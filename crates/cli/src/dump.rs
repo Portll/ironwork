@@ -24,7 +24,7 @@ pub struct Options {
 }
 
 pub fn section_named(name: &str) -> Option<Section> {
-    Section::ALL.into_iter().find(|s| s.name.eq_ignore_ascii_case(name))
+    Section::ALL.into_iter().chain([exec::module::FACTS]).find(|s| s.name.eq_ignore_ascii_case(name))
 }
 
 pub fn run(r: Request) -> ExitCode {
@@ -69,7 +69,7 @@ pub fn dump(bytes: &[u8], o: &Options) -> Result<(String, bool), ModuleError> {
             .unwrap_or_default();
         let computed = crc32(body);
         let matched = computed == entry.crc;
-        let name = entry.name().map_or_else(|| format!("{:#x}", entry.id), str::to_owned);
+        let name = entry.name().or((entry.id == exec::module::FACTS.id).then_some(exec::module::FACTS.name)).map_or_else(|| format!("{:#x}", entry.id), str::to_owned);
         let optional = if entry.optional() { " optional" } else { "" };
         let state = if matched { "ok".to_owned() } else { format!("CHECKSUM MISMATCH (computed {computed:08X})") };
         let _ = writeln!(out, "section {} {name}{optional} offset {} length {} crc {:08X} {state}", entry.id, entry.offset, entry.length, entry.crc);
@@ -330,7 +330,27 @@ pub fn dump(bytes: &[u8], o: &Options) -> Result<(String, bool), ModuleError> {
         }
     }
 
-    match exec::module::read(bytes) {
+    let read = exec::module::read(bytes);
+    if let Ok(module) = &read
+        && shows(exec::module::FACTS)
+        && module.facts.iter().any(Option::is_some)
+    {
+        let _ = writeln!(out, "FACTS");
+        for (k, facts) in module.facts.iter().enumerate() {
+            let program = name(k);
+            match facts {
+                Some(f) => {
+                    let statements: Vec<&str> = f.statements().map(|s| s.name()).collect();
+                    let usages: Vec<&str> = f.usages().map(|u| u.name()).collect();
+                    let _ = writeln!(out, "{program} statements [{}] usages [{}]", statements.join(" "), usages.join(" "));
+                }
+                None => {
+                    let _ = writeln!(out, "{program} -");
+                }
+            }
+        }
+    }
+    match read {
         Ok(_) => {
             let _ = writeln!(out, "module reads");
         }

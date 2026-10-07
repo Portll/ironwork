@@ -3,7 +3,7 @@
 The `.iwm` file format, and how a run unit loads it. It details §8 of
 [codegen-runtime.md](codegen-runtime.md) and serves invariants 6 and 7 of its §10.
 
-**Status:** format 1.0, frozen (§8.1). The container, the encoding rules and every section's
+**Status:** format 1.1, frozen at major 1 (§8.1). The container, the encoding rules and every section's
 codec (§3 to §7, §9) are built in `rt::module`; `ironwork compile` writes modules, with the mapsets
 their programs name (§5.3) and the files their compile read (§9.2), and `ironwork dump` (§11)
 prints them. The loader (§8.2) is built: `ironwork run x.iwm` runs a module's first program on the
@@ -145,7 +145,8 @@ sections before it can decode anything else. Section bodies use the rules of §4
 | 6 | `SQL` | Per program: `Program.sql`, the SQL statement table (§7) | yes |
 | 7 | `BMS` | The map models of the mapsets the module's programs use (§5.3) | yes |
 | 8 | `DEBUG` | Per program: `Program.debug`, then the file each of its sources names (§9) | yes |
-| 0x8000 up | reserved | Extension sections, written with flag bit 0 set | no |
+| 0x8000 | `FACTS` | Per program: the statement kinds and usages it holds (§5.4). Written when the compile gave any program's, flagged optional | no |
+| 0x8001 up | reserved | Extension sections, written with flag bit 0 set | no |
 | any other | unknown | Skipped if flagged optional, and refused otherwise (§3.3) | no |
 
 - **Per program** means a count equal to the directory's program count, then one record per program
@@ -496,6 +497,24 @@ encodes as it is. `rt` owns the types (codegen-runtime.md §6, D4; semantics-lib
 - **At run time.** SEND MAP and RECEIVE MAP take a mapset from any module the run has read, then
   from the copy libraries, `-I` (§8.2).
 
+### 5.4 Program facts
+
+The `FACTS` section holds, per program, what a run journal's close record needs to name the
+assumptions a run of it could have rested on (docs/evidence.md §1): `Option<(Vec<String>,
+Vec<String>)>`, the names of the statement kinds the program holds, then of its data usages, file
+organizations and data clauses, as `numeric::governs::Statement::name` and `Usage::name` give them,
+in the order of those enums. `ironwork compile` writes a record for every program, from the
+program's source as `compile::constructs::of` reads it for a run from source, so a run of the
+module and a run of its source name the same assumptions.
+
+- **Optional.** Since 1.1. A reader of 1.0 skips the section. A module without it, or a program
+  whose record is None, holds every statement kind and usage as far as a run is concerned, which
+  names every assumption they govern.
+- **Names, not bits.** A name this ironwork does not know is a kind none of its assumptions
+  governs, and is skipped.
+- **Options are not here.** A program's options, its SSRANGE and whether it has CBL or PROCESS
+  cards come from its `OPTIONS` record.
+
 ## 6. The program directory
 
 The `DIRECTORY` section is the module's table of contents. The reader parses it first, and the
@@ -567,7 +586,7 @@ error if it meets one. `HostType::Zoned`'s sign is `rt::SignClause`.
 
 ### 8.1 Versions
 
-The format version is `major.minor`; this ironwork writes 1.0 and reads every 1.x minor, from
+The format version is `major.minor`; this ironwork writes 1.1 and reads every 1.x minor, from
 `Version::OLDEST_READABLE` in `rt::module`, which is 1.0. 1.0 is the first frozen format. It holds
 what the 0.x formats came to hold, the files that take their name from a data item and the places
 SSRANGE checks against their tables at the `LIR` section's end, and the `--assume` choices at the
@@ -576,8 +595,8 @@ SSRANGE checks against their tables at the `LIR` section's end, and the `--assum
 `CompX` and `Comp5Bytes` for BINARY-CHAR, COMP-X and PIC X(n) COMP-5 under `--compliance extended`
 (§5.2), the screen ops `ScreenDisplay` and `ScreenAccept`,
 the environment's `Environment` op and `AcceptFrom` 8
-(lir.md §9.1), and `InspectMode` 4, TRAILING. A 0.x module is refused, and compiling the
-source again is the remedy (question 1).
+(lir.md §9.1), and `InspectMode` 4, TRAILING. 1.1 adds the optional `FACTS` section (§5.4). A
+0.x module is refused, and compiling the source again is the remedy (question 1).
 
 | The reader finds | It does |
 |---|---|
@@ -834,6 +853,8 @@ and finds them different.
   positions from the debug table, then its places, constants and service tables. The debug table
   as `#12 PAYROLL.cbl:47:12`, and each source's file as
   `PAYROLL file 1 root 1 CUST.cpy sha256 8062b239… bytes 90`, or `PAYROLL file 2 -` for none.
+  Where the module has a `FACTS` section, each program's statement kinds and usages (§5.4) as
+  `PAYROLL statements [move display call] usages [zoned]`.
 - **Strings** print only with `--strings`, since every other section prints its strings inline.
 - **Checksums.** A bad section prints `CHECKSUM MISMATCH`, and the dump exits non-zero after
   printing what it can; `--no-check` prints regardless. A section whose body will not decode prints

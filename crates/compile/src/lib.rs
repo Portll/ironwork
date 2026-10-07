@@ -4,6 +4,7 @@
 pub mod arith;
 pub mod cics_bind;
 mod classes;
+pub mod constructs;
 pub mod collating;
 mod corresponding;
 pub use corresponding::is_alphabetic;

@@ -125,6 +125,10 @@ impl Loader<Rc<Code>> for VmLibrary {
         program.nested()
     }
 
+    fn facts(program: &Rc<Code>) -> numeric::governs::Facts {
+        program.facts()
+    }
+
     fn source(program: &Rc<Code>, file: usize) -> Option<String> {
         let p = program.program()?;
         p.debug.sources.get(file).map(|&s| p.symbols[s as usize].clone())
@@ -166,7 +170,7 @@ pub fn lowered(compiled: &Compiled) -> Result<Code, LowerError> {
 fn held(compiled: &Compiled, lowered: Result<rt::lir::Program, String>) -> Code {
     let entries = compiled.entries.iter().map(|e| e.name.clone()).collect();
     let method = compiled.program.oo.as_deref().and_then(|o| o.method()).map(|m| format!("{}.{}", m.class, m.name));
-    Code::new(lowered, entries, compiled.program.files.len(), compiled.layout.size as usize, compiled.program.nested.clone(), method)
+    Code::new(lowered, entries, compiled.program.files.len(), compiled.layout.size as usize, compiled.program.nested.clone(), method, compile::constructs::of(compiled))
 }
 
 /// A run unit on the VM over `library`, tracing and limited as the library says.

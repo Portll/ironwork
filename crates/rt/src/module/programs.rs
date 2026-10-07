@@ -3,6 +3,7 @@
 use super::codec::{Decode, Encode, Reader, Writer};
 use super::{Module, ModuleError, ModuleWriter, Section, StringTable};
 use numeric::Assumed;
+use numeric::governs::{Facts, Statement, Usage};
 use crate::bms::Mapset;
 use crate::codec_struct;
 use crate::lir::{AssignItem, 
@@ -73,15 +74,46 @@ fn source_file_valid(file: &SourceFile) -> Result<(), String> {
     if relative { Ok(()) } else { Err(format!("source file {:?} is not a path within its library", file.path)) }
 }
 
-/// The programs of a module, in ordinal order, with their directory, the mapsets they use, and
-/// for each program the file each source of its debug table names, None where the compiler
-/// supplied the member or no file was recorded.
+/// The programs of a module, in ordinal order, with their directory, the mapsets they use, for
+/// each program the file each source of its debug table names, None where the compiler supplied
+/// the member or no file was recorded, and the statement kinds and usages each holds, None where
+/// the module does not say (load-module.md §5.4).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LoadedModule {
     pub directory: Vec<DirectoryEntry>,
     pub programs: Vec<Program>,
     pub mapsets: Vec<Mapset>,
     pub files: Vec<Vec<Option<SourceFile>>>,
+    pub facts: Vec<Option<Facts>>,
+}
+
+/// The optional section of each program's statement kinds and usages, by name.
+pub const FACTS: Section = Section { id: super::EXTENSIONS, name: "FACTS" };
+
+/// One program's record in the FACTS section: its statement kinds' names, then its usages'.
+type FactsRecord = Option<(Vec<String>, Vec<String>)>;
+
+fn facts_record(facts: &Option<Facts>) -> FactsRecord {
+    facts.map(|f| (f.statements().map(|s| s.name().to_owned()).collect(), f.usages().map(|u| u.name().to_owned()).collect()))
+}
+
+/// What a module's program holds: the statement kinds and usages the module records for it, every
+/// one where it records none, and the options its OPTIONS record gives.
+pub fn held_facts(recorded: Option<Facts>, program: &Program) -> Facts {
+    let mut facts = recorded.unwrap_or_else(Facts::every_construct);
+    let options = &program.options;
+    facts.union(Facts::of_options(&options.options, options.ssrange, !options.cards.is_empty()));
+    facts
+}
+
+/// A name this ironwork does not know is a kind no assumption of its register governs.
+fn record_facts(record: FactsRecord) -> Option<Facts> {
+    record.map(|(statements, usages)| {
+        let mut facts = Facts::default();
+        statements.iter().filter_map(|s| Statement::named(s)).for_each(|s| facts.statement(s));
+        usages.iter().filter_map(|u| Usage::named(u)).for_each(|u| facts.usage(u));
+        facts
+    })
 }
 
 /// Every field of a `Program`, listed once so a new field is a compile error here.
@@ -215,7 +247,7 @@ fn per_program(w: &mut Writer, programs: &[Program], record: impl Fn(&Parts<'_>,
     }
 }
 
-fn encode_module(programs: &[Program], directory: &[DirectoryEntry], mapsets: &[Mapset], files: &[Vec<Option<SourceFile>>]) -> Vec<u8> {
+fn encode_module(programs: &[Program], directory: &[DirectoryEntry], mapsets: &[Mapset], files: &[Vec<Option<SourceFile>>], facts: &[Option<Facts>]) -> Vec<u8> {
     let mut m = ModuleWriter::new();
     m.section(Section::DIRECTORY, |w| {
         w.count(directory.len());
@@ -261,6 +293,14 @@ fn encode_module(programs: &[Program], directory: &[DirectoryEntry], mapsets: &[
             files.encode(w);
         }
     });
+    if facts.iter().any(Option::is_some) {
+        m.extension(FACTS.id, |w| {
+            w.count(facts.len());
+            for program in facts {
+                facts_record(program).encode(w);
+            }
+        });
+    }
     m.finish()
 }
 
@@ -382,27 +422,30 @@ fn unrecorded(programs: &[Program]) -> Vec<Vec<Option<SourceFile>>> {
 /// recorded. Same input, same bytes.
 pub fn write(programs: &[Program]) -> Vec<u8> {
     let directory: Vec<_> = programs.iter().map(DirectoryEntry::top_level).collect();
-    encode_module(programs, &directory, &[], &unrecorded(programs))
+    encode_module(programs, &directory, &[], &unrecorded(programs), &vec![None; programs.len()])
 }
 
 /// A module with the caller's directory and mapsets and no files recorded, refused (as the reader
 /// would) if either, or a program, is invalid.
 pub fn write_with(programs: &[Program], directory: &[DirectoryEntry], mapsets: &[Mapset]) -> Result<Vec<u8>, ModuleError> {
     let files = unrecorded(programs);
-    write_module(&LoadedModule { directory: directory.to_vec(), programs: programs.to_vec(), mapsets: mapsets.to_vec(), files })
+    write_module(&LoadedModule { directory: directory.to_vec(), programs: programs.to_vec(), mapsets: mapsets.to_vec(), files, facts: vec![None; programs.len()] })
 }
 
 /// The module `module` describes, refused (as the reader would) if its directory, mapsets, a
 /// program or a program's files are invalid.
 pub fn write_module(module: &LoadedModule) -> Result<Vec<u8>, ModuleError> {
-    let LoadedModule { directory, programs, mapsets, files } = module;
+    let LoadedModule { directory, programs, mapsets, files, facts } = module;
     check_directory(directory, programs)?;
+    if facts.len() != programs.len() {
+        return Err(bad(FACTS.name, format!("facts for {} programs of {}", facts.len(), programs.len())));
+    }
     for program in programs {
         crate::lir::program_valid(program).map_err(|reason| bad("LIR", reason))?;
     }
     check_mapsets(mapsets).map_err(|reason| bad(Section::BMS.name, reason))?;
     check_files(files, programs).map_err(|reason| bad(Section::DEBUG.name, reason))?;
-    Ok(encode_module(programs, directory, mapsets, files))
+    Ok(encode_module(programs, directory, mapsets, files, facts))
 }
 
 /// One file, or none, for each source of each program's debug table.
@@ -503,5 +546,9 @@ pub fn read(bytes: &[u8]) -> Result<LoadedModule, ModuleError> {
     }
     check_directory(&directory, &programs)?;
     check_files(&files, &programs).map_err(|reason| bad(Section::DEBUG.name, reason))?;
-    Ok(LoadedModule { directory, programs, mapsets, files })
+    let facts = match module.sections().iter().any(|e| e.id == FACTS.id) {
+        true => records::<FactsRecord>(&module, &strings, FACTS, count)?.into_iter().map(record_facts).collect(),
+        false => vec![None; count],
+    };
+    Ok(LoadedModule { directory, programs, mapsets, files, facts })
 }

@@ -22,7 +22,7 @@ which a reader of the old one refuses by name:
 
 | Format | Version | Defined in |
 |---|---|---|
-| Load module (`.iwm`) | 1.0 | [docs/load-module.md](docs/load-module.md) §8.1 |
+| Load module (`.iwm`) | 1.1, reading every 1.x | [docs/load-module.md](docs/load-module.md) §8.1 |
 | Run journal (`--evidence`) | `cobolwork-evidence/v1` | [docs/evidence.md](docs/evidence.md) §1, cobolwork's kinds table |
 | Statement list (`--trace-statements`) | 1 | [docs/evidence.md](docs/evidence.md) §1.2 |
 | Build provenance and equivalence statements | `check-v1`, `equivalence-v1`, `job-equivalence-v1` | [docs/evidence.md](docs/evidence.md) §2 to §4 |

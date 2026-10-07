@@ -262,7 +262,9 @@ refused under every option, each item where it stands (IWS0102). [docs/messages.
 
 **What waits on goldens** is every behaviour the manuals leave open: 244 of the register's 336
 assumptions are Chosen, ironwork's reading where IBM documents none. A run behaves as its assumption
-says, `ironwork assumptions` lists them all, and `--assume` switches seven of them. Goldens, IBM's own
+says, `ironwork assumptions` lists them all (`--json` with what each governs: the statement kinds,
+data usages and options it bears on), a run journal's close record names those the run could have
+rested on, and `--assume` switches seven of them. Goldens, IBM's own
 output for the [oracle](#the-oracle)'s programs, settle each one. None has been taken yet, and
 until one is, a Chosen assumption is ironwork's choice, not IBM's behaviour.
 

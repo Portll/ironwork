@@ -91,8 +91,8 @@ fn not_yet(what: impl Into<String>) -> Stop {
 
 /// A program as the VM's run unit holds it: its LIR, or why it did not lower, with its ENTRY names,
 /// the file count and storage size the run unit gives it whether or not it lowered, the
-/// PROGRAM-IDs of the programs it contains, which a CANCEL of it reaches, and for a method the
-/// `Class.method` a dump lists it by.
+/// PROGRAM-IDs of the programs it contains, which a CANCEL of it reaches, for a method the
+/// `Class.method` a dump lists it by, and the statement kinds, usages and options it holds.
 pub struct Code {
     lowered: Result<Lowered, String>,
     entries: Vec<String>,
@@ -100,6 +100,7 @@ pub struct Code {
     size: usize,
     nested: Vec<String>,
     method: Option<String>,
+    facts: numeric::governs::Facts,
 }
 
 /// A lowered program with what the VM works out from it once: its collating sequence as the
@@ -126,8 +127,12 @@ struct Lowered {
 }
 
 impl Code {
-    pub fn new(program: Result<Program, String>, entries: Vec<String>, files: usize, size: usize, nested: Vec<String>, method: Option<String>) -> Self {
-        Self { lowered: program.map(Lowered::new), entries, files, size, nested, method }
+    pub fn new(program: Result<Program, String>, entries: Vec<String>, files: usize, size: usize, nested: Vec<String>, method: Option<String>, facts: numeric::governs::Facts) -> Self {
+        Self { lowered: program.map(Lowered::new), entries, files, size, nested, method, facts }
+    }
+
+    pub fn facts(&self) -> numeric::governs::Facts {
+        self.facts
     }
 
     pub fn program(&self) -> Option<&Program> {

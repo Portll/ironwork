@@ -270,10 +270,11 @@ impl Events {
         let text = match event {
             Event::Open { dd, mode, path } => format!("open {dd} {mode:?} {}", path.display()),
             Event::Close { dd, path } => format!("close {dd} {}", path.display()),
-            Event::Load { program, source, .. } => format!("load {program} {}", source.map(|s| s.display().to_string()).unwrap_or_default()),
+            Event::Load { program, source, facts, .. } => format!("load {program} {} {facts:?}", source.map(|s| s.display().to_string()).unwrap_or_default()),
             Event::Paragraph { program, name, index } => format!("paragraph {program} {name} {index}"),
             Event::Sink { kind, file, line, operand, input } => format!("sink {kind} {file}:{line} {operand} {input:?}"),
             Event::Statement { file, line } => format!("statement {file}:{line}"),
+            Event::Class { class, facts } => format!("class {class} {facts:?}"),
         };
         for b in text.bytes().chain([0]) {
             self.digest = (self.digest ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);

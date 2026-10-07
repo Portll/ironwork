@@ -142,6 +142,9 @@ pub trait Loader<H> {
     /// A loaded program's file count and storage size.
     fn shape(program: &H) -> (usize, usize);
 
+    /// The statement kinds, usages and options a loaded program holds.
+    fn facts(program: &H) -> numeric::governs::Facts;
+
     /// The PROGRAM-IDs of the programs a loaded program contains, which a CANCEL of it reaches.
     fn nested(program: &H) -> &[String];
 
@@ -178,8 +181,11 @@ pub enum Clock {
 pub enum Event<'a> {
     Open { dd: &'a str, mode: OpenMode, path: &'a Path },
     Close { dd: &'a str, path: &'a Path },
-    /// `recorded` is [`LoadedProgram::recorded`], empty for a program read from source.
-    Load { program: &'a str, source: Option<&'a Path>, recorded: &'a [(String, Option<crate::module::SourceFile>)] },
+    /// `recorded` is [`LoadedProgram::recorded`], empty for a program read from source; `facts`
+    /// what the program holds ([`Loader::facts`]).
+    Load { program: &'a str, source: Option<&'a Path>, recorded: &'a [(String, Option<crate::module::SourceFile>)], facts: numeric::governs::Facts },
+    /// A COBOL class definition an INVOKE loaded, with what its data and methods hold.
+    Class { class: &'a str, facts: numeric::governs::Facts },
     /// Control entering paragraph (or section header) `index` of `program` at its start.
     Paragraph { program: &'a str, name: &'a str, index: usize },
     /// `kind` is cobolwork's name for the sink (`dynamic-program-load`, `log`, ...); `file` is the
@@ -674,7 +680,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             return Ok(i);
         }
         let loaded = self.library.program(&name)?;
-        self.notify(Event::Load { program: &name, source: loaded.source.as_deref(), recorded: &loaded.recorded });
+        self.notify(Event::Load { program: &name, source: loaded.source.as_deref(), recorded: &loaded.recorded, facts: L::facts(&loaded.compiled) });
         let index = self.add_named(Some(loaded.compiled), loaded.name, loaded.files, loaded.size);
         self.programs[index].source = loaded.source;
         Ok(index)

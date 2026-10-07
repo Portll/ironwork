@@ -7,6 +7,7 @@ pub use rt::cics;
 pub use rt::digest;
 pub use rt::evidence;
 pub use compile::collating;
+pub use compile::constructs;
 pub use compile::declaratives;
 #[cfg(test)]
 mod edit;

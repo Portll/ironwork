@@ -82,6 +82,35 @@ fn a_directory_that_disagrees_with_the_programs_is_refused_by_the_writer() {
 }
 
 #[test]
+fn the_facts_section_carries_each_programs_statement_kinds_and_usages_when_known() {
+    use ironwork_rt::module::{FACTS, held_facts};
+    use numeric::governs::{Facts, OptionFact, Statement, Usage};
+    let unrecorded = write(&two());
+    let module = read(&unrecorded).unwrap();
+    assert_eq!(module.facts, [None, None]);
+    assert!(!Module::read(&unrecorded).unwrap().sections().iter().any(|e| e.id == FACTS.id));
+    let mut sorts = Facts::default();
+    sorts.statement(Statement::Sort);
+    sorts.usage(Usage::Packed);
+    let known = LoadedModule { facts: vec![Some(sorts), None], ..module.clone() };
+    let bytes = write_module(&known).unwrap();
+    let entry = *Module::read(&bytes).unwrap().sections().last().unwrap();
+    assert_eq!((entry.id, entry.optional()), (FACTS.id, true));
+    let back = read(&bytes).unwrap();
+    assert_eq!(back.facts, known.facts);
+    assert_eq!(write_module(&back).unwrap(), bytes);
+    let short = LoadedModule { facts: vec![None], ..module };
+    assert!(matches!(write_module(&short), Err(ModuleError::Malformed { section: "FACTS", .. })));
+
+    let report = &back.programs[1];
+    let unknown = held_facts(None, report);
+    assert_eq!(unknown.statements().count(), Statement::ALL.len());
+    assert!(unknown.has(numeric::governs::Trigger::Option(OptionFact::Ssrange)) == report.options.ssrange);
+    let held = held_facts(Some(sorts), &back.programs[0]);
+    assert_eq!(held.statements().collect::<Vec<_>>(), [Statement::Sort]);
+}
+
+#[test]
 fn the_debug_section_records_the_file_each_source_names() {
     let unrecorded = read(&write(&two())).unwrap();
     assert_eq!(unrecorded.files, [vec![None], vec![None]]);
@@ -181,7 +210,7 @@ fn a_file_without_the_magic_is_not_a_module() {
 fn another_major_or_an_older_minor_is_refused_and_a_newer_minor_read() {
     let bytes = write(&two());
     let mut major = bytes.clone();
-    major[8] = 2;
+    major[8..12].copy_from_slice(&[2, 0, 0, 0]);
     let error = read(&major).unwrap_err();
     assert_eq!(error, ModuleError::Version(Version { major: 2, minor: 0 }));
     assert_eq!(error.to_string(), "load module format 2.0; this ironwork reads 1.x. Compile the source again");

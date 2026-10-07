@@ -26,7 +26,7 @@ by `prev` and `seq`.
 | `step` | `step`, `pgm`, `outcome` | for `job`, each step as the job log shows it: `RC=0004`, an abend, BYPASSED or JCL ERROR, with why |
 | `sink` | `sink`, `file`, `line`, `marker`, `reached`, `input` | with `--trace-marker`, an operation an input could steer, the first time it is reached with the marker in its operand and the first time without (§1.1); with `--trace-input`, `input` true, false or null, and a record for each value it first takes (§1.3). `marker` and `reached` only with a marker |
 | `statement` | `file`, `line`, `capped` | with `--trace-statements`, each start of a listed statement, in the order the run made them, up to 100 per statement, the 100th with `capped` true (§1.2) |
-| `close` | `exit`, `counts`, `durationMs`, `ledger`, and for `run` `executor`: `vm` or `interpreter`, whichever ran the program | last |
+| `close` | `exit`, `counts`, `durationMs`, `ledger`, for `run` `executor`: `vm` or `interpreter`, whichever ran the program, and for a command that ran a program `assumptions` | last |
 
 - `exit` is how the run ended: for `check`, the compile's return code; for `run`, `cics` and `job`,
   the RETURN-CODE of a run that ran to its end, its own value even where the exit status gives it
@@ -35,6 +35,17 @@ by `prev` and `seq`.
   compile refused. `--exit-code` does not change it. A RETURN-CODE from 240 up is told from an
   abend by the `abend` record an abend writes.
 
+- `assumptions` names, in byte order, the ids of the register's assumptions (`ironwork assumptions
+  --json`) the run could have rested on. Each assumption governs statement kinds, data usages and
+  options: any of its lists, each met when the run holds all of its triggers. The run holds what
+  each program it entered holds, its first and each one a CALL, LINK, XCTL or function invocation
+  loaded and each COBOL class an INVOKE loaded, with the options each was compiled with, and how
+  the run was made: a CICS task, a job step, a PARM, a statement limit. Facts are taken at program
+  granularity, not from the statements that ran, so the list is a superset of the assumptions the
+  run did rest on: a program that holds a SORT names the SORT assumptions whether or not the SORT
+  ran. A program from a load module without its statement kinds and usages (load-module.md §5.4)
+  counts as holding them all. Both executors name the same list. `check` and a run the compile
+  refused name none, and leave the field out.
 - A job's journal is one run: the JCL as an `input`, then for each step its programs' sources, its
   DDs' `open` and `close` records and CALLs, an `end` record for each data set it was given, and
   its `step` record. A COBOL step's abend gives the `abend` record its file and line, and standard

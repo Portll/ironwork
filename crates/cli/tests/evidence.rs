@@ -735,3 +735,98 @@ fn a_run_the_vm_stops_or_does_not_generate_closes_its_journal_with_that_exit() {
     }
     fs::remove_dir_all(dir).unwrap();
 }
+
+/// The ids a journal's close record names under `assumptions`.
+fn assumptions(close: &str) -> Vec<String> {
+    let start = close.find("\"assumptions\":[").expect("assumptions in the close record") + "\"assumptions\":[".len();
+    let list = &close[start..start + close[start..].find(']').unwrap()];
+    list.split(',').filter(|s| !s.is_empty()).map(|s| s.trim_matches('"').to_owned()).collect()
+}
+
+#[test]
+fn the_close_record_names_the_assumptions_the_programs_the_run_entered_could_rest_on() {
+    let dir = temp("assumptions");
+    put(
+        &dir,
+        "src/MAINP.cbl",
+        &format!(
+            "       CBL TRUNC(OPT)\n{}",
+            source(&[
+                "IDENTIFICATION DIVISION.",
+                "PROGRAM-ID. MAINP.",
+                "DATA DIVISION.",
+                "WORKING-STORAGE SECTION.",
+                "01  P PIC S9(5) COMP-3 VALUE 10.",
+                "01  B PIC S9(4) COMP VALUE 1.",
+                "PROCEDURE DIVISION.",
+                "    ADD 5 TO P",
+                "    ADD 1 TO B",
+                "    DISPLAY P B",
+                "    CALL 'SORTER'",
+                "    GOBACK.",
+            ])
+        ),
+    );
+    put(
+        &dir,
+        "lib/SORTER.cbl",
+        &source(&[
+            "IDENTIFICATION DIVISION.",
+            "PROGRAM-ID. SORTER.",
+            "ENVIRONMENT DIVISION.",
+            "INPUT-OUTPUT SECTION.",
+            "FILE-CONTROL.",
+            "    SELECT WORK-FILE ASSIGN TO SORTWK.",
+            "DATA DIVISION.",
+            "FILE SECTION.",
+            "SD  WORK-FILE.",
+            "01  WORK-REC PIC X(3).",
+            "WORKING-STORAGE SECTION.",
+            "01  DONE PIC X VALUE 'N'.",
+            "PROCEDURE DIVISION.",
+            "    SORT WORK-FILE ON ASCENDING KEY WORK-REC",
+            "        INPUT PROCEDURE FEED OUTPUT PROCEDURE DRAIN",
+            "    GOBACK.",
+            "FEED.",
+            "    MOVE 'BBB' TO WORK-REC",
+            "    RELEASE WORK-REC",
+            "    MOVE 'AAA' TO WORK-REC",
+            "    RELEASE WORK-REC.",
+            "DRAIN.",
+            "    PERFORM UNTIL DONE = 'Y'",
+            "        RETURN WORK-FILE AT END MOVE 'Y' TO DONE",
+            "            NOT AT END DISPLAY WORK-REC",
+            "        END-RETURN",
+            "    END-PERFORM.",
+        ]),
+    );
+    let journal = on_both_executors(&dir, &["run", "src/MAINP.cbl", "-L", "lib"], &[]);
+    let ids = assumptions(journal.last().unwrap());
+    for id in ["C2", "C9", "C1", "S1", "S7", "C11"] {
+        assert!(ids.contains(&id.to_owned()), "{id} in {ids:?}");
+    }
+    for id in ["C27", "C22", "SQ1", "J1", "RW1", "C340", "S2", "L19"] {
+        assert!(!ids.contains(&id.to_owned()), "{id} in {ids:?}");
+    }
+    let mut sorted = ids.clone();
+    sorted.sort();
+    assert_eq!(ids, sorted);
+
+    // The same programs as load modules name the same assumptions.
+    for source in ["src/MAINP.cbl", "lib/SORTER.cbl"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_ironwork")).current_dir(&dir).args(["compile", source, "-o", "iwm"]).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    }
+    let out = Command::new(env!("CARGO_BIN_EXE_ironwork")).current_dir(&dir).args(["run", "iwm/MAINP.iwm", "-L", "iwm", "--evidence", "ev-iwm"]).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let module_journal = fs::read_to_string(fs::read_dir(dir.join("ev-iwm/runs")).unwrap().next().unwrap().unwrap().path()).unwrap();
+    assert!(module_journal.lines().any(|l| field(l, "kind") == Some("call") && field(l, "program") == Some("SORTER")), "{module_journal}");
+    assert_eq!(assumptions(module_journal.lines().last().unwrap()), ids);
+
+    // A check runs nothing, so its close record names none.
+    let out = Command::new(env!("CARGO_BIN_EXE_ironwork")).current_dir(&dir).args(["check", "src/MAINP.cbl", "--evidence", "ev-check"]).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let check = fs::read_to_string(fs::read_dir(dir.join("ev-check/runs")).unwrap().next().unwrap().unwrap().path()).unwrap();
+    assert!(!check.contains("\"assumptions\""), "{check}");
+    fs::remove_dir_all(dir).unwrap();
+}

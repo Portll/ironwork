@@ -123,6 +123,10 @@ impl Loader<()> for Scratch {
         &[]
     }
 
+    fn facts(_: &()) -> numeric::governs::Facts {
+        numeric::governs::Facts::default()
+    }
+
     fn source(_: &(), _: usize) -> Option<String> {
         None
     }

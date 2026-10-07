@@ -13,7 +13,7 @@ use crate::jni;
 use crate::lir::{CallArg, InvokePlan, MethodName, Receiver, Step};
 use crate::storage::{Kind, Loc, Val};
 use crate::store::{self, ProgramFacts};
-use crate::unit::{ADDRESS_BASE, Loaded, Loader, RETURN_CODE, RunUnit, UnitHost};
+use crate::unit::{ADDRESS_BASE, Event, Loaded, Loader, RETURN_CODE, RunUnit, UnitHost};
 use crate::vocab::{Figurative, Pos};
 use numeric::assumptions::{EXPIRED_REFERENCE_ABENDS, LOCAL_FRAMES};
 use numeric::precision::{Fixed, Places};
@@ -232,6 +232,14 @@ fn load_class<'w, P: Copy, O, S, X: OoHost<'w, P, O, S>>(x: &mut X, external: &s
     let factory_object = oo.add_object(Instance { class: index, factory: true, parts: Vec::new() }).map_err(|m| Abend::ironwork(m, pos))?;
     oo.classes[index].factory_object = factory_object;
     let Some(code) = code else { return Ok(index) };
+    if x.unit().observed() {
+        let mut facts = numeric::governs::Facts::default();
+        let data = code.factory.iter().chain(&code.object).map(|p| &p.data);
+        for program in data.chain(code.methods.iter().map(|m| &m.code)) {
+            facts.union(<X::Loader as Loader<X::Program>>::facts(program));
+        }
+        x.unit().notify(Event::Class { class: external, facts });
+    }
     let parent = load_class(x, &code.parent, pos)?;
     let oo = &mut x.unit().oo;
     let mut at = Some(parent);

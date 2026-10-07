@@ -8,6 +8,7 @@ use crate::lir::{Class, ClassPart, Program, SymId};
 use crate::oo::{ClassCode, JAVA_LANG_OBJECT, MethodCode, Part};
 use crate::unit::{FoundClass, LoadError, LoadedProgram};
 use crate::vm::Code;
+use numeric::governs::Facts;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -34,6 +35,7 @@ struct Read {
     programs: Vec<Option<Program>>,
     mapsets: Vec<Mapset>,
     files: Vec<Vec<Option<SourceFile>>>,
+    facts: Vec<Option<Facts>>,
     first: bool,
 }
 
@@ -59,8 +61,8 @@ impl Modules {
     }
 
     fn register(&mut self, path: PathBuf, module: LoadedModule, first: bool) -> usize {
-        let LoadedModule { directory, programs, mapsets, files } = module;
-        self.read.push(Read { path, directory, programs: programs.into_iter().map(Some).collect(), mapsets, files, first });
+        let LoadedModule { directory, programs, mapsets, files, facts } = module;
+        self.read.push(Read { path, directory, programs: programs.into_iter().map(Some).collect(), mapsets, files, facts, first });
         self.read.len() - 1
     }
 
@@ -78,8 +80,9 @@ impl Modules {
         } else {
             program.debug.sources.iter().map(|&s| symbol(&program, s)).zip(own.iter().cloned()).collect()
         };
+        let facts = held.facts(ordinal, &program);
         Some(checked.map(|()| {
-            let code = code(program, nested, None);
+            let code = code(program, nested, None, facts);
             let (files, size) = code.shape();
             LoadedProgram { compiled: Rc::new(code), name, files, size, source: None, recorded }
         }))
@@ -165,11 +168,12 @@ impl Modules {
         let held = &mut self.read[k];
         let Some(mut program) = held.programs[ordinal].take() else { return Err(format!("{}: program {ordinal} is taken", held.path.display())) };
         (self.check)(&program).map_err(|e| format!("{}: class {}: {e}", held.path.display(), held.directory[ordinal].id))?;
+        let facts = held.facts(ordinal, &program);
         let Some(class) = program.services.class.take() else { return Err(format!("{}: program {ordinal} is not a class", held.path.display())) };
         let Class { parent, factory, object, methods, .. } = *class;
         let sym = |id: SymId| symbol(&program, id);
         let name = sym(program.id);
-        let part = |p: ClassPart| Part { data: Rc::new(code(p.data, Vec::new(), None)), records: p.records };
+        let part = |p: ClassPart| Part { data: Rc::new(code(p.data, Vec::new(), None, facts)), records: p.records };
         let methods = methods
             .into_iter()
             .map(|m| {
@@ -179,7 +183,7 @@ impl Modules {
                     params: m.params.iter().map(|&p| sym(p)).collect(),
                     returns: m.returns.map(sym),
                     own_records: usize::from(m.own_records),
-                    code: Rc::new(code(m.code, Vec::new(), Some(format!("{name}.{method}")))),
+                    code: Rc::new(code(m.code, Vec::new(), Some(format!("{name}.{method}")), facts)),
                     name: method,
                 }
             })
@@ -194,6 +198,10 @@ impl Read {
     /// The lowest ordinal not yet taken whose directory entry `wanted` accepts.
     fn untaken(&self, wanted: impl Fn(&DirectoryEntry) -> bool) -> Option<usize> {
         self.directory.iter().zip(&self.programs).position(|(e, p)| p.is_some() && wanted(e))
+    }
+
+    fn facts(&self, ordinal: usize, program: &Program) -> Facts {
+        super::held_facts(self.facts.get(ordinal).copied().flatten(), program)
     }
 
     fn defining(&self, external: &str) -> Option<usize> {
@@ -211,10 +219,10 @@ fn symbol(program: &Program, id: SymId) -> String {
 
 /// A program from a module as the VM holds it, with the PROGRAM-IDs of the programs it directly
 /// contains and, for a method, the `Class.method` a dump lists it by.
-fn code(program: Program, nested: Vec<String>, method: Option<String>) -> Code {
+fn code(program: Program, nested: Vec<String>, method: Option<String>, facts: Facts) -> Code {
     let entries = program.services.entries.iter().map(|e| symbol(&program, e.name)).collect();
     let (files, size) = (program.services.files.len(), program.storage.size as usize);
-    Code::new(Ok(program), entries, files, size, nested, method)
+    Code::new(Ok(program), entries, files, size, nested, method, facts)
 }
 
 /// The module at `path`, read and checked, or why not with the path in front.

@@ -20,12 +20,13 @@ pub struct Request {
 }
 
 /// A source's programs in ordinal order, with their directory entries, the files each one's debug
-/// table names, and the mapsets they name.
+/// table names, the mapsets they name, and what each holds.
 struct Lowered {
     programs: Vec<Program>,
     directory: Vec<DirectoryEntry>,
     files: Vec<Vec<Option<SourceFile>>>,
     mapsets: Vec<Mapset>,
+    facts: Vec<Option<numeric::governs::Facts>>,
 }
 
 /// Every `.iwm` this request writes, as file name and the sources it holds.
@@ -86,7 +87,7 @@ pub fn run(r: Request) -> ExitCode {
         })
         .collect();
     for (name, members) in outputs {
-        let mut all = Lowered { programs: Vec::new(), directory: Vec::new(), files: Vec::new(), mapsets: Vec::new() };
+        let mut all = Lowered { programs: Vec::new(), directory: Vec::new(), files: Vec::new(), mapsets: Vec::new(), facts: Vec::new() };
         let Some(parts) = members.iter().map(|&k| lowered[k].as_ref()).collect::<Option<Vec<_>>>() else {
             eprintln!("ironwork: {name} not written");
             continue;
@@ -97,6 +98,7 @@ pub fn run(r: Request) -> ExitCode {
             let base = all.programs.len() as u32;
             all.programs.extend(part.programs.iter().cloned());
             all.files.extend(part.files.iter().cloned());
+            all.facts.extend(part.facts.iter().copied());
             all.directory.extend(part.directory.iter().map(|e| DirectoryEntry { parent: e.parent.map(|p| p + base), ..e.clone() }));
             for mapset in &part.mapsets {
                 match mapsets.get(&mapset.name) {
@@ -113,7 +115,7 @@ pub fn run(r: Request) -> ExitCode {
             continue;
         }
         all.mapsets = mapsets.into_values().collect();
-        let module = LoadedModule { directory: all.directory, programs: all.programs, mapsets: all.mapsets, files: all.files };
+        let module = LoadedModule { directory: all.directory, programs: all.programs, mapsets: all.mapsets, files: all.files, facts: all.facts };
         let bytes = match exec::module::write_module(&module) {
             Ok(b) => b,
             Err(e) => {
@@ -171,7 +173,7 @@ fn lower_source(source: &Path, r: &Request, at: exec::lir::CompileTime, bundled:
     let parsed: Vec<_> = parsed.into_iter().filter(|p| !p.is_prototype()).collect();
     let parents = parents(&parsed);
     let mut code = 0u8;
-    let mut lowered = Lowered { programs: Vec::new(), directory: Vec::new(), files: Vec::new(), mapsets: Vec::new() };
+    let mut lowered = Lowered { programs: Vec::new(), directory: Vec::new(), files: Vec::new(), mapsets: Vec::new(), facts: Vec::new() };
     let mut read = None;
     let mut named = BTreeSet::new();
     for (mut ast, parent) in parsed.into_iter().zip(parents) {
@@ -211,6 +213,7 @@ fn lower_source(source: &Path, r: &Request, at: exec::lir::CompileTime, bundled:
         lowered.directory.push(DirectoryEntry { id, external, parent, common, entries, params, returning, dynamic: true });
         lowered.programs.push(program);
         lowered.files.push(files);
+        lowered.facts.push(Some(exec::constructs::of(&compiled)));
     }
     for name in named {
         match syntax::bms::find_mapset(&libraries, &name) {

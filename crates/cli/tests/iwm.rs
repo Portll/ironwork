@@ -128,7 +128,7 @@ fn a_source_makes_one_module_named_after_it_holding_every_program() {
     let (shown, status, _) = dump(&module, &[]);
     assert_eq!(status, Some(0), "{shown}");
     for line in [
-        "format 1.0",
+        "format 1.1",
         &format!("length {}", bytes.len()),
         "program 0 PAYROLL parent - common no dynamic yes using [] returning no",
         "program 1 SUB parent 0 common no dynamic yes using [] returning no",
@@ -144,6 +144,8 @@ fn a_source_makes_one_module_named_after_it_holding_every_program() {
     ] {
         assert!(shown.lines().any(|l| l == line), "{line}\n{shown}");
     }
+    assert!(shown.lines().any(|l| l.starts_with("section 32768 FACTS optional ")), "{shown}");
+    assert!(shown.lines().any(|l| l.starts_with("PAYROLL statements [") && l.contains("display")), "{shown}");
     let options = [
         "arith", "trunc", "numproc", "codepage", "trunc_check", "fastsrt", "fastsrt_adv_print", "sort_keys", "adv", "thread", "dll", "rent", "dbcs", "warnings", "compile",
         "dynam", "debug", "cics_return_warning", "invdata", "zwb", "quote", "currency", "nsymbol", "dispsign", "intdate", "qualify", "initial", "vlr", "vsamopenfs",

@@ -137,7 +137,7 @@ const KINDS: [(&str, &str, &[&str], &[&str]); 13] = [
     ("sink", "journal", &["sink", "file", "line", "marker", "reached", "input"], &["sink", "file", "line"]),
     ("statement", "journal", &["file", "line", "capped"], &["file", "line"]),
     ("output", "journal", &["name", "sha256", "bytes", "path", "stdout"], &["name", "sha256"]),
-    ("close", "journal", &["exit", "counts", "durationMs", "ledger", "executor"], &["exit"]),
+    ("close", "journal", &["exit", "counts", "durationMs", "ledger", "executor", "assumptions"], &["exit"]),
     ("genesis", "ledger", &["createdAt"], &["createdAt"]),
     ("run", "ledger", &["run", "runChain", "runLength", "runTip"], &["run", "runChain", "runLength", "runTip"]),
     ("lock-broken", "ledger", &["holderPid", "ageMs"], &["holderPid", "ageMs"]),
@@ -286,6 +286,9 @@ pub struct Journal {
     started: Instant,
     /// Which ran the program, `vm` or `interpreter`, for the close record.
     pub executor: Option<&'static str>,
+    /// What the programs the run entered hold and how it was made, whose assumptions the close
+    /// record names; None for a command that ran no program.
+    pub facts: Option<numeric::governs::Facts>,
 }
 
 /// Where a closed run's tip went.
@@ -303,7 +306,7 @@ impl Journal {
         let id = format!("{stamp}Z-{}", hex(&random(8)));
         let path = dir.join("runs").join(format!("{id}.jsonl"));
         let file = open_new(&path)?;
-        let mut journal = Self { id, path, dir, file, chain: Chain { chain: hex(&random(16)), seq: 0, prev: ZERO.into() }, counts: BTreeMap::new(), started: Instant::now(), executor: None };
+        let mut journal = Self { id, path, dir, file, chain: Chain { chain: hex(&random(16)), seq: 0, prev: ZERO.into() }, counts: BTreeMap::new(), started: Instant::now(), executor: None, facts: None };
         let roots = reads.iter().map(|r| Value::Str(r.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())).collect();
         journal.append_at(
             "open",
@@ -346,6 +349,9 @@ impl Journal {
         let mut close = fields([("exit", exit.map_or(Value::Null, Value::Int)), ("counts", Value::Obj(counts)), ("durationMs", Value::Int(duration)), ("ledger", ledger.into())]);
         if let Some(executor) = self.executor {
             close.insert("executor".into(), executor.into());
+        }
+        if let Some(facts) = &self.facts {
+            close.insert("assumptions".into(), Value::Arr(numeric::assumptions::governed(facts).into_iter().map(Value::from).collect()));
         }
         self.append("close", close)?;
         self.file.sync_all()?;

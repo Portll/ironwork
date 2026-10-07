@@ -167,6 +167,10 @@ impl Loader<Rc<Compiled>> for Library {
         &program.program.nested
     }
 
+    fn facts(program: &Rc<Compiled>) -> numeric::governs::Facts {
+        compile::constructs::of(program)
+    }
+
     fn source(program: &Rc<Compiled>, file: usize) -> Option<String> {
         program.program.sources.get(file).cloned()
     }

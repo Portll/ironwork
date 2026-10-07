@@ -55,7 +55,7 @@ usage:
                                                        run a batch program, or with --job a job, on generated input
                                                        and keep each abend; with --differential, each input on
                                                        which the interpreter and the VM differ
-  ironwork assumptions [--c-series]                    list the register of assumptions, one per line
+  ironwork assumptions [--c-series | --json]           list the register of assumptions, one per line
   ironwork --version
 flags:
   -silent    stop the checked-mode reports: TRUNC(OPT) stores whose result depends on the
@@ -435,6 +435,10 @@ assumptions flags:
   --c-series
              put each entry's number in one C series first, its position in the register, with the
              original id beside it (C36 L1); the stored ids do not change
+  --json
+             the register as one JSON array of {id, basis, oracle, claim, governs}; governs is any
+             of its lists, each met when a run holds all of its triggers (statement:sort,
+             usage:packed, option:TRUNC(OPT) or always), which a run journal's close record names
 compare flags: ironwork compare --base OLD.cbl --head NEW.cbl [--dd NAME=path]... [--sql-replay file]
   --base, --head
              the two versions of the program; each runs in its own directory on copies of every DD,
@@ -557,15 +561,25 @@ fn usage_error(message: &str) -> ExitCode {
     exit::status(Outcome::Usage)
 }
 
-fn list_assumptions(c_series: bool) -> ExitCode {
+fn list_assumptions(c_series: bool, json: bool) -> ExitCode {
+    use exec::evidence::{Value, canonical, fields};
     use numeric::assumptions::Oracle;
+    let oracle_name = |o: Oracle| match o {
+        Oracle::Hercules => "hercules",
+        Oracle::EnterpriseCobol => "enterprise-cobol",
+        Oracle::Db2 => "db2",
+    };
+    if json {
+        let entries = numeric::assumptions::ASSUMPTIONS.iter().map(|a| {
+            let governs = a.governs.iter().map(|all| Value::Arr(all.iter().map(|t| Value::Str(t.name())).collect())).collect();
+            Value::Obj(fields([("id", a.id.into()), ("basis", a.basis.name().into()), ("oracle", oracle_name(a.oracle).into()), ("claim", a.claim.into()), ("governs", Value::Arr(governs))]))
+        });
+        println!("{}", canonical(&Value::Arr(entries.collect())));
+        return ExitCode::SUCCESS;
+    }
     for (n, a) in numeric::assumptions::c_series() {
         let basis = a.basis.name();
-        let oracle = match a.oracle {
-            Oracle::Hercules => "hercules",
-            Oracle::EnterpriseCobol => "enterprise-cobol",
-            Oracle::Db2 => "db2",
-        };
+        let oracle = oracle_name(a.oracle);
         if c_series {
             println!("C{n}\t{}\t{basis}\t{oracle}\t{}", a.id, a.claim);
         } else {
@@ -592,6 +606,7 @@ fn driver() -> ExitCode {
     let (mut replay, mut keyed) = (None, false);
     let (mut sql_db, mut sql_record) = (None, None);
     let mut c_series = false;
+    let mut assumptions_json = false;
     let (mut vm, mut interpret) = (false, false);
     let mut evidence_dir: Option<std::path::PathBuf> = None;
     let mut trace_marker: Option<String> = None;
@@ -810,6 +825,7 @@ fn driver() -> ExitCode {
             "--strings" => dump_options.strings = true,
             "--no-check" => dump_options.check = false,
             "--c-series" => c_series = true,
+            "--json" => assumptions_json = true,
             "--exit-code" => exit_code = true,
             "--vm" => vm = true,
             "--interpret" => interpret = true,
@@ -900,10 +916,16 @@ fn driver() -> ExitCode {
     }
     diagnostics::follow(json == Some(true));
     if rest == ["assumptions"] {
-        return list_assumptions(c_series);
+        if c_series && assumptions_json {
+            return usage_error("--c-series is for the tab-separated list, not --json");
+        }
+        return list_assumptions(c_series, assumptions_json);
     }
     if c_series {
         return usage_error("unknown flag --c-series");
+    }
+    if assumptions_json {
+        return usage_error("--json is for assumptions");
     }
     let run_flags = !dds.is_empty() || !environment.is_empty() || replay.is_some() || keyed || sql_db.is_some() || sql_record.is_some() || evidence_dir.is_some() || trace_marker.is_some()
         || trace_statements.is_some() || trace_input || provenance_file.is_some() || coverage_file.is_some() || !cics_options.is_empty() || !matches!(clock, exec::unit::Clock::System)
@@ -1245,7 +1267,8 @@ fn driver() -> ExitCode {
         Err(code) => return code,
     };
     if command == "cics" {
-        let run = journal.map(|j| evidence::Run::new(j, &reads, path, trace_marker.as_deref()).with_statements(listed.unwrap_or_default()).with_input(trace_input));
+        let facts = ran_facts(&compiled, exec::constructs::of_run(true, false, false, false));
+        let run = journal.map(|j| evidence::Run::new(j, &reads, path, trace_marker.as_deref()).with_statements(listed.unwrap_or_default()).with_input(trace_input).with_facts(facts));
         let coverage = coverage_file.as_deref().map(|file| (file, outlines.as_slice(), reads.as_slice()));
         return run_cics(&compiled, path, library, dds, clock, database, &cics_options, run, executor, coverage);
     }
@@ -1256,7 +1279,8 @@ fn driver() -> ExitCode {
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
     let shared = journal.map(|mut j| {
         j.executor = Some(if code.is_some() { "vm" } else { "interpreter" });
-        std::rc::Rc::new(std::cell::RefCell::new(evidence::Run::new(j, &reads, path, trace_marker.as_deref()).with_statements(listed.unwrap_or_default()).with_input(trace_input)))
+        let facts = ran_facts(&compiled, exec::constructs::of_run(false, false, parm.is_some(), statement_limit.is_some()));
+        std::rc::Rc::new(std::cell::RefCell::new(evidence::Run::new(j, &reads, path, trace_marker.as_deref()).with_statements(listed.unwrap_or_default()).with_input(trace_input).with_facts(facts)))
     });
     let covered = coverage_file.as_ref().map(|_| std::rc::Rc::new(std::cell::RefCell::new(coverage::Coverage::naming(path, &reads))));
     let observer = (shared.is_some() || covered.is_some()).then(|| {
@@ -1331,6 +1355,12 @@ fn write_arguments(dir: &std::path::Path, arguments: &[Option<Vec<u8>>]) -> io::
         }
     }
     Ok(())
+}
+
+/// What a run of `compiled` holds before it loads anything: the program's own facts and the run's.
+fn ran_facts(compiled: &exec::Compiled, mut run: numeric::governs::Facts) -> numeric::governs::Facts {
+    run.union(exec::constructs::of(compiled));
+    run
 }
 
 /// Closes the journal on how the run ended and gives the exit status.
