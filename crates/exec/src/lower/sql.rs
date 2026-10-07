@@ -5,7 +5,8 @@
 use super::flow::Ctx;
 use super::{Lower, LowerError, R, unsupported};
 use crate::layout::Resolved;
-use crate::sql::{HostType, host_array, host_type};
+use compile::sql::{host_array, host_type};
+use rt::sql::HostType;
 use rt::abend::AbendCode;
 use rt::lir::{self, HostArray, HostPlace, Op, PlaceId, RowCount, SqlEntry, SqlStatement, SqlTest, Sqlca, Terminator};
 use syntax::Pos;
@@ -119,7 +120,7 @@ impl Lower<'_> {
             Statement::Connect { what, target } => (SqlStatement::Connect { what: self.sym(what), location: self.host_places(target.as_slice(), command)? }, String::new(), false),
             Statement::Open { declared: None, .. } | Statement::Malformed(_) => return unsupported("an EXEC SQL statement the compiler refuses", block.pos),
         };
-        let fingerprint = crate::sql::fingerprint(&text);
+        let fingerprint = rt::sql::fingerprint(&text);
         Ok(SqlEntry { ordinal, verb: self.sym(command), statement, text: self.sym(&text), fingerprint, with_hold })
     }
 
