@@ -119,8 +119,16 @@ fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_fr
         let line = index as u32 + 1;
         let debugging_text;
         let mut chars = chars.as_slice();
-        if extended && let Some(found) = crate::directives::read(chars, Pos { file, line, col: 1 }) {
+        if let Some(found) = crate::directives::read(chars, Pos { file, line, col: 1 }) {
+            use crate::directives::Directive;
             match found? {
+                // Enterprise COBOL 6.3 has DEFINE and IF; the rest are read under extended alone.
+                d @ (Directive::Define { .. } | Directive::If(_) | Directive::Else | Directive::EndIf) if !extended => {
+                    let col = chars.iter().position(|c| *c != ' ').unwrap_or(0) as u32 + 1;
+                    conditions.apply(d, Pos { file, line, col }, &mut Vec::new())?;
+                    continue;
+                }
+                _ if !extended => {}
                 crate::directives::Directive::Ignored(note) => {
                     if conditions.active() {
                         out.notes.push(note);
@@ -670,6 +678,15 @@ mod tests {
         let Err(other) = extended("       >>CALL-CONVENTION COBOL\n") else { panic!("another directive is refused") };
         assert!(other.message.starts_with(">>CALL-CONVENTION COBOL: the source-format directives"), "{}", other.message);
         assert_eq!(other.pos.col, 8);
+    }
+
+    #[test]
+    fn strict_reads_enterprise_cobol_s_define_and_if_without_a_message_and_not_elif() {
+        let text = "       >>DEFINE MODE AS 'TEST'\n       >>IF MODE = 'TEST'\n       KEPT.\n       >>ELSE\n       DROPPED.\n       >>END-IF\n";
+        let s = read(text).unwrap();
+        assert_eq!((s.text.split_whitespace().collect::<Vec<_>>(), s.notes.len()), (vec!["KEPT."], 0));
+        let elif = read("       >>DEFINE MODE AS 1\n       >>IF MODE DEFINED\n       >>ELIF X DEFINED\n       >>END-IF\n").unwrap();
+        assert!(elif.text.contains(">>ELIF"), "{}", elif.text);
     }
 
     #[test]

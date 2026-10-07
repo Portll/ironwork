@@ -147,3 +147,28 @@ fn length_of_a_fixed_length_record_needs_no_address() {
         assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), ("0006\n", Some(&Ending::StopRun)), "{}", ran.err);
     }
 }
+
+/// Enterprise COBOL 6.3's conditional compilation, under strict.
+const CONDITIONAL_COMPILATION: &str = concat!(
+    "       >>DEFINE STAGE AS 2\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. CONDCOMP.\n",
+    "       PROCEDURE DIVISION.\n",
+    "       >>IF STAGE > 1\n",
+    "           DISPLAY 'LATE STAGE'\n",
+    "       >>ELSE\n",
+    "           DISPLAY 'EARLY STAGE'\n",
+    "       >>END-IF\n",
+    "       >>IF NOT-SET IS DEFINED\n",
+    "           DISPLAY 'NOT-SET'\n",
+    "       >>END-IF\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn conditional_compilation_chooses_the_lines_under_strict_alike_on_both_executors() {
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let ran = Harness::source(CONDITIONAL_COMPILATION).run(executor);
+        assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), ("LATE STAGE\n", Some(&Ending::StopRun)), "{}", ran.err);
+    }
+}

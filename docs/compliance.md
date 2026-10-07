@@ -921,8 +921,10 @@ PARAMETER, a value from the compiler's options, leaves the name undefined, as ir
 such option. cobc 3.2 gives the same lines on the probes checked. An >>IF with no >>END-IF, an
 >>ELSE, >>ELIF or >>END-IF with no >>IF, and a condition of another form are refused (IWC0318).
 GnuCOBOL's >>DEFINE CONSTANT, a constant for the program text, stays refused, as do >>EVALUATE and
-the directives no section here names (IWS0094). Enterprise COBOL 6.3 reads >>DEFINE and >>IF too;
-ironwork reads them under extended only for now.
+the directives no section here names (IWS0094). Enterprise COBOL 6.3 has >>DEFINE, >>IF, >>ELSE and
+>>END-IF (Language Reference, Conditional compilation), and strict reads them the same way with no
+message; >>ELIF, which IBM has not, is read under extended alone. IBM's arithmetic expressions in
+>>DEFINE, its predefined compilation variables and its DEFINE compiler option are not read yet.
 
 ### IWX0049-W >>TURN, >>LISTING and >>PAGE
 
