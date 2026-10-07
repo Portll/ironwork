@@ -782,6 +782,27 @@ fn an_evaluate_subject_that_is_a_condition_name_takes_truth_values() {
 }
 
 #[test]
+fn an_evaluate_subject_may_be_a_parenthesised_condition() {
+    let data = "       01  A PIC 9 VALUE 1.\n       01  B PIC 9 VALUE 1.\n       01  C PIC X VALUE 'Y'.\n";
+    let out = run(&program(
+        "",
+        data,
+        &[
+            line("EVALUATE (A = B) ALSO C"),
+            line("    WHEN TRUE ALSO 'Y' DISPLAY 'EQUAL Y'"),
+            line("    WHEN FALSE ALSO ANY DISPLAY 'DIFFERENT' END-EVALUATE"),
+            line("EVALUATE (A + 1) WHEN 2 DISPLAY 'TWO' END-EVALUATE"),
+            line("MOVE 2 TO B"),
+            line("EVALUATE (A = B) OR (C = 'N') WHEN TRUE DISPLAY 'NO'"),
+            line("    WHEN FALSE DISPLAY 'NEITHER' END-EVALUATE"),
+            line("GOBACK."),
+        ]
+        .concat(),
+    ));
+    assert_eq!(out, "EQUAL Y\nTWO\nNEITHER\n");
+}
+
+#[test]
 fn an_abbreviated_relation_may_write_is_before_its_operator() {
     let body = |a: u8| {
         [

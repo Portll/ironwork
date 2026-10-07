@@ -3441,8 +3441,11 @@ impl Parser<'_> {
             return Ok(Subject::Bool(b == "TRUE"));
         }
         let save = self.at;
-        self.expr()?;
-        let conditional = self.relop_ahead(0) || self.is_word("IS") || self.is_word("NOT")
+        // A parenthesised condition, (A = B), is no arithmetic expression: read it as a condition.
+        let conditional = self.expr().is_err()
+            || self.relop_ahead(0)
+            || self.is_word("IS")
+            || self.is_word("NOT")
             || self.word().is_some_and(|w| matches!(w, "NUMERIC" | "ALPHABETIC" | "ALPHABETIC-LOWER" | "ALPHABETIC-UPPER" | "DBCS" | "KANJI" | "POSITIVE" | "NEGATIVE" | "ZERO"));
         self.at = save;
         Ok(if conditional { Subject::Cond(self.cond()?) } else { Subject::Expr(self.expr()?) })
