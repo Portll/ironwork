@@ -52,6 +52,8 @@ pub struct Request {
     pub evidence: Option<PathBuf>,
     /// The text an input trace looks for in each sink's operand, recorded in the journal.
     pub trace_marker: Option<String>,
+    /// Records at each sink whether an input byte may be in its operand, as `run --trace-input` does.
+    pub trace_input: bool,
     /// PARMs given in place of the EXEC's, by step as the job log names it.
     pub parms: Vec<(String, String)>,
     /// In-stream data given in place of the JCL's, by step and DD (`STEP.DD`), each a file of lines.
@@ -611,7 +613,7 @@ fn run_cobol(path: &Path, parm: &str, req: &Request, dds: &[Allocated], database
     if let Some(run) = evidence {
         crate::evidence::sources(run.borrow_mut().journal_mut(), &first.sources, &path.display().to_string(), roots);
     }
-    let library = exec::unit::Library { programs, dirs: std::iter::once(own).chain(req.program_dirs.iter().cloned()).collect(), copy: libraries, flags: req.flags.clone(), trace_statements: req.coverage.is_some().then_some(exec::unit::StatementFilter::All), trace_input: false, statement_limit: req.statement_limit, time_limit: req.time_limit, storage_limit: req.storage_limit, program_ids: None, screen: None, environment: Default::default() };
+    let library = exec::unit::Library { programs, dirs: std::iter::once(own).chain(req.program_dirs.iter().cloned()).collect(), copy: libraries, flags: req.flags.clone(), trace_statements: req.coverage.is_some().then_some(exec::unit::StatementFilter::All), trace_input: req.trace_input, statement_limit: req.statement_limit, time_limit: req.time_limit, storage_limit: req.storage_limit, program_ids: None, screen: None, environment: Default::default() };
     let compiled = exec::compile(first, &req.flags).map_err(|errors| Failed::before(Outcome::Refused, syntax::most_severe(&errors).map(|e| e.place(&path.display().to_string()).to_string()).unwrap_or_default()))?;
     if let Some(run) = evidence {
         run.borrow_mut().add_program(exec::constructs::of(&compiled));
@@ -1161,7 +1163,7 @@ fn run_job(job: &Job, runner: &mut Runner<'_>, mut database: Option<&mut dyn exe
                     _ => step.pgm.clone(),
                 };
                 let run = journal.borrow_mut().take().map(|j| {
-                    let mut r = crate::evidence::Run::new(j, roots, &source, runner.req.trace_marker.as_deref());
+                    let mut r = crate::evidence::Run::new(j, roots, &source, runner.req.trace_marker.as_deref()).with_input(runner.req.trace_input);
                     r.add_run_facts(exec::constructs::of_run(false, true, step.parm.is_some(), runner.req.statement_limit.is_some()));
                     for d in dds.iter().filter(|d| d.dataset) {
                         r.track(&d.name, &d.path);

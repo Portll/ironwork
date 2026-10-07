@@ -214,7 +214,8 @@ flags:
              --trace-marker names whether an input byte may be in its operand (input true), none
              is (false), or the run did something not followed yet (null: SORT and MERGE, the
              Report Writer, XML and JSON statements, object-oriented COBOL, Language Environment
-             services). run, and cics for every task of its pseudo-conversation
+             services). run, job for every step's programs, and cics for every task of its
+             pseudo-conversation
   --trace-statements FILE
              with --evidence: record each start of a statement FILE lists, one FILE:LINE per
              line, a file matched by its name: cobolwork's routes.statements. The first 100
@@ -1050,8 +1051,8 @@ fn driver() -> ExitCode {
     if trace_statements.is_some() && (evidence_dir.is_none() || !matches!(rest.first().map(String::as_str), Some("run" | "cics"))) {
         return usage_error("--trace-statements goes with --evidence, for run and cics");
     }
-    if trace_input && (evidence_dir.is_none() || !matches!(rest.first().map(String::as_str), Some("run" | "cics"))) {
-        return usage_error("--trace-input goes with --evidence, for run and cics");
+    if trace_input && (evidence_dir.is_none() || !matches!(rest.first().map(String::as_str), Some("run" | "job" | "cics"))) {
+        return usage_error("--trace-input goes with --evidence, for run, job and cics");
     }
     let listed = match trace_statements.as_deref().map(evidence::listed_statements).transpose() {
         Ok(listed) => listed,
@@ -1093,7 +1094,7 @@ fn driver() -> ExitCode {
             (exec::unit::Clock::System, Some(_)) => exec::unit::Clock::Fixed(1_767_225_600, 0),
             (c, _) => c,
         };
-        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, proclibs, user, flags, clock, replay: replay.map(std::path::PathBuf::from), expected: expected_dir, expected_steps, declare, statement, evidence: evidence_dir, trace_marker, parms: step_parms, instream, coverage: coverage_file, statement_limit, time_limit, storage_limit });
+        return job::run(job::Request { jcl: file.into(), datasets: dir.into(), text, libraries, program_dirs, proclibs, user, flags, clock, replay: replay.map(std::path::PathBuf::from), expected: expected_dir, expected_steps, declare, statement, evidence: evidence_dir, trace_marker, trace_input, parms: step_parms, instream, coverage: coverage_file, statement_limit, time_limit, storage_limit });
     }
     if datasets.is_some() || !proclibs.is_empty() || user.is_some() {
         return usage_error("--datasets, --proclib and --user are for job");

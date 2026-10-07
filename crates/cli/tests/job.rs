@@ -720,3 +720,33 @@ fn job_coverage_keeps_apart_two_sources_that_share_a_program_id() {
     // Statements by file: PGMA's DISPLAY in both its steps, PGMB's skipped DISPLAY in none.
     assert!(text.contains("{\"file\":\"PGMA.cbl\",\"line\":5,\"started\":2}") && !text.contains("{\"file\":\"PGMB.cbl\",\"line\":7,"), "{text}");
 }
+
+#[test]
+fn a_steps_operation_records_whether_input_reached_it_under_trace_input() {
+    let dir = temp("traceinput");
+    fs::write(
+        dir.join("lib/CALLBY.cbl"),
+        cobol(&[
+            "IDENTIFICATION DIVISION.",
+            "PROGRAM-ID. CALLBY.",
+            "DATA DIVISION.",
+            "WORKING-STORAGE SECTION.",
+            "01 WS-PGM PIC X(8).",
+            "01 WS-OWN PIC X(8) VALUE 'NOSUCH'.",
+            "PROCEDURE DIVISION.",
+            "    ACCEPT WS-PGM.",
+            "    CALL WS-PGM ON EXCEPTION CONTINUE END-CALL.",
+            "    CALL WS-OWN ON EXCEPTION CONTINUE END-CALL.",
+            "    GOBACK.",
+        ]),
+    )
+    .unwrap();
+    let ev = dir.with_extension("evidence");
+    let _ = fs::remove_dir_all(&ev);
+    let o = job_with(&dir, "//S1 EXEC PGM=CALLBY\n//SYSIN DD *\nHELLOPGM\n/*\n", &["--evidence", ev.to_str().unwrap(), "--trace-marker", "HELLO", "--trace-input"]);
+    assert_eq!(o.status.code(), Some(0), "{}", log(&o));
+    let runs: Vec<_> = fs::read_dir(ev.join("runs")).unwrap().flatten().collect();
+    let text = fs::read_to_string(runs[0].path()).unwrap();
+    let sinks: Vec<_> = text.lines().filter(|l| field(l, "kind") == Some("sink")).map(|l| (field(l, "line").unwrap(), field(l, "input"))).collect();
+    assert!(sinks.contains(&("9", Some("true"))) && sinks.contains(&("10", Some("false"))), "{text}");
+}

@@ -157,7 +157,7 @@ sink to a finding, so a path recorded from another directory still matches.
 
 ### 1.3 Input trace by taint: `--trace-input`
 
-With `--evidence`, `run` and `cics` follow which bytes of run-unit memory may hold input, with no
+With `--evidence`, `run`, `job` (each step) and `cics` follow which bytes of run-unit memory may hold input, with no
 marker. At each operation §1.1 names, the sink record says whether an input byte may be in its
 operand: `input` true, false, or null. cobolwork needs this before coverage may refute a finding
 (cobolwork `docs/spec/reach.md` §9.8, fact 3): a step that changes bytes (a numeric MOVE, a COMPUTE,
