@@ -986,6 +986,7 @@ impl Parser<'_> {
             organization: Organization::Sequential,
             access: Access::Sequential,
             record_key: None,
+            label_records: Vec::new(),
             alternate_keys: Vec::new(),
             split_keys: Vec::new(),
             relative_key: None,
@@ -1237,6 +1238,16 @@ impl Parser<'_> {
                     "EXTERNAL" | "GLOBAL" if files[index].sort => return Err(crate::messages::IWS0047.at(pos, format!("SD {name}: a sort or merge file takes no EXTERNAL or GLOBAL clause"))),
                     "EXTERNAL" => files[index].external = true,
                     "GLOBAL" => files[index].global = true,
+                    "LABEL" => {
+                        self.accept_any(&["RECORD", "RECORDS"]);
+                        self.accept_any(&["IS", "ARE"]);
+                        while self.word().is_some_and(|w| !FD_WORDS.contains(&w)) {
+                            if self.accept_any(&["STANDARD", "OMITTED"]).is_none() {
+                                let r = self.reference()?;
+                                files[index].label_records.push(r);
+                            }
+                        }
+                    }
                     "LINAGE" => {
                         let linage = self.linage()?;
                         if files[index].linage.is_some() {

@@ -509,3 +509,45 @@ fn length_of_a_table_element_needs_no_subscript() {
     let errors = compile_errors(&program("", data, &[line("MOVE E1 TO N"), line("GOBACK.")].concat()));
     assert!(errors.contains("E1 takes 1 subscripts, not 0"), "{errors}");
 }
+
+#[test]
+fn an_arithmetic_receiver_must_be_numeric_or_numeric_edited() {
+    let source = |procedure: &str| {
+        format!(
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  G PIC X(5).\n       01  H PIC 9(3) VALUE 2.\n       01  E PIC ZZ9.\n       01  N PIC 9(3).\n       01  Q.\n           05  Q1 PIC 9.\n       PROCEDURE DIVISION.\n{procedure}           GOBACK.\n"
+        )
+    };
+    let refused = compile_errors(&source("           COMPUTE G = H * 2\n           ADD 1 TO G\n           DIVIDE H INTO N GIVING N REMAINDER Q\n           MULTIPLY 2 BY H GIVING E\n           SUBTRACT 1 FROM H GIVING N\n"));
+    let expected = [
+        "IWC0323-S COMPUTE G: a receiving operand of an arithmetic statement must be numeric or numeric-edited, and G is alphanumeric",
+        "IWC0323-S ADD G: a receiving operand of an arithmetic statement must be numeric or numeric-edited, and G is alphanumeric",
+        "IWC0323-S DIVIDE Q: a receiving operand of an arithmetic statement must be numeric or numeric-edited, and Q is a group",
+    ];
+    assert_eq!(refused.lines().filter(|l| l.starts_with("IWC0323")).collect::<Vec<_>>(), expected, "{refused}");
+    assert_eq!(compile_errors(&source("           COMPUTE E = H * 2\n           ADD 1 TO N\n           DIVIDE H INTO N GIVING N REMAINDER E\n")), "");
+}
+
+#[test]
+fn a_label_records_data_name_must_be_defined() {
+    let source = |label: &str, data: &str| {
+        format!(
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       ENVIRONMENT DIVISION.\n       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n           SELECT F ASSIGN TO FDD.\n       DATA DIVISION.\n       FILE SECTION.\n       FD  F {label}.\n       01  R PIC X(80).\n       WORKING-STORAGE SECTION.\n{data}       PROCEDURE DIVISION.\n           GOBACK.\n"
+        )
+    };
+    assert_eq!(compile_errors(&source("LABEL RECORDS ARE STANDARD", "")), "");
+    assert_eq!(compile_errors(&source("LABEL RECORD IS LBL", "       01  LBL PIC X(80).\n")), "");
+    assert_eq!(compile_errors(&source("LABEL RECORDS XXXXX084 DATA RECORD IS R", "")), "IWC0324-S LABEL RECORDS XXXXX084: not defined as a data-name");
+}
+
+#[test]
+fn recording_mode_f_takes_records_of_one_length() {
+    let source = |clauses: &str, second: &str| {
+        format!(
+            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       ENVIRONMENT DIVISION.\n       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n           SELECT F ASSIGN TO FDD.\n       DATA DIVISION.\n       FILE SECTION.\n       FD  F {clauses}.\n       01  R1 PIC 9(1).\n{second}       WORKING-STORAGE SECTION.\n       PROCEDURE DIVISION.\n           GOBACK.\n"
+        )
+    };
+    assert_eq!(compile_errors(&source("RECORDING MODE F", "       01  R2 PIC X(79).\n")), "IWC0325-S FD F: RECORDING MODE F, but its records are 1 to 79 bytes");
+    assert_eq!(compile_errors(&source("RECORDING MODE F RECORD CONTAINS 1 TO 80 CHARACTERS", "")), "IWC0325-S FD F: RECORDING MODE F, but its records are 1 to 80 bytes");
+    assert_eq!(compile_errors(&source("RECORDING MODE V", "       01  R2 PIC X(79).\n")), "");
+    assert_eq!(compile_errors(&source("RECORDING MODE F", "       01  R2 PIC X(1).\n")), "");
+}

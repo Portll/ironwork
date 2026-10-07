@@ -170,6 +170,9 @@ pub struct FileDecl {
     pub record_varying: bool,
     /// RECORD IS VARYING ... DEPENDING ON: the item holding each record's length.
     pub record_depending: Option<Ref>,
+    /// LABEL RECORD IS data-name: the names, which Enterprise COBOL resolves though it reads the
+    /// clause as comments.
+    pub label_records: Vec<Ref>,
     pub records: Vec<DataEntry>,
     /// FD ... REPORT IS: the reports written to the file.
     pub reports: Vec<String>,

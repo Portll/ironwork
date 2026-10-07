@@ -321,6 +321,8 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     for k in 0..program.files.len() {
         check.file_keys(k);
         check.record_depending(k);
+        check.label_records(k);
+        check.recording_mode(k);
         check.passwords(k);
         linage::check_file(check.program, check.layout, k, check.errors);
     }
@@ -1144,17 +1146,28 @@ impl Check<'_> {
                 to.iter().for_each(|r| self.reference(r));
             }
             Stmt::Compute { targets, expr, size_error, .. } => {
-                targets.iter().for_each(|t| self.reference(&t.r));
+                for t in targets {
+                    self.reference(&t.r);
+                    self.arithmetic_receiver("COMPUTE", &t.r);
+                }
                 self.expr(expr);
                 self.size_error(size_error.as_ref());
             }
             Stmt::Arith(a) => {
+                let verb = match a.verb {
+                    ArithVerb::Add => "ADD",
+                    ArithVerb::Subtract => "SUBTRACT",
+                    ArithVerb::Multiply => "MULTIPLY",
+                    ArithVerb::Divide => "DIVIDE",
+                };
                 for (t, e) in &a.computations {
                     self.reference(&t.r);
+                    self.arithmetic_receiver(verb, &t.r);
                     self.expr(e);
                 }
                 if let Some((t, x, y)) = &a.remainder {
                     self.reference(&t.r);
+                    self.arithmetic_receiver(verb, &t.r);
                     self.expr(x);
                     self.expr(y);
                 }
@@ -1702,6 +1715,35 @@ impl Check<'_> {
         }
     }
 
+    /// LABEL RECORD IS data-name: Enterprise COBOL reads the clause as comments and still refuses a
+    /// data-name it does not know, IGYGR1174-S.
+    fn label_records(&mut self, k: usize) {
+        let f = &self.program.files[k];
+        for r in &f.label_records {
+            if self.layout.resolve(&r.name, &r.qualifiers, r.pos).is_err() {
+                self.errors.push(syntax::messages::IWC0324.at(r.pos, format!("LABEL RECORDS {}: not defined as a data-name", r.name)));
+            }
+        }
+    }
+
+    /// RECORDING MODE F takes records of one length: not RECORD IS VARYING, not a two-bound RECORD
+    /// clause, and level-01 records of one size with no OCCURS DEPENDING ON (Programming Guide
+    /// SC27-8714-03, p. 227). Enterprise COBOL discards the file otherwise, IGYGR1211-S.
+    fn recording_mode(&mut self, k: usize) {
+        let f = &self.program.files[k];
+        if f.recording != Some('F') {
+            return;
+        }
+        let declared = (f.record_min, f.record_max);
+        let lengths = match declared {
+            (Some(min), Some(max)) if f.record_varying || min != max => Some((min, max)),
+            _ => self.layout.record_lengths[k].filter(|(shortest, longest)| shortest != longest),
+        };
+        if let Some((shortest, longest)) = lengths {
+            self.errors.push(syntax::messages::IWC0325.at(f.pos, format!("FD {}: RECORDING MODE F, but its records are {shortest} to {longest} bytes", f.name)));
+        }
+    }
+
     /// A PASSWORD item is a WORKING-STORAGE item of category alphabetic, alphanumeric or
     /// alphanumeric-edited (Language Reference SC27-8713-03, p. 152).
     fn passwords(&mut self, k: usize) {
@@ -1730,6 +1772,27 @@ impl Check<'_> {
         if let Ok(layout::Resolved::Condition(_)) = self.layout.resolve(&r.name, &r.qualifiers, r.pos) {
             self.errors.push(syntax::messages::IWC0095.at(r.pos, format!("{} is a condition-name, not a data item", r.name)));
         }
+    }
+
+    /// An arithmetic statement's receiving operand is numeric or numeric-edited (Language Reference
+    /// SC27-8713-03, the ADD, COMPUTE, DIVIDE, MULTIPLY and SUBTRACT statements); Enterprise COBOL
+    /// discards the statement otherwise, IGYPA3146-S. CORRESPONDING never comes here: it pairs
+    /// numeric items of its two groups.
+    fn arithmetic_receiver(&mut self, verb: &str, r: &Ref) {
+        let Some(i) = self.item(r) else { return };
+        let kind = self.layout.items[i].kind;
+        if kind.is_numeric() || matches!(kind, rt::storage::Kind::NumericEdited { .. }) {
+            return;
+        }
+        let class = match kind {
+            rt::storage::Kind::Group => "a group",
+            rt::storage::Kind::Alnum { .. } => "alphanumeric",
+            rt::storage::Kind::AlnumEdited { .. } => "alphanumeric-edited",
+            rt::storage::Kind::National => "national",
+            rt::storage::Kind::Pointer | rt::storage::Kind::ProgramPointer => "a pointer",
+            _ => "not numeric",
+        };
+        self.errors.push(syntax::messages::IWC0323.at(r.pos, format!("{verb} {}: a receiving operand of an arithmetic statement must be numeric or numeric-edited, and {} is {class}", r.name, r.name)));
     }
 
     /// A reference that may name a condition-name: a condition's, or SET TO TRUE's or FALSE's.

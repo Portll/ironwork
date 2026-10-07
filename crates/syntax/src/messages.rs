@@ -364,6 +364,9 @@ catalogue! {
     IWC0316 Severe "BASED: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0317 Severe "FREE {name}: GnuCOBOL's FREE of a record, not Enterprise COBOL's, which frees through a pointer; --compliance extended reads it";
     IWC0318 Severe "conditional compilation: {why}";
+    IWC0323 Severe "{verb} {item}: a receiving operand of an arithmetic statement must be numeric or numeric-edited, and {item} is {class}";
+    IWC0324 Severe "LABEL RECORDS {name}: not defined as a data-name";
+    IWC0325 Severe "FD {file}: RECORDING MODE F, but its records are {shortest} to {longest} bytes";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
     IWJ0002 Severe "an unbalanced ) in {text}";
     IWJ0003 Severe "unbalanced parentheses or quotes in {text}";

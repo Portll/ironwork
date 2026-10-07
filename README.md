@@ -488,7 +488,8 @@ The subset the interpreter runs today:
   conditions, EVALUATE, SEARCH ALL, MAX and MIN, and gives HIGH-VALUE, LOW-VALUE, CHAR and ORD;
   national and numeric comparisons keep their own order. The choices are assumptions C35 to C37.
 - **Procedure:** sections and paragraphs; MOVE (with editing and de-editing), COMPUTE, ADD,
-  SUBTRACT, MULTIPLY, DIVIDE (GIVING, REMAINDER, ROUNDED, ON SIZE ERROR), IF, EVALUATE (ALSO,
+  SUBTRACT, MULTIPLY, DIVIDE (GIVING, REMAINDER, ROUNDED, ON SIZE ERROR; a receiving operand
+  neither numeric nor numeric-edited is refused, IWC0323, as IGYPA3146-S refuses it), IF, EVALUATE (ALSO,
   THRU, ANY, TRUE/FALSE, OTHER), PERFORM (procedures, sections, THRU, TIMES, UNTIL, VARYING with
   up to six AFTER phrases on a performed procedure, inline; a COMP-1 or COMP-2 variable steps in
   floating point), EXIT PARAGRAPH/SECTION/PERFORM
@@ -558,8 +559,9 @@ The subset the interpreter runs today:
   program that invokes a function.
 - **Files:** sequential, line-sequential, indexed (VSAM KSDS) and relative (RRDS):
   SELECT/ASSIGN/FILE STATUS, ORGANIZATION, ACCESS SEQUENTIAL/RANDOM/DYNAMIC, RECORD KEY, ALTERNATE
-  RECORD KEY [WITH DUPLICATES], RELATIVE KEY; FD with RECORDING MODE F or V and RECORD
-  CONTAINS/VARYING; OPEN INPUT/OUTPUT/EXTEND/I-O; READ [NEXT|PREVIOUS] [INTO] [KEY IS] with AT END
+  RECORD KEY [WITH DUPLICATES], RELATIVE KEY; FD with RECORDING MODE F, which refuses records of
+  differing length (IWC0325, as IGYGR1211-S), or V, RECORD CONTAINS/VARYING, and LABEL RECORDS,
+  whose data-names must be defined (IWC0324, as IGYGR1174-S); OPEN INPUT/OUTPUT/EXTEND/I-O; READ [NEXT|PREVIOUS] [INTO] [KEY IS] with AT END
   or INVALID KEY; WRITE [FROM] with ADVANCING (lines, PAGE, or a mnemonic-name for C01 to C12, CSP or
   AFP-5A), AT END-OF-PAGE or INVALID KEY; REWRITE, DELETE and START with INVALID KEY; CLOSE;
   OPTIONAL files, and the file status codes for each outcome. FD LINAGE with FOOTING, TOP and

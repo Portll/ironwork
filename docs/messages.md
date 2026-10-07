@@ -338,6 +338,9 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0316 | S | `BASED: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0317 | S | `FREE {name}: GnuCOBOL's FREE of a record, not Enterprise COBOL's, which frees through a pointer; --compliance extended reads it` |
 | IWC0318 | S | `conditional compilation: {why}` |
+| IWC0323 | S | `{verb} {item}: a receiving operand of an arithmetic statement must be numeric or numeric-edited, and {item} is {class}` |
+| IWC0324 | S | `LABEL RECORDS {name}: not defined as a data-name` |
+| IWC0325 | S | `FD {file}: RECORDING MODE F, but its records are {shortest} to {longest} bytes` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
 | IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |
