@@ -230,6 +230,33 @@ ended without one, or a JCL error, says ([Exit status](#exit-status)).
 `--expected DATASETS=DIR` runs the job on a copy of the data sets and compares what it leaves with
 production's, as [docs/evidence.md](docs/evidence.md) §4 describes.
 
+## Scope
+
+What ironwork claims, and what it does not, as 1.0 states it.
+
+**Conformance** means that a program ironwork compiles does what Enterprise COBOL 6.4's manuals say
+it does, and, where they leave a choice, what ironwork's register of assumptions records. The
+evidence is the [conformance report](#the-conformance-report): NIST's CCVS85, where 383 of the 458
+routines run clean and the rest are named by class in `docs/conformance/nist.tsv`; the interpreter
+and the VM giving the same results on every program both run; IBM's own compile listings of
+CCVS85; the machine model against Hercules; and Db2 for Linux for SQL. No IBM compiler has run
+ironwork's tests. Conformance is to IBM's documentation, checked by that evidence, and not a
+certificate from IBM.
+
+**What is refused** is refused by name, never given a guessed result. An Enterprise COBOL construct
+ironwork does not run yet is an IWR message naming it: at compile time where the compiler can tell,
+and otherwise when a run reaches it, which ends the run with that message under the abend code
+IRONWORK, EXEC or JAVA (exit status 244). What Enterprise COBOL refuses,
+`--compliance strict`, the default, refuses too, with IBM's message at IBM's severity where IBM's
+compiler flags it. Micro Focus and GnuCOBOL forms run only under `--compliance extended`, each with
+its IWX warning. [docs/messages.md](docs/messages.md) lists every message.
+
+**What waits on goldens** is every behaviour the manuals leave open: 244 of the register's 336
+assumptions are Chosen, ironwork's reading where IBM documents none. A run behaves as its assumption
+says, `ironwork assumptions` lists them all, and `--assume` switches seven of them. Goldens, IBM's own
+output for the [oracle](#the-oracle)'s programs, settle each one. None has been taken yet, and
+until one is, a Chosen assumption is ironwork's choice, not IBM's behaviour.
+
 ## Exit status
 
 `check` and `compile` exit with the compile's return code (below), and 2 for usage. `run`, `cics`
