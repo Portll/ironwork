@@ -175,6 +175,13 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 let val = self.read(loc, at)?;
                 Ok(Number::Fixed(arith::fixed_operand(val, dmax, pos)?))
             }
+            Operand::Function(f) => match self.function_count(f)? {
+                Some(n) => Ok(n),
+                None => {
+                    let val = self.value(o)?;
+                    Ok(Number::Fixed(arith::fixed_operand(val, dmax, pos)?))
+                }
+            },
             Operand::Const(c) => match self.code.literals[c as usize] {
                 Some((n, places)) => Ok(Number::Int(n, places)),
                 None => {
@@ -186,6 +193,54 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 let val = self.value(o)?;
                 Ok(Number::Fixed(arith::fixed_operand(val, dmax, pos)?))
             }
+        }
+    }
+
+    /// FUNCTION MOD of two fixed-point arguments, each evaluated as `comparand` evaluates it and
+    /// held as a count, the intrinsic taking the two values only where `count_mod` cannot; None,
+    /// with nothing evaluated, for any other function or argument.
+    fn function_count(&mut self, id: FunctionId) -> R<Option<Number>> {
+        let plan = &self.p.plans.function[id as usize];
+        let (Func::Mod, None, [Argument::Value(a), Argument::Value(b)]) = (plan.func, &plan.refmod, plan.args.as_slice()) else { return Ok(None) };
+        if !(self.countable(a) && self.countable(b)) {
+            return Ok(None);
+        }
+        let pos = self.pos(plan.at);
+        let x = self.comparand_number(a, pos)?;
+        let y = self.comparand_number(b, pos)?;
+        if let Some(n) = count_mod(x, y) {
+            return Ok(Some(n));
+        }
+        let mut args = vec![Val::Num(x.fixed()), Val::Num(y.fixed())];
+        let result = intrinsic::evaluate(&mut Call { vm: self, plan }, plan.func.name(), plan.side, &mut args, pos);
+        match self.settle(result)? {
+            Val::Num(f) => Ok(Some(Number::of(f))),
+            _ => Err(not_yet("FUNCTION MOD of numbers that is not a number")),
+        }
+    }
+
+    /// A function argument `comparand` reads as a fixed-point number: an arithmetic expression, a
+    /// numeric literal or a binary, packed or zoned item.
+    fn countable(&self, c: &Comparand) -> bool {
+        match c {
+            Comparand::Expr { mode: Mode::Fixed, .. } => true,
+            Comparand::Expr { .. } => false,
+            Comparand::Operand(Operand::Const(k)) => self.code.literals[*k as usize].is_some(),
+            Comparand::Operand(Operand::Load(p)) => matches!(self.p.places[*p as usize].kind, Kind::Binary { .. } | Kind::Packed { .. } | Kind::Zoned { .. }),
+            Comparand::Operand(_) => false,
+        }
+    }
+
+    /// `comparand` of an argument `countable` takes, held as a `Number`.
+    fn comparand_number(&mut self, c: &Comparand, pos: Pos) -> R<Number> {
+        match c {
+            Comparand::Expr { expr, dmax, prepass, .. } => {
+                for &q in prepass {
+                    self.loc(q)?;
+                }
+                self.eval_number(*expr, *dmax, pos)
+            }
+            Comparand::Operand(o) => self.operand_number(*o, 0, pos),
         }
     }
 
