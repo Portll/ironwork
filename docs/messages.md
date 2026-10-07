@@ -326,6 +326,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0302 | S | `PIC X(n) COMP-5: Micro Focus's and GnuCOBOL's binary of n bytes, where Enterprise COBOL's COMP-5 takes a numeric PICTURE; --compliance extended reads it` |
 | IWC0303 | S | `PIC X({n}) {COMP-X or COMP-5}: {n} bytes of binary, and ironwork's binary items hold at most eight` |
 | IWC0304 | S | `{paragraph or section} FOREVER: under --compliance extended PERFORM FOREVER is Micro Focus's and GnuCOBOL's endless loop, not a PERFORM of it; compile the program under strict` |
+| IWC0305 | S | `FUNCTION MODULE-CALLER-ID: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
 | IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |
@@ -821,6 +822,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0028 | W | `PERFORM ... FOREVER (Micro Focus and GnuCOBOL; Enterprise COBOL has no FOREVER phrase): it repeats until EXIT PERFORM, GO TO, GOBACK or STOP RUN leaves it` |
 | IWX0029 | W | `ACCEPT ... FROM {LINES, COLUMNS or COLS} (GnuCOBOL; Enterprise COBOL has no screen): the screen's {24 lines or 80 columns}` |
 | IWX0030 | W | `WRITE ... BEFORE ADVANCING on the line-sequential file {file} (GnuCOBOL and Micro Focus; Enterprise COBOL allows only AFTER there): the line, then the lines or page it names` |
+| IWX0031 | W | `FUNCTION MODULE-CALLER-ID (GnuCOBOL; Enterprise COBOL has no such function): the PROGRAM-ID of the program that called this one, empty in the main program` |
 
 ## Run-time refusals
 

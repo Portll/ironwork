@@ -27,7 +27,7 @@ pub const FUNCTIONS: &[&str] = &[
     "SECONDS-PAST-MIDNIGHT", "SIGN", "SIN", "SQRT", "STANDARD-DEVIATION", "SUM", "TAN", "TEST-DATE-YYYYMMDD", "TEST-DAY-YYYYDDD",
     "TEST-FORMATTED-DATETIME", "TEST-NUMVAL", "TEST-NUMVAL-C", "TEST-NUMVAL-F", "UUID4", "VARIANCE", "YEAR-TO-YYYY",
     "ULENGTH", "UPOS", "USUBSTR", "USUPPLEMENTARY", "UVALID", "UWIDTH", "COMBINED-DATETIME", "CONTENT-OF",
-    "WHEN-COMPILED",
+    "WHEN-COMPILED", "MODULE-CALLER-ID",
 ];
 
 /// Functions of type alphanumeric or national, or whose type follows an argument that may be one
@@ -35,7 +35,7 @@ pub const FUNCTIONS: &[&str] = &[
 pub const CHARACTER_VALUED: &[&str] = &[
     "BIT-OF", "BIT-TO-CHAR", "CHAR", "CONTENT-OF", "CURRENT-DATE", "DISPLAY-OF", "FORMATTED-CURRENT-DATE", "FORMATTED-DATE",
     "FORMATTED-DATETIME", "FORMATTED-TIME", "HEX-OF", "HEX-TO-CHAR", "LOWER-CASE", "MAX", "MIN", "NATIONAL-OF", "REVERSE", "TRIM",
-    "UPPER-CASE", "USUBSTR", "UUID4", "WHEN-COMPILED",
+    "UPPER-CASE", "USUBSTR", "UUID4", "WHEN-COMPILED", "MODULE-CALLER-ID",
 ];
 
 /// Functions whose result is long floating point under ARITH(COMPAT) and extended under

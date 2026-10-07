@@ -995,3 +995,49 @@ fn before_advancing_on_a_line_sequential_file_writes_the_line_then_moves_alike_o
     assert_eq!(warned.iter().filter(|d| d.2 == Some("IWX0030")).map(|d| d.0).collect::<Vec<_>>(), [14, 15, 17], "{warned:?}");
     assert!(diagnostics_under(BEFORE_ADVANCING, numeric::Compliance::Strict).iter().any(|d| d.2 == Some("IWC0145")));
 }
+
+/// FUNCTION MODULE-CALLER-ID in a main program and two levels of CALL below it.
+const MODULE_CALLER_ID: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. MAINP.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  X PIC X(10).\n",
+    "       01  N PIC 9(4).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE FUNCTION MODULE-CALLER-ID TO X\n",
+    "           COMPUTE N = FUNCTION LENGTH(FUNCTION MODULE-CALLER-ID)\n",
+    "           DISPLAY 'MAIN [' X '] ' N\n",
+    "           CALL 'SUBP'\n",
+    "           STOP RUN.\n",
+    "       END PROGRAM MAINP.\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. SUBP.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY 'SUB [' FUNCTION MODULE-CALLER-ID ']'\n",
+    "           IF FUNCTION MODULE-CALLER-ID = 'MAINP' DISPLAY 'EQ' END-IF\n",
+    "           CALL 'SUBQ'\n",
+    "           GOBACK.\n",
+    "       END PROGRAM SUBP.\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. SUBQ.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY 'SUBQ [' FUNCTION MODULE-CALLER-ID ']'\n",
+    "           GOBACK.\n",
+    "       END PROGRAM SUBQ.\n",
+);
+
+#[test]
+fn module_caller_id_names_the_calling_program_alike_on_both_executors() {
+    // cobc 3.2's output.
+    let expected = "MAIN [          ] 0000\nSUB [MAINP]\nEQ\nSUBQ [SUBP]\n";
+    let walked = Harness::source(MODULE_CALLER_ID).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!(walked.out, expected, "{:?}\n{}", walked.ending, walked.err);
+    let vm = Harness::source(MODULE_CALLER_ID).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    let main = MODULE_CALLER_ID.split_inclusive("END PROGRAM MAINP.\n").next().unwrap();
+    let warned = diagnostics_under(main, numeric::Compliance::Extended);
+    assert_eq!(warned, [(8, 17, Some("IWX0031"), Severity::Warning), (9, 40, Some("IWX0031"), Severity::Warning)]);
+    let refused = diagnostics_under(main, numeric::Compliance::Strict);
+    assert_eq!(refused.iter().map(|d| (d.0, d.2)).collect::<Vec<_>>(), [(8, Some("IWC0305")), (9, Some("IWC0305"))]);
+}

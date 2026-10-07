@@ -353,6 +353,7 @@ functions! {
     Uwidth = 79, "UWIDTH", 2..=2;
     CombinedDatetime = 80, "COMBINED-DATETIME", 2..=2;
     ContentOf = 81, "CONTENT-OF", 1..=1;
+    ModuleCallerId = 82, "MODULE-CALLER-ID", 0..=0;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

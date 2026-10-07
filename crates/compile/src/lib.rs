@@ -1977,6 +1977,13 @@ impl Check<'_> {
             }
             Operand::Literal(_) => {}
             Operand::Function(f) => {
+                if f.name == "MODULE-CALLER-ID" && self.intrinsic(&f.name) {
+                    self.errors.push(if self.extended {
+                        syntax::messages::IWX0031.at(f.pos, "FUNCTION MODULE-CALLER-ID (GnuCOBOL; Enterprise COBOL has no such function): the PROGRAM-ID of the program that called this one, empty in the main program")
+                    } else {
+                        syntax::messages::IWC0305.at(f.pos, "FUNCTION MODULE-CALLER-ID: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it")
+                    });
+                }
                 if !self.intrinsic(&f.name) {
                     match self.functions.map(|all| all.iter().find(|u| u.name == f.name)) {
                         Some(Some(udf)) => function::check_invocation(udf, f, self.layout, self.alphabetic, self.program.environment.decimal_point_comma, self.errors),

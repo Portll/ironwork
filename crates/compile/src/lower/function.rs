@@ -280,7 +280,8 @@ fn result(func: Func, args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
         | Func::BitToChar
         | Func::DisplayOf
         | Func::Uuid4
-        | Func::WhenCompiled => of(Value::Bytes),
+        | Func::WhenCompiled
+        | Func::ModuleCallerId => of(Value::Bytes),
         Func::NationalOf => of(Value::National),
         Func::UpperCase
         | Func::LowerCase

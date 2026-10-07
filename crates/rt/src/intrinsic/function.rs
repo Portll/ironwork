@@ -42,6 +42,8 @@ pub trait Evaluator {
     fn random(&mut self) -> &mut Option<u32>;
     /// The currency sign of NUMVAL-C and TEST-NUMVAL-C without argument-2 (assumption C102).
     fn currency(&self) -> String;
+    /// The name of the program that called the running one, None in the main program.
+    fn caller(&mut self) -> Option<String>;
 }
 
 fn integer(n: i128, digits: u32) -> Val {
@@ -861,6 +863,11 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
         "WHEN-COMPILED" => {
             arity(0..=0, args)?;
             date_and_time(facts, x.compiled(), pos)
+        }
+        "MODULE-CALLER-ID" => {
+            arity(0..=0, args)?;
+            let caller = x.caller().unwrap_or_default();
+            text_value(facts, &caller, pos)
         }
         "UUID4" => {
             arity(0..=0, args)?;

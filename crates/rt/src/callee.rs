@@ -199,7 +199,10 @@ pub struct Callee {
 pub fn run<'w, X: UnitHost<'w>, O, T, E: From<Abend>>(x: &mut X, callee: &Callee, run: impl FnOnce(&mut X) -> Result<(R<O>, T), E>) -> Result<(R<O>, T), E> {
     let index = callee.index;
     let active = x.unit().programs[index].active;
-    let (ending, value) = run(x)?;
+    x.unit().calls.push(index);
+    let ran = run(x);
+    x.unit().calls.pop();
+    let (ending, value) = ran?;
     let unit = x.unit();
     unit.programs[index].active = active;
     if callee.by == (By::Call { initial: true }) {

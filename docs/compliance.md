@@ -710,6 +710,17 @@ prints it; cobc writes the two lines one after the other on one line. ACAS write
 headings BEFORE 1 and the others AFTER. ADVANCING a mnemonic-name stays refused there (IWC0145), as
 does BEFORE under strict.
 
+### IWX0031-W FUNCTION MODULE-CALLER-ID
+
+`IWX0031-W FUNCTION MODULE-CALLER-ID (GnuCOBOL; Enterprise COBOL has no such function): the
+PROGRAM-ID of the program that called this one, empty in the main program`, at the function.
+
+The value is alphanumeric, as long as the caller's name: SUBP when SUBP called the running program,
+and an empty value, of length zero, in the main program, as cobc 3.2 gives it. The caller is the
+program whose CALL, user-defined function reference or INVOKE entered the latest activation of the
+running one. ACAS compares it with "ACAS" to learn whether its menu program called it. Strict
+refuses it (IWC0305).
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

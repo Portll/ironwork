@@ -293,6 +293,10 @@ pub struct RunUnit<'w, H, L: Loader<H>> {
     pub observer: Option<Observer<'w>>,
     /// FUNCTION RANDOM's generator, one for the run unit, from the first reference on.
     pub random: Option<u32>,
+    /// The first program activated, the run unit's main program.
+    pub main: Option<usize>,
+    /// The programs CALLs, functions and INVOKEs in progress entered, outermost first.
+    pub calls: Vec<usize>,
     /// The job step's program arguments, which ACCEPT ... FROM COMMAND-LINE and ARGUMENT-VALUE read
     /// under `--compliance extended`; empty without a PARM.
     pub arguments: crate::le::parm::Arguments,
@@ -492,6 +496,8 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             oo: Default::default(),
             observer: None,
             random: None,
+            main: None,
+            calls: Vec::new(),
             arguments: Default::default(),
             crt: None,
             environment: Default::default(),
@@ -633,9 +639,19 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             let base = self.allocate(self.programs[me].size);
             (self.programs[me].base, self.programs[me].placed) = (base, true);
         }
+        self.main.get_or_insert(me);
         let program = &mut self.programs[me];
         program.active = true;
         (program.base, !program.initialized || initial)
+    }
+
+    /// The program that entered program `me`'s latest activation: the main program for one a CALL
+    /// from it entered, None for the main program.
+    pub fn caller_of(&self, me: usize) -> Option<usize> {
+        match self.calls.iter().rposition(|&p| p == me)? {
+            0 => self.main,
+            k => Some(self.calls[k - 1]),
+        }
     }
 
     /// Program `me`'s storage holds its initial values, and its GO TOs go where they are written.

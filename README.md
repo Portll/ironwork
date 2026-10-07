@@ -359,7 +359,8 @@ ACCEPT FROM ENVIRONMENT, SET ENVIRONMENT and DISPLAY UPON ENVIRONMENT-NAME (IWX0
 record-locking phrases (IWX0022-W), INSPECT ... TRAILING (IWX0023-W), CALL ... RETURNING OMITTED,
 NOTHING or NULL (IWX0024-W), COMP-X (IWX0025-W), PIC X(n) COMP-5 (IWX0026-W), FLOAT-SHORT and
 FLOAT-LONG as COMP-1 and COMP-2 (IWX0027-W), PERFORM ... FOREVER (IWX0028-W), ACCEPT ... FROM LINES
-and COLUMNS (IWX0029-W) and WRITE ... BEFORE ADVANCING on a line-sequential file (IWX0030-W).
+and COLUMNS (IWX0029-W), WRITE ... BEFORE ADVANCING on a line-sequential file (IWX0030-W) and
+FUNCTION MODULE-CALLER-ID (IWX0031-W).
 [docs/compliance.md](docs/compliance.md) gives each one's meaning, the census that chose them, and
 what stays refused and why.
 

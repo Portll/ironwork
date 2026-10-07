@@ -53,6 +53,11 @@ impl<'p> Evaluator for Call<'_, 'p, '_, '_, '_> {
     fn currency(&self) -> String {
         self.machine.default_currency()
     }
+
+    fn caller(&mut self) -> Option<String> {
+        let unit = &self.machine.unit;
+        unit.caller_of(self.machine.me).map(|p| unit.programs[p].name.clone())
+    }
 }
 
 impl<'p> Machine<'p, '_, '_> {

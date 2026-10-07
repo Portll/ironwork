@@ -481,6 +481,11 @@ impl<'p, L: Loader<Rc<Code>>> Evaluator for Call<'_, 'p, '_, '_, L> {
     fn currency(&self) -> String {
         self.vm.p.options.numval_currency.clone()
     }
+
+    fn caller(&mut self) -> Option<String> {
+        let unit = &self.vm.unit;
+        unit.caller_of(self.vm.me).map(|p| unit.programs[p].name.clone())
+    }
 }
 
 #[cfg(test)]
