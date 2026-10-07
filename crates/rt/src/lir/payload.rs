@@ -359,6 +359,7 @@ functions! {
     HeapAllocate = 85, "HEAP ALLOCATE", 1..=1;
     HeapFree = 86, "HEAP FREE", 1..=1;
     Concatenate = 87, "CONCATENATE", 1..=usize::MAX;
+    ChainingArgument = 88, "CHAINING ARGUMENT", 2..=2;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

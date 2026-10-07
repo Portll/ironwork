@@ -339,6 +339,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0317 | S | `FREE {name}: GnuCOBOL's FREE of a record, not Enterprise COBOL's, which frees through a pointer; --compliance extended reads it` |
 | IWC0318 | S | `conditional compilation: {why}` |
 | IWC0319 | S | `FUNCTION CONCATENATE: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0320 | S | `PROCEDURE DIVISION CHAINING: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0323 | S | `{verb} {item}: a receiving operand of an arithmetic statement must be numeric or numeric-edited, and {item} is {class}` |
 | IWC0324 | S | `LABEL RECORDS {name}: not defined as a data-name` |
 | IWC0325 | S | `FD {file}: RECORDING MODE F, but its records are {shortest} to {longest} bytes` |
@@ -866,6 +867,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0052 | W | `INITIALISE (Micro Focus and GnuCOBOL; Enterprise COBOL spells it INITIALIZE): it is read as INITIALIZE` |
 | IWX0053 | W | `FUNCTION CONCATENATE (GnuCOBOL; Enterprise COBOL has no such function): its arguments' characters joined, a number's as its digits` |
 | IWX0054 | W | `COPY {name}. (GnuCOBOL and Micro Focus; Enterprise COBOL reads the name as {name}.): the member is {name}, and the periods after it end the statement` |
+| IWX0055 | W | `PROCEDURE DIVISION CHAINING (GnuCOBOL and Micro Focus; Enterprise COBOL's main program takes its PARM through USING): each item takes the run's argument in its position, its bytes left-justified, where one is given` |
 
 ## Run-time refusals
 

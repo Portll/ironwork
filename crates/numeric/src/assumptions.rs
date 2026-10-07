@@ -387,6 +387,7 @@ pub const SPLIT_KEYS: &str = "C484";
 pub const DELETE_FILE: &str = "C485";
 pub const BASED_ITEMS: &str = "C486";
 pub const ALLOCATE_HEAP: &str = "C487";
+pub const CHAINING: &str = "C488";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2741,6 +2742,13 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[S(Set)]],
+    },
+    Assumption {
+        id: CHAINING,
+        claim: "Under --compliance extended, PROCEDURE DIVISION CHAINING, GnuCOBOL's and Micro Focus's, gives each item named the run's argument in its position as the procedure starts: the job step's PARM program arguments split at blanks stand for the command line (C442 for ACCEPT ... FROM COMMAND-LINE), and each word's bytes go into the item left-justified, padded with spaces and cut to its length, whatever its class, as cobc 3.2 copies them. An item with no argument keeps its value, and in a program another one called the items keep theirs, the arguments being the main program's",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), S(Move)]],
     },
     Assumption {
         id: COMMAND_LINE_FROM_PARM,

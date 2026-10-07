@@ -623,6 +623,10 @@ impl<'p, L: Loader<Rc<Code>>> Evaluator for Call<'_, 'p, '_, '_, L> {
         unit.caller_of(self.vm.me).map(|p| unit.programs[p].name.clone())
     }
 
+    fn run_argument(&mut self, position: usize) -> Option<String> {
+        position.checked_sub(1).and_then(|k| self.vm.unit.arguments.words.get(k)).cloned()
+    }
+
     fn heap_allocate(&mut self, size: usize) -> u32 {
         self.vm.unit.heap_allocate(size)
     }
@@ -775,6 +779,10 @@ mod tests {
         }
         fn argument_length(&mut self, _: usize) -> usize {
             0
+        }
+
+        fn run_argument(&mut self, _: usize) -> Option<String> {
+            None
         }
 
         fn heap_allocate(&mut self, _: usize) -> u32 {

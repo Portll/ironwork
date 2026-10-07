@@ -974,6 +974,19 @@ Enterprise COBOL takes the second period as the one that ends the statement, so 
 which ends an empty sentence in the PROCEDURE DIVISION and is refused elsewhere; ironwork copies
 member X wherever the statement stands.
 
+### IWX0055-W PROCEDURE DIVISION CHAINING
+
+`IWX0055-W PROCEDURE DIVISION CHAINING (GnuCOBOL and Micro Focus; Enterprise COBOL's main program
+takes its PARM through USING): each item takes the run's argument in its position, its bytes
+left-justified, where one is given`, at CHAINING.
+
+The job step's PARM program arguments, split at blanks, stand for the command line, as they do for
+ACCEPT ... FROM COMMAND-LINE. Each word's bytes go into its item as the procedure starts,
+left-justified, padded with spaces and cut to the item's length whatever its class, as cobc 3.2
+copies them: `123` into a PIC 9 item gives 1. An item with no word keeps its value, and so does
+every item of a program another one called. ACAS's posting programs take their date range this
+way. Assumption C488. Strict refuses it (IWC0320).
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

@@ -365,6 +365,7 @@ catalogue! {
     IWC0317 Severe "FREE {name}: GnuCOBOL's FREE of a record, not Enterprise COBOL's, which frees through a pointer; --compliance extended reads it";
     IWC0318 Severe "conditional compilation: {why}";
     IWC0319 Severe "FUNCTION CONCATENATE: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
+    IWC0320 Severe "PROCEDURE DIVISION CHAINING: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0323 Severe "{verb} {item}: a receiving operand of an arithmetic statement must be numeric or numeric-edited, and {item} is {class}";
     IWC0324 Severe "LABEL RECORDS {name}: not defined as a data-name";
     IWC0325 Severe "FD {file}: RECORDING MODE F, but its records are {shortest} to {longest} bytes";
@@ -892,6 +893,7 @@ catalogue! {
     IWX0052 Warning "INITIALISE (Micro Focus and GnuCOBOL; Enterprise COBOL spells it INITIALIZE): it is read as INITIALIZE";
     IWX0053 Warning "FUNCTION CONCATENATE (GnuCOBOL; Enterprise COBOL has no such function): its arguments' characters joined, a number's as its digits";
     IWX0054 Warning "COPY {name}. (GnuCOBOL and Micro Focus; Enterprise COBOL reads the name as {name}.): the member is {name}, and the periods after it end the statement";
+    IWX0055 Warning "PROCEDURE DIVISION CHAINING (GnuCOBOL and Micro Focus; Enterprise COBOL's main program takes its PARM through USING): each item takes the run's argument in its position, its bytes left-justified, where one is given";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

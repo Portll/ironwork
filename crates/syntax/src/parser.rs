@@ -643,11 +643,16 @@ impl Parser<'_> {
             if self.accept_word("USING") {
                 using = self.parameters()?;
             }
+            let chaining = self.chaining()?;
             if self.accept_word("RETURNING") {
                 returning = Some(self.name("a RETURNING item")?);
             }
             self.expect(&Tok::Period, "a period after the PROCEDURE DIVISION header")?;
-            self.procedure_paragraphs(&mut report_writer, &mut declaratives)?
+            let mut paragraphs = self.procedure_paragraphs(&mut report_writer, &mut declaratives)?;
+            if let Some(first) = paragraphs.get_mut(report_writer.procedure_start) {
+                first.statements.splice(0..0, chaining);
+            }
+            paragraphs
         } else {
             Vec::new()
         };
@@ -1727,6 +1732,30 @@ impl Parser<'_> {
         }
         self.locked(phrase, at);
         Ok(())
+    }
+
+    /// PROCEDURE DIVISION CHAINING, GnuCOBOL's and Micro Focus's: under `--compliance extended`,
+    /// for each item named, a MOVE of the run's argument in its position into the item's bytes as
+    /// the procedure starts, where the program is the main one and that argument was given
+    /// (assumption C488), with IWX0055-W; refused under strict.
+    fn chaining(&mut self) -> R<Vec<Stmt>> {
+        let at = self.pos();
+        if !self.accept_word("CHAINING") {
+            return Ok(Vec::new());
+        }
+        if !self.extended {
+            return Err(crate::messages::IWC0320.at(at, "PROCEDURE DIVISION CHAINING: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it"));
+        }
+        self.messages.push(crate::messages::IWX0055.at(at, "PROCEDURE DIVISION CHAINING (GnuCOBOL and Micro Focus; Enterprise COBOL's main program takes its PARM through USING): each item takes the run's argument in its position, its bytes left-justified, where one is given"));
+        let mut moves = Vec::new();
+        for (k, param) in self.parameters()?.into_iter().enumerate() {
+            let one = Expr::Operand(Operand::Literal(Literal::Number("1".into())));
+            let bytes = Ref { name: param.name, qualifiers: Vec::new(), subscripts: Vec::new(), refmod: Some(RefMod { start: Box::new(one), length: None }), pos: at };
+            let position = Expr::Operand(Operand::Literal(Literal::Number((k + 1).to_string())));
+            let argument = FunctionCall { name: "CHAINING ARGUMENT".into(), args: vec![position, Expr::Operand(Operand::Ref(bytes.clone()))], modifier: None, refmod: None, all_subscripts: Vec::new(), pos: at };
+            moves.push(Stmt::Move { from: Operand::Function(argument), to: vec![bytes], pos: at });
+        }
+        Ok(moves)
     }
 
     /// RETURNING or GIVING after STOP RUN or GOBACK, GnuCOBOL's and Micro Focus's: under

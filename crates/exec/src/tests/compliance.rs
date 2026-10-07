@@ -1871,3 +1871,32 @@ fn concatenate_joins_its_arguments_alike_on_both_executors() {
     let refused = diagnostics_under(CONCATENATE, numeric::Compliance::Strict);
     assert_eq!(refused.iter().filter(|d| d.2 == Some("IWC0319")).count(), 3, "{refused:?}");
 }
+
+/// PROCEDURE DIVISION CHAINING of three items, one numeric.
+const CHAINING: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. CHAIN.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  X            PIC X VALUE '-'.\n",
+    "       01  ABCD         PIC X(4) VALUE 'ZZZZ'.\n",
+    "       01  NUM          PIC 9 VALUE 7.\n",
+    "       PROCEDURE DIVISION CHAINING X ABCD NUM.\n",
+    "           DISPLAY '[' X '][' ABCD '][' NUM ']'\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn chaining_moves_each_run_argument_into_its_item_alike_on_both_executors() {
+    // cobc 3.2's output for each command line.
+    for (parm, expected) in [("", "[-][ZZZZ][7]\n"), ("A", "[A][ZZZZ][7]\n"), ("AB CDEFG 5", "[A][CDEF][5]\n"), ("A B 123", "[A][B   ][1]\n")] {
+        let walked = Harness::source(CHAINING).flags(EXTENDED).parm(parm).run(Executor::Interpreter);
+        assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{parm}: {}", walked.err);
+        let vm = Harness::source(CHAINING).flags(EXTENDED).parm(parm).run(Executor::Vm);
+        assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    }
+    let warned: Vec<_> = diagnostics_under(CHAINING, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0055")).map(|d| (d.0, d.1)).collect();
+    assert_eq!(warned, [(8, 27)]);
+    let refused = syntax::parse(CHAINING).unwrap_err();
+    assert_eq!((refused.pos.line, refused.id), (8, Some("IWC0320")), "{refused}");
+}

@@ -59,6 +59,10 @@ impl<'p> Evaluator for Call<'_, 'p, '_, '_, '_> {
         unit.caller_of(self.machine.me).map(|p| unit.programs[p].name.clone())
     }
 
+    fn run_argument(&mut self, position: usize) -> Option<String> {
+        position.checked_sub(1).and_then(|k| self.machine.unit.arguments.words.get(k)).cloned()
+    }
+
     fn heap_allocate(&mut self, size: usize) -> u32 {
         self.machine.unit.heap_allocate(size)
     }
