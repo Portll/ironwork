@@ -24,17 +24,22 @@ impl<'p> Machine<'p, '_, '_> {
             Some(c) if c.program.function.as_ref().is_some_and(|g| !g.prototype) => c,
             _ => return Err(Abend::ironwork(format!("FUNCTION {}: {} is a program, not a user-defined function", udf.name, udf.external), pos)),
         };
-        let mut bound = Vec::with_capacity(f.args.len());
+        let (mut bound, mut lengths) = (Vec::with_capacity(f.args.len()), Vec::with_capacity(f.args.len()));
         for (arg, formal) in f.args.iter().zip(&udf.params) {
-            bound.push(match arg {
-                Expr::Operand(Operand::Ref(r)) if !formal.by_value => Bound::At(self.locate(r)?.offset),
-                _ => Bound::Value(self.expr_value(arg, pos)?),
-            });
+            let (b, length) = match arg {
+                Expr::Operand(Operand::Ref(r)) if !formal.by_value => {
+                    let loc = self.locate(r)?;
+                    (Bound::At(loc.offset), loc.len)
+                }
+                _ => (Bound::Value(self.expr_value(arg, pos)?), 0),
+            };
+            bound.push(b);
+            lengths.push(length);
         }
         self.unit.enter(pos)?;
         let mark = self.unit.mem.len();
         let read_before = self.unit.pending();
-        let (outcome, ()) = callee::run(self, &Callee { index, by: By::Function, mark: Some(mark), pos }, |m| {
+        let (outcome, ()) = callee::run(self, &Callee { index, by: By::Function, mark: Some(mark), pos, lengths: &lengths }, |m| {
             let outcome = run(&compiled, index, &mut *m.unit, &bound, pos);
             m.unit.resume_statement(read_before);
             Ok::<_, Abend>((outcome, ()))

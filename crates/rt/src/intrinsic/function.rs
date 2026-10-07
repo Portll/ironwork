@@ -44,6 +44,9 @@ pub trait Evaluator {
     fn currency(&self) -> String;
     /// The name of the program that called the running one, None in the main program.
     fn caller(&mut self) -> Option<String>;
+    /// The length of the argument in USING position `position`, from 1, of the running
+    /// activation: 0 for one omitted or not passed, and in the main program.
+    fn argument_length(&mut self, position: usize) -> usize;
 }
 
 fn integer(n: i128, digits: u32) -> Val {
@@ -868,6 +871,11 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             arity(0..=0, args)?;
             let caller = x.caller().unwrap_or_default();
             text_value(facts, &caller, pos)
+        }
+        "ARGUMENT LENGTH" => {
+            arity(1..=1, args)?;
+            let position = usize::try_from(whole(&args[0], name, pos)?).unwrap_or_default();
+            Ok(Val::Num(Fixed::new(x.argument_length(position) as i128, Places::new(9, 0))))
         }
         "UUID4" => {
             arity(0..=0, args)?;

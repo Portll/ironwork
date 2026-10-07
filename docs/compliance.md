@@ -767,6 +767,25 @@ came: true when the CALL passed OMITTED in its place or passed fewer arguments, 
 the same answers for both. cobcurses tests its optional parameters this way. Strict refuses it
 (IWC0307).
 
+### IWX0035-W ANY LENGTH
+
+`IWX0035-W ANY LENGTH (GnuCOBOL and Micro Focus; Enterprise COBOL's parameters have the length their
+entries give): L is as long as the argument each CALL passes for it`, at the entry.
+
+    01 identifier PIC X ANY LENGTH.
+    01 identifier ANY LENGTH.
+
+An alphanumeric 01 or 77 item of the LINKAGE SECTION named in PROCEDURE DIVISION USING takes the
+length of the argument in its position on each CALL or function reference: a data item's length,
+or the bytes BY CONTENT or BY VALUE gives, and 0 for one omitted or not passed. It is read as a group
+holding that many single characters, a table whose count is set as the procedure starts, so it
+moves, compares, displays and is reference-modified as an alphanumeric group of the argument's
+length, and FUNCTION LENGTH gives that length; cobc 3.2 gives the same output on the probes
+checked. CobolCraft passes every packet buffer this way. Refused with IWR0076: an ANY LENGTH entry
+anywhere else, one that is not alphanumeric, one with OCCURS or REDEFINES, a RETURNING item written
+ANY LENGTH, one an ENTRY statement names, and a function argument that is not a data item, which
+would have no length of its own. Assumption C481. Strict refuses the clause (IWC0308).
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

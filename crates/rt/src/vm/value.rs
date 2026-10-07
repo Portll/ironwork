@@ -541,6 +541,10 @@ impl<'p, L: Loader<Rc<Code>>> Evaluator for Call<'_, 'p, '_, '_, L> {
         let unit = &self.vm.unit;
         unit.caller_of(self.vm.me).map(|p| unit.programs[p].name.clone())
     }
+
+    fn argument_length(&mut self, position: usize) -> usize {
+        self.vm.unit.argument_length_of(self.vm.me, position)
+    }
 }
 
 #[cfg(test)]

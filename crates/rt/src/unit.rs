@@ -303,6 +303,8 @@ pub struct RunUnit<'w, H, L: Loader<H>> {
     pub main: Option<usize>,
     /// The programs CALLs, functions and INVOKEs in progress entered, outermost first.
     pub calls: Vec<usize>,
+    /// The length of each argument the entry in `calls` was passed, 0 for one omitted.
+    pub argument_lengths: Vec<Vec<usize>>,
     /// The job step's program arguments, which ACCEPT ... FROM COMMAND-LINE and ARGUMENT-VALUE read
     /// under `--compliance extended`; empty without a PARM.
     pub arguments: crate::le::parm::Arguments,
@@ -504,6 +506,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             random: None,
             main: None,
             calls: Vec::new(),
+            argument_lengths: Vec::new(),
             arguments: Default::default(),
             crt: None,
             environment: Default::default(),
@@ -658,6 +661,13 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             0 => self.main,
             k => Some(self.calls[k - 1]),
         }
+    }
+
+    /// The length of the argument in USING position `position`, from 1, of program `me`'s latest
+    /// activation: 0 for one omitted or not passed, and in the main program.
+    pub fn argument_length_of(&self, me: usize, position: usize) -> usize {
+        let Some(k) = self.calls.iter().rposition(|&p| p == me) else { return 0 };
+        position.checked_sub(1).and_then(|i| self.argument_lengths[k].get(i)).copied().unwrap_or(0)
     }
 
     /// Program `me`'s storage holds its initial values, and its GO TOs go where they are written.

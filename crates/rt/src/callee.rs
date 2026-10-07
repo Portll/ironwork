@@ -30,28 +30,37 @@ pub trait Arguments<'w, P: Copy, O>: Values<P, O> + UnitHost<'w> {
 /// argument a temporary's holding its bytes, OMITTED none. A BY VALUE argument's temporary is bound
 /// to the parameter whether it is received BY VALUE or BY REFERENCE (assumption C333).
 pub fn addresses<'w, P: Copy, O>(x: &mut impl Arguments<'w, P, O>, args: &[CallArg<P, O>], pos: Pos) -> R<Vec<Option<usize>>> {
-    let mut addresses = Vec::with_capacity(args.len());
-    addresses_into(x, args, pos, &mut addresses)?;
-    Ok(addresses)
+    Ok(arguments(x, args, pos)?.0)
 }
 
-/// `addresses`, appended to `addresses`.
-pub fn addresses_into<'w, P: Copy, O>(x: &mut impl Arguments<'w, P, O>, args: &[CallArg<P, O>], pos: Pos, addresses: &mut Vec<Option<usize>>) -> R<()> {
+/// `addresses`, with each argument's length.
+pub fn arguments<'w, P: Copy, O>(x: &mut impl Arguments<'w, P, O>, args: &[CallArg<P, O>], pos: Pos) -> R<(Vec<Option<usize>>, Vec<usize>)> {
+    let (mut addresses, mut lengths) = (Vec::with_capacity(args.len()), Vec::with_capacity(args.len()));
+    addresses_into(x, args, pos, &mut addresses, &mut lengths)?;
+    Ok((addresses, lengths))
+}
+
+/// `arguments`, appended to `addresses` and `lengths`.
+pub fn addresses_into<'w, P: Copy, O>(x: &mut impl Arguments<'w, P, O>, args: &[CallArg<P, O>], pos: Pos, addresses: &mut Vec<Option<usize>>, lengths: &mut Vec<usize>) -> R<()> {
     for arg in args {
-        let at = match arg {
-            CallArg::Omitted => None,
-            CallArg::Reference(p) => Some(x.locate(*p, false)?.offset),
+        let (at, length) = match arg {
+            CallArg::Omitted => (None, 0),
+            CallArg::Reference(p) => {
+                let loc = x.locate(*p, false)?;
+                (Some(loc.offset), loc.len)
+            }
             CallArg::Value(o) => {
                 let val = x.value(o, pos)?;
                 let bytes = value_argument(val, pos)?;
-                Some(x.unit().push_temporary(&bytes))
+                (Some(x.unit().push_temporary(&bytes)), bytes.len())
             }
             CallArg::Content(c) => {
                 let bytes = content(x, c, pos)?;
-                Some(x.unit().push_temporary(&bytes))
+                (Some(x.unit().push_temporary(&bytes)), bytes.len())
             }
         };
         addresses.push(at);
+        lengths.push(length);
     }
     Ok(())
 }
@@ -181,13 +190,15 @@ pub enum By {
 
 /// A loaded program run as a callee.
 #[derive(Clone, Copy, Debug)]
-pub struct Callee {
+pub struct Callee<'a> {
     pub index: usize,
     pub by: By,
     /// Memory's length before the caller pushed the callee's arguments, released back to once it
     /// returns; None when the caller releases them.
     pub mark: Option<usize>,
     pub pos: Pos,
+    /// Each argument's length, which an ANY LENGTH parameter takes (assumption C481).
+    pub lengths: &'a [usize],
 }
 
 /// Runs program `callee.index`: `run` activates it, binds its LINKAGE, runs its procedure and reads
@@ -196,12 +207,14 @@ pub struct Callee {
 /// inactive unless an earlier activation of it, which a RECURSIVE program or a function can have,
 /// is still running (C127), an INITIAL program a CALL entered is cancelled, the temporaries since
 /// `mark` are released, and an abend that ended it names its files. The caller passes STOP RUN up.
-pub fn run<'w, X: UnitHost<'w>, O, T, E: From<Abend>>(x: &mut X, callee: &Callee, run: impl FnOnce(&mut X) -> Result<(R<O>, T), E>) -> Result<(R<O>, T), E> {
+pub fn run<'w, X: UnitHost<'w>, O, T, E: From<Abend>>(x: &mut X, callee: &Callee<'_>, run: impl FnOnce(&mut X) -> Result<(R<O>, T), E>) -> Result<(R<O>, T), E> {
     let index = callee.index;
     let active = x.unit().programs[index].active;
     x.unit().calls.push(index);
+    x.unit().argument_lengths.push(callee.lengths.to_vec());
     let ran = run(x);
     x.unit().calls.pop();
+    x.unit().argument_lengths.pop();
     let (ending, value) = ran?;
     let unit = x.unit();
     unit.programs[index].active = active;

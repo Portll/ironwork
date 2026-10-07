@@ -1,6 +1,7 @@
 //! ironwork for COBOL, the compiler: a parsed program checked against IBM's rules, with its
 //! WORKING-STORAGE laid out as IBM lays it out, ready for the interpreter or for lowering.
 
+pub mod any_length;
 pub mod arith;
 pub mod cics_bind;
 mod classes;
@@ -237,6 +238,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     let inherited = scope::inherit(&mut program);
     let own_linkage = scope::own_linkage(&program);
     omitted::rewrite(&mut program, &inherited.entries, options.compliance == numeric::Compliance::Extended, &mut errors);
+    any_length::rewrite(&mut program, &mut errors);
     let linkage: Vec<DataEntry> = program.linkage.iter().chain(&inherited.entries).cloned().collect();
     let files: Vec<(&[DataEntry], Option<u32>)> = program.files.iter().map(|f| (f.records.as_slice(), f.record_max)).collect();
     let shared = layout::record_area_owners(&program.files, &program.environment).unwrap_or_else(|e| {
@@ -844,7 +846,7 @@ fn top_level_tables(entries: &mut Vec<DataEntry>, errors: &mut Vec<Error>) -> Ve
         }
         let name = e.name.clone().unwrap_or_else(|| "FILLER".into());
         errors.push(syntax::messages::IWX0019.at(e.pos, format!("OCCURS at level {:02} (Micro Focus and GnuCOBOL; Enterprise COBOL takes OCCURS only at levels 02 to 49): {name} is read as a table in a record of its own", e.level)));
-        let record = DataEntry { level: 1, name: None, spelled: None, picture: None, usage: None, value: None, redefines: None, occurs: None, occurs_min: None, depending_on: None, sign: None, justified: false, sync: false, blank_when_zero: false, indexed_by: Vec::new(), keys: Vec::new(), condition_values: Vec::new(), false_value: None, renames: None, object_class: None, external: false, global: false, pos: e.pos };
+        let record = DataEntry { level: 1, name: None, spelled: None, picture: None, usage: None, value: None, redefines: None, occurs: None, occurs_min: None, depending_on: None, sign: None, justified: false, sync: false, blank_when_zero: false, indexed_by: Vec::new(), keys: Vec::new(), condition_values: Vec::new(), false_value: None, renames: None, object_class: None, external: false, global: false, any_length: false, pos: e.pos };
         for d in &mut entries[at..end] {
             if d.level != 88 {
                 d.level = if d.level == 77 { 2 } else { d.level + 1 };

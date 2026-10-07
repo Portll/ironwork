@@ -72,11 +72,12 @@ impl<'c> Lower<'c> {
     /// A LINKAGE record named in the PROCEDURE DIVISION header, located as `locate` finds it by
     /// name. One holding an OCCURS DEPENDING ON table is refused: locating it reads the count and
     /// may abend, and the walker names the invocation's position there, which the definition does
-    /// not know.
+    /// not know. An ANY LENGTH parameter is the exception: its argument is always a data item,
+    /// bound by its address, so the place is never located.
     fn record(&mut self, name: &str, pos: Pos) -> R<PlaceId> {
         let r = Ref { name: name.to_owned(), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos };
         let place = self.place(&r, false)?;
-        if !self.places[place as usize].odo.is_empty() {
+        if !self.places[place as usize].odo.is_empty() && !crate::any_length::is_parameter(self.program, name) {
             return unsupported("a user-defined function's parameter or RETURNING record holding an OCCURS DEPENDING ON table", pos);
         }
         Ok(place)

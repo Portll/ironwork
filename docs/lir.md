@@ -1839,13 +1839,16 @@ functions! {
     WhenCompiled = 73, "WHEN-COMPILED", 0..=0;
     Ulength = 74, "ULENGTH", 1..=1;  …  ContentOf = 81, "CONTENT-OF", 1..=1;
     ModuleCallerId = 82, "MODULE-CALLER-ID", 0..=0;
+    ArgumentLength = 83, "ARGUMENT LENGTH", 1..=1;
 }
 ```
 
 Tags 0 to 20 are the walker's first twenty-one functions (`rt::intrinsic::function::evaluate`),
 21 to 72 the alphabetical first part of `rt::intrinsic::FUNCTIONS`, 73 WHEN-COMPILED, and 74 to 81
 the eight that follow in it: ULENGTH, UPOS, USUBSTR, USUPPLEMENTARY, UVALID, UWIDTH,
-COMBINED-DATETIME and CONTENT-OF, and 82 GnuCOBOL's MODULE-CALLER-ID under `--compliance extended`.
+COMBINED-DATETIME and CONTENT-OF, 82 GnuCOBOL's MODULE-CALLER-ID under `--compliance extended`, and
+83 ARGUMENT LENGTH, which no source can name: the length of the argument in a USING position, which
+compile's ANY LENGTH rewrite moves into a parameter's count as the procedure starts.
 Every function the walker runs has a row.
 
 - **The walker's order** (machine.rs `function`): every argument by `expr_value`, which is

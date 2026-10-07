@@ -354,6 +354,7 @@ catalogue! {
     IWC0305 Severe "FUNCTION MODULE-CALLER-ID: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0306 Severe "{STOP RUN or GOBACK} {RETURNING or GIVING}: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's, where a MOVE to RETURN-CODE comes first; --compliance extended reads it";
     IWC0307 Severe "{name} [NOT] OMITTED: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's, which writes ADDRESS OF {name} = NULL; --compliance extended reads it";
+    IWC0308 Severe "ANY LENGTH: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
     IWJ0002 Severe "an unbalanced ) in {text}";
     IWJ0003 Severe "unbalanced parentheses or quotes in {text}";
@@ -720,6 +721,7 @@ catalogue! {
     IWR0056 Severe "a {category} PICTURE with USAGE {usage} is not supported yet";
     IWR0057 Severe "{a SCREEN SECTION form ironwork does not run} is not supported yet";
     IWR0075 Severe "FUNCTION {name}: a user-defined function is not supported here yet";
+    IWR0076 Severe "ANY LENGTH on {name}: ironwork reads it on an alphanumeric 01 or 77 parameter, and {why}";
     IWS0001 Severe "{what the syntax takes there}, found {the word or token there}";
     IWS0002 Severe "{COPY or a translator's INCLUDE} {name}: no such member in the copy libraries";
     IWS0003 Severe "COPY: {message}";
@@ -855,6 +857,7 @@ catalogue! {
     IWX0032 Warning "a level-66 entry before the end of its record (GnuCOBOL's IBM and Micro Focus dialects; Enterprise COBOL writes a record's RENAMES entries after its last entry): {name} is read as following {record}'s last entry";
     IWX0033 Warning "{STOP RUN or GOBACK} {RETURNING or GIVING} (GnuCOBOL and Micro Focus; Enterprise COBOL moves the value to RETURN-CODE first): the value is moved to RETURN-CODE, then {STOP RUN or GOBACK} ends the program";
     IWX0034 Warning "{name} [NOT] OMITTED (GnuCOBOL and Micro Focus; Enterprise COBOL writes ADDRESS OF {name} = NULL): it is read as ADDRESS OF {name} = NULL, true when the caller passed OMITTED or no argument there";
+    IWX0035 Warning "ANY LENGTH (GnuCOBOL and Micro Focus; Enterprise COBOL's parameters have the length their entries give): {name} is as long as the argument each CALL passes for it";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

@@ -30,17 +30,22 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let code = self.unit.programs[index].compiled.clone().ok_or_else(not_a_function)?;
         let lowered = code.lowered.as_ref().map_err(|why| not_yet(format!("a user-defined function that does not lower ({why})")))?;
         let definition = lowered.program.services.function.as_ref().ok_or_else(not_a_function)?;
-        let mut bound = Vec::with_capacity(plan.args.len());
+        let (mut bound, mut lengths) = (Vec::with_capacity(plan.args.len()), Vec::with_capacity(plan.args.len()));
         for arg in &plan.args {
-            bound.push(match arg {
-                UserArgument::Reference(q) => Bound::At(self.loc(*q)?.offset),
-                UserArgument::Value(c) => Bound::Value(self.comparand(c, pos)?),
-            });
+            let (b, length) = match arg {
+                UserArgument::Reference(q) => {
+                    let loc = self.loc(*q)?;
+                    (Bound::At(loc.offset), loc.len)
+                }
+                UserArgument::Value(c) => (Bound::Value(self.comparand(c, pos)?), 0),
+            };
+            bound.push(b);
+            lengths.push(length);
         }
         self.unit.enter(pos)?;
         let mark = self.unit.mem.len();
         let read_before = self.unit.pending();
-        let ran = callee::run(self, &Callee { index, by: By::Function, mark: Some(mark), pos }, |caller| {
+        let ran = callee::run(self, &Callee { index, by: By::Function, mark: Some(mark), pos, lengths: &lengths }, |caller| {
             let outcome = caller.function_activation(lowered, definition, index, &bound, pos);
             caller.unit.resume_statement(read_before);
             match outcome.map_err(Stop::halt) {

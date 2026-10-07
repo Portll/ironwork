@@ -303,6 +303,9 @@ pub struct DataEntry {
     pub external: bool,
     /// GLOBAL, written on the entry or attained from its FD.
     pub global: bool,
+    /// ANY LENGTH, GnuCOBOL's and Micro Focus's parameter as long as its argument, read under
+    /// `--compliance extended`.
+    pub any_length: bool,
     pub pos: Pos,
 }
 

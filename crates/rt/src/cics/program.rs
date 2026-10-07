@@ -174,7 +174,7 @@ fn enter<'w, P: Copy, O, S, X: CicsHost<'w, P, O, S>>(x: &mut X, program: Option
     let below = u32::from(!xctl);
     task(x).links += below;
     x.unit().begin_cics_run_unit();
-    let callee = Callee { index, by: By::Link, mark: None, pos };
+    let callee = Callee { index, by: By::Link, mark: None, pos, lengths: &[] };
     let ran = callee::run(x, &callee, |x| {
         x.unit().enter(pos)?;
         let ending = x.run_program(program, index, area, xctl);

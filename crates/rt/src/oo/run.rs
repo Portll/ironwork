@@ -519,7 +519,7 @@ fn run_method<'w, P: Copy, O, S, X: OoHost<'w, P, O, S>>(x: &mut X, plan: &Invok
     };
     let running = Running { class, factory: method.factory, this, cell, frame, invoked };
     let call = MethodCall { code: method.code.clone(), storage, records, arguments: addresses, running };
-    let callee = Callee { index: storage, by: By::Invoke, mark: Some(mark), pos };
+    let callee = Callee { index: storage, by: By::Invoke, mark: Some(mark), pos, lengths: &[] };
     let (ending, returned) = callee::run(x, &callee, |x| x.run_method(call, pos).map(|r| (r.ending, r.value)))?;
     let unit = x.unit();
     let ending = ending.map_err(|mut abend| {

@@ -1195,3 +1195,101 @@ fn omitted_is_refused_under_strict_and_warned_under_extended() {
     let refused = syntax::parse(called).unwrap_err();
     assert_eq!((refused.pos.line, refused.pos.col, refused.id), (8, 18, Some("IWC0307")), "{refused}");
 }
+
+/// ANY LENGTH passed items of three lengths and a BY CONTENT literal.
+const ANY_LENGTH_CALLS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. ANYMAIN.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  SHORT-ONE PIC X(3) VALUE 'ABC'.\n",
+    "       01  LONG-ONE  PIC X(10) VALUE 'ABCDEFGHIJ'.\n",
+    "       01  GROUPED.\n",
+    "           05 G1 PIC X(2) VALUE 'GG'.\n",
+    "           05 G2 PIC 9(3) VALUE 123.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           CALL 'ANYSUB' USING SHORT-ONE\n",
+    "           CALL 'ANYSUB' USING LONG-ONE\n",
+    "           CALL 'ANYSUB' USING GROUPED\n",
+    "           CALL 'ANYSUB' USING BY CONTENT 'LITERAL'\n",
+    "           DISPLAY 'AFTER ' SHORT-ONE '|' LONG-ONE '|' GROUPED\n",
+    "           STOP RUN.\n",
+    "       END PROGRAM ANYMAIN.\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. ANYSUB.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  N PIC 9(4).\n",
+    "       LINKAGE SECTION.\n",
+    "       01  L PIC X ANY LENGTH.\n",
+    "       PROCEDURE DIVISION USING L.\n",
+    "           MOVE FUNCTION LENGTH(L) TO N\n",
+    "           DISPLAY 'LEN ' N ' [' L '] ' L(2:1)\n",
+    "           IF L = 'ABC'\n",
+    "               DISPLAY 'EQUALS ABC'\n",
+    "           END-IF\n",
+    "           MOVE 'XY' TO L\n",
+    "           DISPLAY 'MOVED [' L ']'\n",
+    "           GOBACK.\n",
+    "       END PROGRAM ANYSUB.\n",
+);
+
+/// A function's ANY LENGTH parameter passed items and a reference-modified item.
+const ANY_LENGTH_FUNCTION: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       FUNCTION-ID. FIRSTCH.\n",
+    "       DATA DIVISION.\n",
+    "       LINKAGE SECTION.\n",
+    "       01  S PIC X ANY LENGTH.\n",
+    "       01  R PIC X(12).\n",
+    "       PROCEDURE DIVISION USING S RETURNING R.\n",
+    "           MOVE FUNCTION LENGTH(S) TO R\n",
+    "           MOVE S(1:1) TO R(12:1)\n",
+    "           GOBACK.\n",
+    "       END FUNCTION FIRSTCH.\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. FMAIN.\n",
+    "       ENVIRONMENT DIVISION.\n",
+    "       CONFIGURATION SECTION.\n",
+    "       REPOSITORY.\n",
+    "           FUNCTION FIRSTCH.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  W5 PIC X(5) VALUE 'HELLO'.\n",
+    "       01  W9 PIC X(9) VALUE 'WORLDWIDE'.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY '[' FUNCTION FIRSTCH(W5) ']'\n",
+    "           DISPLAY '[' FUNCTION FIRSTCH(W9) ']'\n",
+    "           DISPLAY '[' FUNCTION FIRSTCH(W9(3:4)) ']'\n",
+    "           STOP RUN.\n",
+    "       END PROGRAM FMAIN.\n",
+);
+
+#[test]
+fn any_length_takes_each_arguments_length_alike_on_both_executors() {
+    // cobc 3.2's output.
+    for (source, expected) in [(ANY_LENGTH_CALLS, "LEN 0003 [ABC] B\nEQUALS ABC\nMOVED [XY ]\nLEN 0010 [ABCDEFGHIJ] B\nMOVED [XY        ]\nLEN 0005 [GG123] G\nMOVED [XY   ]\nLEN 0007 [LITERAL] I\nMOVED [XY     ]\nAFTER XY |XY        |XY   \n"), (ANY_LENGTH_FUNCTION, "[000000005  H]\n[000000009  W]\n[000000004  R]\n")] {
+        let walked = Harness::source(source).flags(EXTENDED).run(Executor::Interpreter);
+        assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{}", walked.err);
+        let vm = Harness::source(source).flags(EXTENDED).run(Executor::Vm);
+        assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    }
+}
+
+#[test]
+fn any_length_is_refused_under_strict_and_where_ironwork_does_not_read_it() {
+    let called = &ANY_LENGTH_CALLS[ANY_LENGTH_CALLS.find("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. ANYSUB").unwrap()..];
+    assert_eq!(diagnostics_under(called, numeric::Compliance::Extended), [(7, 8, Some("IWX0035"), Severity::Warning), (9, 17, Some("IWX0008"), Severity::Warning)]);
+    let refused = syntax::parse(called).unwrap_err();
+    assert_eq!((refused.pos.line, refused.pos.col, refused.id), (7, 20, Some("IWC0308")), "{refused}");
+    let returned = called.replace("USING L.", "USING L RETURNING L.");
+    assert_eq!(diagnostics_under(&returned, numeric::Compliance::Extended).first().map(|d| (d.0, d.2)), Some((7, Some("IWR0076"))));
+    let numeric = called.replace("PIC X ANY LENGTH", "PIC 9 ANY LENGTH");
+    assert_eq!(diagnostics_under(&numeric, numeric::Compliance::Extended).first().map(|d| (d.0, d.2)), Some((7, Some("IWR0076"))));
+    let literal = ANY_LENGTH_FUNCTION.replace("FIRSTCH(W5)", "FIRSTCH('LIT')");
+    let libraries = syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended);
+    let main = syntax::parse_all_with(&literal, &libraries).unwrap().into_iter().find(|p| p.id == "FMAIN").unwrap();
+    let flags: Vec<String> = EXTENDED.iter().map(|f| f.to_string()).collect();
+    let Err(refused) = compile(main, &flags) else { panic!("the literal argument compiled") };
+    assert_eq!(refused.iter().map(|e| (e.pos.line, e.id)).collect::<Vec<_>>(), [(23, Some("IWR0076"))]);
+}

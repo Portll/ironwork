@@ -328,6 +328,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0305 | S | `FUNCTION MODULE-CALLER-ID: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0306 | S | `{STOP RUN or GOBACK} {RETURNING or GIVING}: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's, where a MOVE to RETURN-CODE comes first; --compliance extended reads it` |
 | IWC0307 | S | `{name} [NOT] OMITTED: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's, which writes ADDRESS OF {name} = NULL; --compliance extended reads it` |
+| IWC0308 | S | `ANY LENGTH: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
 | IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |
@@ -694,6 +695,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWR0056 | S | `a {category} PICTURE with USAGE {usage} is not supported yet` |
 | IWR0057 | S | `{a SCREEN SECTION form ironwork does not run} is not supported yet` |
 | IWR0075 | S | `FUNCTION {name}: a user-defined function is not supported here yet` |
+| IWR0076 | S | `ANY LENGTH on {name}: ironwork reads it on an alphanumeric 01 or 77 parameter, and {why}` |
 | IWS0001 | S | `{what the syntax takes there}, found {the word or token there}` |
 | IWS0002 | S | `{COPY or a translator's INCLUDE} {name}: no such member in the copy libraries` |
 | IWS0003 | S | `COPY: {message}` |
@@ -829,6 +831,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0032 | W | `a level-66 entry before the end of its record (GnuCOBOL's IBM and Micro Focus dialects; Enterprise COBOL writes a record's RENAMES entries after its last entry): {name} is read as following {record}'s last entry` |
 | IWX0033 | W | `{STOP RUN or GOBACK} {RETURNING or GIVING} (GnuCOBOL and Micro Focus; Enterprise COBOL moves the value to RETURN-CODE first): the value is moved to RETURN-CODE, then {STOP RUN or GOBACK} ends the program` |
 | IWX0034 | W | `{name} [NOT] OMITTED (GnuCOBOL and Micro Focus; Enterprise COBOL writes ADDRESS OF {name} = NULL): it is read as ADDRESS OF {name} = NULL, true when the caller passed OMITTED or no argument there` |
+| IWX0035 | W | `ANY LENGTH (GnuCOBOL and Micro Focus; Enterprise COBOL's parameters have the length their entries give): {name} is as long as the argument each CALL passes for it` |
 
 ## Run-time refusals
 

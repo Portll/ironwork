@@ -58,6 +58,10 @@ impl<'p> Evaluator for Call<'_, 'p, '_, '_, '_> {
         let unit = &self.machine.unit;
         unit.caller_of(self.machine.me).map(|p| unit.programs[p].name.clone())
     }
+
+    fn argument_length(&mut self, position: usize) -> usize {
+        self.machine.unit.argument_length_of(self.machine.me, position)
+    }
 }
 
 impl<'p> Machine<'p, '_, '_> {

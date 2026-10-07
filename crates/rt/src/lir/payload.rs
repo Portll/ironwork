@@ -354,6 +354,7 @@ functions! {
     CombinedDatetime = 80, "COMBINED-DATETIME", 2..=2;
     ContentOf = 81, "CONTENT-OF", 1..=1;
     ModuleCallerId = 82, "MODULE-CALLER-ID", 0..=0;
+    ArgumentLength = 83, "ARGUMENT LENGTH", 1..=1;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

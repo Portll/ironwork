@@ -1495,6 +1495,7 @@ impl Parser<'_> {
             object_class: None,
             external: false,
             global: false,
+            any_length: false,
             pos,
         };
         if let Some(w) = self.word()
@@ -1615,6 +1616,14 @@ impl Parser<'_> {
                 }
                 "EXTERNAL" => e.external = true,
                 "GLOBAL" => e.global = true,
+                "ANY" if self.is_word("LENGTH") => {
+                    let at = self.tokens[self.at - 1].pos;
+                    self.at += 1;
+                    if !self.extended {
+                        return Err(crate::messages::IWC0308.at(at, "ANY LENGTH: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it"));
+                    }
+                    e.any_length = true;
+                }
                 "IS" if matches!(self.word(), Some("EXTERNAL" | "GLOBAL")) => {}
                 other => match usage_word(other) {
                     Some(u) => e.usage = Some(self.signedness(u)),

@@ -1112,13 +1112,13 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     fn call_nested(&mut self, c: &'p Call, index: usize, entry: Option<usize>, compiled: &Compiled, dynamic: bool) -> R<Option<Flow>> {
         let pos = c.pos;
         let mark = self.unit.mem.len();
-        let addresses = callee::addresses(self, &call_args(&c.using), pos)?;
+        let (addresses, lengths) = callee::arguments(self, &call_args(&c.using), pos)?;
         self.parmcheck_set();
         // A dynamic CALL suspends the caller's handlers, as CBLPSHPOP(ON) does (C234).
         let suspends = dynamic && compiled.program.containers.is_empty();
         let containers = self.containers_of(&compiled.program);
         let by = By::Call { initial: compiled.program.initial };
-        let (ending, returned) = callee::run(self, &Callee { index, by, mark: Some(mark), pos }, |m| {
+        let (ending, returned) = callee::run(self, &Callee { index, by, mark: Some(mark), pos, lengths: &lengths }, |m| {
             let mut callee = Machine::activation_within(compiled, index, &mut *m.unit, false, containers)?;
             let entry = entry.and_then(|k| compiled.entries.get(k));
             callee.bind_linkage(&[], entry.map_or(&compiled.program.using, |e| &e.using), &addresses, true);

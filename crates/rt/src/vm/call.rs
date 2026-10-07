@@ -107,13 +107,14 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let mark = self.unit.mem.len();
         let mut addresses = std::mem::take(&mut self.spare.addresses);
         addresses.clear();
-        let filled = callee::addresses_into(self, &plan.args, pos, &mut addresses);
+        let mut lengths = Vec::with_capacity(plan.args.len());
+        let filled = callee::addresses_into(self, &plan.args, pos, &mut addresses, &mut lengths);
         self.settle(filled)?;
         self.parmcheck_set();
         let program = &lowered.program;
         let containers = self.containers_of(program);
         let by = By::Call { initial: program.initial };
-        let (ending, returned) = callee::run(self, &Callee { index, by, mark: Some(mark), pos }, |caller| {
+        let (ending, returned) = callee::run(self, &Callee { index, by, mark: Some(mark), pos, lengths: &lengths }, |caller| {
             let spare = &mut caller.spare;
             let tables = Spare { linkage: std::mem::take(&mut spare.linkage), armed: std::mem::take(&mut spare.armed), frames: std::mem::take(&mut spare.frames), ..Spare::default() };
             // Built where it runs and initialized there: returning the activation would copy it.

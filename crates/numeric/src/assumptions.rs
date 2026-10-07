@@ -380,6 +380,7 @@ pub const COMP_X: &str = "C467";
 pub const PIC_X_COMP_5: &str = "C468";
 pub const GNUCOBOL_FLOATS: &str = "C469";
 pub const RETURNING_ON_STOP: &str = "C480";
+pub const ANY_LENGTH: &str = "C481";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2685,6 +2686,13 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[O(Extended), S(Move)]],
+    },
+    Assumption {
+        id: ANY_LENGTH,
+        claim: "Under --compliance extended, an alphanumeric 01 or 77 parameter written ANY LENGTH, GnuCOBOL's and Micro Focus's, is as long as the argument the CALL or the function reference passes in its USING position: a data item's length, or the bytes BY CONTENT or BY VALUE gives, as cobc 3.2 gives it, and 0 for one omitted or not passed. It is read as a group holding that many single characters, an OCCURS DEPENDING ON table whose count is set as the procedure starts, so it moves, compares, displays and is reference-modified as an alphanumeric group of its argument's length, and FUNCTION LENGTH gives that length. An ENTRY statement naming one, a RETURNING item written ANY LENGTH, any other ANY LENGTH entry and a function argument that is not a data item are refused. Enterprise COBOL's parameters have the length their entries give",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), S(Call)], &[O(Extended), S(UserFunction)]],
     },
     Assumption {
         id: COMMAND_LINE_FROM_PARM,

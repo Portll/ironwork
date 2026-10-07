@@ -34,6 +34,8 @@ pub struct Formal {
     /// An edited item's PICTURE symbols and the currency string its currency symbol stands for.
     pub edit: Option<(Vec<Sym>, String)>,
     pub decimal_point_comma: bool,
+    /// ANY LENGTH under `--compliance extended`: as long as its argument, which is a data item.
+    pub any_length: bool,
 }
 
 impl Udf {
@@ -63,6 +65,7 @@ pub fn signature(p: &Prototype, qualify: Qualify) -> Result<Udf, Error> {
             alphabetic: alphabetic.contains(&item.pos),
             edit,
             decimal_point_comma: p.environment.decimal_point_comma,
+            any_length: p.linkage.iter().any(|e| e.any_length && e.name.as_deref() == Some(name)),
         })
     };
     let returning = p.returning.as_deref().ok_or_else(|| syntax::messages::IWC0017.at(p.pos, format!("FUNCTION-ID {}: a user-defined function needs PROCEDURE DIVISION RETURNING", p.name)))?;
@@ -135,7 +138,7 @@ fn disagreement(a: &Udf, b: &Udf) -> Option<String> {
     if a.params.len() != b.params.len() {
         return Some(format!("{} parameters differ in number", a.params.len()));
     }
-    let same = |x: &Formal, y: &Formal| (x.by_value, x.kind, x.size, x.scaling, x.alphabetic, &x.edit) == (y.by_value, y.kind, y.size, y.scaling, y.alphabetic, &y.edit);
+    let same = |x: &Formal, y: &Formal| (x.by_value, x.kind, x.size, x.scaling, x.alphabetic, &x.edit, x.any_length) == (y.by_value, y.kind, y.size, y.scaling, y.alphabetic, &y.edit, y.any_length);
     if let Some(k) = (0..a.params.len()).find(|&k| !same(&a.params[k], &b.params[k])) {
         return Some(format!("parameter {} ({}) differs", k + 1, a.params[k].name));
     }
@@ -146,6 +149,9 @@ fn disagreement(a: &Udf, b: &Udf) -> Option<String> {
 /// expression has no description to conform: it is moved or computed into a temporary of the
 /// formal parameter's (assumption C272).
 pub fn conformance(layout: &Layout, item: usize, alphabetic: bool, decimal_point_comma: bool, formal: &Formal) -> Option<String> {
+    if formal.any_length {
+        return None;
+    }
     let it = &layout.items[item];
     if formal.by_value {
         if it.kind == Kind::Group {
@@ -196,6 +202,11 @@ pub fn check_invocation(udf: &Udf, f: &FunctionCall, layout: &Layout, alphabetic
                 continue;
             }
             Expr::Operand(Operand::Ref(r)) if r.refmod.is_none() => r,
+            Expr::Operand(Operand::Ref(_)) => continue,
+            _ if formal.any_length => {
+                errors.push(syntax::messages::IWR0076.at(f.pos, format!("ANY LENGTH on {}: ironwork reads it on an alphanumeric 01 or 77 parameter, and FUNCTION {name} argument {} is not a data item, whose length it would take", formal.name, k + 1)));
+                continue;
+            }
             _ => continue,
         };
         if let Ok(Resolved::Item(i)) = layout.resolve(&r.name, &r.qualifiers, r.pos)
