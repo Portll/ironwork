@@ -361,7 +361,6 @@ catalogue! {
     IWC0312 Severe "FUNCTION STORED-CHAR-LENGTH: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0313 Severe "DELETE FILE: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0314 Severe "PROGRAM-POINTER: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it as PROCEDURE-POINTER";
-    IWC0315 Severe "PROCEDURE DIVISION after a data description entry with no period: GnuCOBOL's and Micro Focus's reading, not Enterprise COBOL's; --compliance extended reads it";
     IWC0316 Severe "BASED: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0317 Severe "FREE {name}: GnuCOBOL's FREE of a record, not Enterprise COBOL's, which frees through a pointer; --compliance extended reads it";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
@@ -834,6 +833,7 @@ catalogue! {
     IWS0101 Severe "{FLOAT-SHORT or FLOAT-LONG}: GnuCOBOL's and Micro Focus's floating point, not Enterprise COBOL's; --compliance extended reads it as {COMP-1 or COMP-2}";
     IWS0102 Severe "the Communication feature ({a COMMUNICATION SECTION item or statement}) is not part of Enterprise COBOL, which does not compile it";
     IWS0104 Error "{terminator}: an explicit scope terminator with no verb open for it; it was discarded";
+    IWS0105 Error "a period was required before {word}: one was assumed";
     IWX0001 Warning "free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}";
     IWX0002 Warning "constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry";
     IWX0003 Warning "<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =";
@@ -878,7 +878,6 @@ catalogue! {
     IWX0042 Warning "FUNCTION STORED-CHAR-LENGTH (GnuCOBOL; Enterprise COBOL has no such function): the argument's length in characters without its trailing spaces";
     IWX0043 Warning "DELETE FILE (Micro Focus and GnuCOBOL; Enterprise COBOL has no such statement): each closed file's data set is removed";
     IWX0044 Warning "PROGRAM-POINTER (GnuCOBOL and Micro Focus; Enterprise COBOL writes PROCEDURE-POINTER): it is read as PROCEDURE-POINTER, set by SET ... TO ENTRY and called by CALL";
-    IWX0045 Warning "a data description entry with no period before PROCEDURE DIVISION (GnuCOBOL and Micro Focus; Enterprise COBOL ends each entry with one): the entry ends there";
     IWX0046 Warning "BASED (GnuCOBOL and Micro Focus; Enterprise COBOL describes such an item in the LINKAGE SECTION): {name} has no storage until SET ADDRESS OF gives it some";
     IWX0047 Warning "FREE {name} (GnuCOBOL; Enterprise COBOL frees through a pointer): the storage ADDRESS OF {name} names is released, and the record has none";
 }

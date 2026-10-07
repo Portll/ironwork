@@ -1689,11 +1689,14 @@ fn program_pointers_missing_periods_and_based_items_run_alike_on_both_executors(
 fn program_pointers_missing_periods_and_based_items_are_warned_under_extended_and_refused_under_strict() {
     let warned = |source: &str, id: &str| diagnostics_under(source, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some(id)).map(|d| d.0).collect::<Vec<_>>();
     assert_eq!(warned(PROGRAM_POINTERS, "IWX0044"), [5, 6]);
-    assert_eq!(warned(NO_PERIOD, "IWX0045"), [7]);
     assert_eq!(warned(BASED_ITEMS, "IWX0046"), [5, 8]);
-    for (source, line, id) in [(PROGRAM_POINTERS, 5, "IWC0314"), (NO_PERIOD, 7, "IWC0315"), (BASED_ITEMS, 5, "IWC0316")] {
+    for (source, line, id) in [(PROGRAM_POINTERS, 5, "IWC0314"), (BASED_ITEMS, 5, "IWC0316")] {
         let refused = syntax::parse(source).unwrap_err();
         assert_eq!((refused.pos.line, refused.id), (line, Some(id)), "{refused}");
+    }
+    for compliance in [numeric::Compliance::Strict, numeric::Compliance::Extended] {
+        let assumed: Vec<_> = diagnostics_under(NO_PERIOD, compliance).into_iter().filter(|d| d.2 == Some("IWS0105")).map(|d| (d.0, d.3)).collect();
+        assert_eq!(assumed, [(7, Severity::Error)], "{compliance:?}");
     }
     let nested = BASED_ITEMS.replace("05 R-A PIC X(3).", "05 R-A PIC X(3) BASED.");
     assert!(diagnostics_under(&nested, numeric::Compliance::Extended).iter().any(|d| (d.0, d.2) == (6, Some("IWR0077"))));

@@ -1561,12 +1561,10 @@ impl Parser<'_> {
         }
         let mut floating = None;
         while !self.accept(&Tok::Period) {
+            // Enterprise COBOL assumes the period at E (IGYDS1082-E) and compiles on.
             if self.is_word("PROCEDURE") && self.word_at(1) == Some("DIVISION") {
                 let at = self.pos();
-                if !self.extended {
-                    return Err(crate::messages::IWC0315.at(at, "PROCEDURE DIVISION after a data description entry with no period: GnuCOBOL's and Micro Focus's reading, not Enterprise COBOL's; --compliance extended reads it"));
-                }
-                self.messages.push(crate::messages::IWX0045.at(at, "a data description entry with no period before PROCEDURE DIVISION (GnuCOBOL and Micro Focus; Enterprise COBOL ends each entry with one): the entry ends there"));
+                self.messages.push(crate::messages::IWS0105.at(at, "a period was required before PROCEDURE DIVISION: one was assumed"));
                 break;
             }
             let clause = self.name("a data description clause or a period")?;

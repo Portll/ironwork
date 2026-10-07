@@ -886,14 +886,6 @@ The item is Enterprise COBOL's PROCEDURE-POINTER: SET ... TO ENTRY sets it, CALL
 it holds, and it compares and moves as one, as cobc 3.2 gives the results. CobolCraft keeps its
 callbacks in such items. Assumption C486. Strict refuses it (IWC0314).
 
-### IWX0045-W A data description entry with no period before PROCEDURE DIVISION
-
-`IWX0045-W a data description entry with no period before PROCEDURE DIVISION (GnuCOBOL and Micro
-Focus; Enterprise COBOL ends each entry with one): the entry ends there`, at PROCEDURE.
-
-cobc 3.2 calls the period "optional" there and reads on. Assumption C486. Strict refuses it
-(IWC0315).
-
 ### IWX0046-W BASED
 
 `IWX0046-W BASED (GnuCOBOL and Micro Focus; Enterprise COBOL describes such an item in the LINKAGE

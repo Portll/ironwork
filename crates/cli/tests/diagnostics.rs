@@ -272,3 +272,13 @@ fn a_scope_terminator_no_verb_is_open_for_is_return_code_8() {
     let out = ironwork(&["check", source.path()]);
     assert_eq!((out.status.code(), stderr(&out)), (Some(8), format!("{}:8:12: IWS0104-E END-IF: an explicit scope terminator with no verb open for it; it was discarded\n", source.path())));
 }
+
+#[test]
+fn a_missing_period_before_procedure_division_is_assumed_at_return_code_8() {
+    let source = Source::new(
+        "period",
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  A PIC 9 VALUE 1\n       PROCEDURE DIVISION.\n           GOBACK.\n",
+    );
+    let out = ironwork(&["check", source.path()]);
+    assert_eq!((out.status.code(), stderr(&out)), (Some(8), format!("{}:6:8: IWS0105-E a period was required before PROCEDURE DIVISION: one was assumed\n", source.path())));
+}

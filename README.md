@@ -327,7 +327,8 @@ messages', 0 when there is none (Enterprise COBOL Programming Guide SC27-8714-03
 
 Every refusal ironwork makes is S (assumption C45). An explicit scope terminator no verb is open
 for, END-IF after a period for one, is discarded at E (IWS0104), as Enterprise COBOL discards it
-with IGYPS2113-E. Every message a compile gives opens with its id
+with IGYPS2113-E, and a data description entry with no period before PROCEDURE DIVISION gets one
+at E (IWS0105), as IGYDS1082-E assumes it. Every message a compile gives opens with its id
 from ironwork's catalogue: `IW`, the area's letter, four digits and the severity it was given, as
 `IWR0001-S` refuses XML PARSE VALIDATING. IWS is syntax, IWC Enterprise COBOL's compile rules, IWO
 options, IWP EXEC blocks, BMS and CSD, IWR an Enterprise COBOL construct ironwork does not run yet,
@@ -377,9 +378,7 @@ FUNCTION MODULE-CALLER-ID (IWX0031-W), STOP RUN or GOBACK RETURNING (IWX0033-W),
 condition (IWX0034-W), ANY LENGTH parameters (IWX0035-W), START KEY < and NOT > (IWX0036-W), an
 FD with no FILE SECTION header (IWX0037-W), PERFORM UNTIL EXIT (IWX0038-W), ASSIGN TO DISK
 (IWX0039-W), split keys (IWX0040-W), periods after a period (IWX0041-W), FUNCTION
-STORED-CHAR-LENGTH (IWX0042-W), DELETE FILE (IWX0043-W), PROGRAM-POINTER (IWX0044-W), an entry with
-no period before PROCEDURE DIVISION (IWX0045-W), BASED (IWX0046-W) and FREE of a record
-(IWX0047-W).
+STORED-CHAR-LENGTH (IWX0042-W), DELETE FILE (IWX0043-W), PROGRAM-POINTER (IWX0044-W), BASED (IWX0046-W) and FREE of a record (IWX0047-W).
 [docs/compliance.md](docs/compliance.md) gives each one's meaning, the census that chose them, and
 what stays refused and why.
 
