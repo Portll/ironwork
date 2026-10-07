@@ -850,6 +850,7 @@ catalogue! {
     IWX0029 Warning "ACCEPT ... FROM {LINES, COLUMNS or COLS} (GnuCOBOL; Enterprise COBOL has no screen): the screen's {24 lines or 80 columns}";
     IWX0030 Warning "WRITE ... BEFORE ADVANCING on the line-sequential file {file} (GnuCOBOL and Micro Focus; Enterprise COBOL allows only AFTER there): the line, then the lines or page it names";
     IWX0031 Warning "FUNCTION MODULE-CALLER-ID (GnuCOBOL; Enterprise COBOL has no such function): the PROGRAM-ID of the program that called this one, empty in the main program";
+    IWX0032 Warning "a level-66 entry before the end of its record (GnuCOBOL's IBM and Micro Focus dialects; Enterprise COBOL writes a record's RENAMES entries after its last entry): {name} is read as following {record}'s last entry";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

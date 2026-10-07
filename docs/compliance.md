@@ -721,6 +721,25 @@ program whose CALL, user-defined function reference or INVOKE entered the latest
 running one. ACAS compares it with "ACAS" to learn whether its menu program called it. Strict
 refuses it (IWC0305).
 
+### IWX0032-W A level-66 entry inside its record
+
+`IWX0032-W a level-66 entry before the end of its record (GnuCOBOL's IBM and Micro Focus dialects;
+Enterprise COBOL writes a record's RENAMES entries after its last entry): DW-BP-YYMM is read as
+following DW's last entry`, at the level-66 entry.
+
+Enterprise COBOL's RENAMES entries for a record "must immediately follow the last data description
+entry of that record" (Language Reference, RENAMES clause). No IBM listing of the message its
+compiler gives for one inside the record has been found, in IBM's Messages and Codes (SC27-4648-02
+lists no IGYDS texts) or in the corpus's listings, so strict keeps the layout's refusal, IWC0035-S.
+cobc 3.2 takes it with a warning under `-std=ibm`, `ibm-strict` and `mf`, and refuses it under
+`-std=default`. Under extended a run of level-66 entries followed by an entry of levels 02 to 49 is
+read as following the record's last entry: the entries after it continue the record, and each
+RENAMES covers what it names, as cobc lays it out. One followed by a level-88 entry stays refused
+(IWC0028). Assumption C471.
+
+In the 500-repository corpus it is the first refusal of 137 of the 194 batch programs of
+Pavansai0522_CABS-MAINFRAME-DEMO-TIER5, through one shared copybook.
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

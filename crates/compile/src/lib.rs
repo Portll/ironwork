@@ -189,6 +189,10 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         let inserted = top_level_tables(&mut program.working_storage, &mut errors);
         declared += inserted.iter().filter(|&&at| at < declared).count();
         top_level_tables(&mut program.local_storage, &mut errors);
+        let Program { working_storage, local_storage, linkage, files, .. } = &mut program;
+        for entries in [working_storage, local_storage, linkage].into_iter().chain(files.iter_mut().map(|f| &mut f.records)) {
+            renames_inside_records(entries, &mut errors);
+        }
     }
     screens::expand(&mut program, options.compliance == numeric::Compliance::Extended, &mut errors);
     let page = options.code_page();
@@ -851,6 +855,35 @@ fn top_level_tables(entries: &mut Vec<DataEntry>, errors: &mut Vec<Error>) -> Ve
         at = end + 1;
     }
     inserted
+}
+
+/// Level-66 entries followed by an entry of levels 02 to 49 of the same record, which cobc 3.2
+/// takes under its IBM and Micro Focus dialects, moved under `--compliance extended` to follow the
+/// record's last entry, with IWX0032-W. A RENAMES names what it renames, so where it stands changes
+/// no storage. One followed by a level-88 entry is left for the layout to refuse (IWC0028).
+/// Assumption C471.
+fn renames_inside_records(entries: &mut [DataEntry], errors: &mut Vec<Error>) {
+    let mut at = 0;
+    while at < entries.len() {
+        if entries[at].level != 66 {
+            at += 1;
+            continue;
+        }
+        let run = entries[at..].iter().take_while(|e| e.level == 66).count();
+        let next = at + run;
+        if !entries.get(next).is_some_and(|e| (2..=49).contains(&e.level)) {
+            at = next;
+            continue;
+        }
+        let record = entries[..at].iter().rev().find(|e| e.level == 1).and_then(|e| e.name.clone()).unwrap_or_else(|| "FILLER".into());
+        let end = next + entries[next..].iter().take_while(|e| !matches!(e.level, 1 | 66 | 77)).count();
+        for e in &entries[at..next] {
+            let name = e.name.as_deref().unwrap_or("FILLER");
+            errors.push(syntax::messages::IWX0032.at(e.pos, format!("a level-66 entry before the end of its record (GnuCOBOL's IBM and Micro Focus dialects; Enterprise COBOL writes a record's RENAMES entries after its last entry): {name} is read as following {record}'s last entry")));
+        }
+        entries[at..end].rotate_left(run);
+        at = end - run;
+    }
 }
 
 /// A paragraph or section named FOREVER where PERFORM FOREVER is read as the endless loop

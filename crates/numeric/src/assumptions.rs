@@ -370,6 +370,7 @@ pub const STORAGE_NOT_OWNED: &str = "C458";
 pub const OUT_OF_SCOPE_CALL_NOT_FOUND: &str = "C470";
 pub const BINARY_CHAR: &str = "C460";
 pub const TOP_LEVEL_TABLE: &str = "C461";
+pub const RENAMES_INSIDE_A_RECORD: &str = "C471";
 pub const SCREEN_MODEL: &str = "C462";
 pub const SCREEN_SECTION_LAYOUT: &str = "C463";
 pub const ENVIRONMENT_VARIABLES: &str = "C464";
@@ -2638,6 +2639,13 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     Assumption {
         id: TOP_LEVEL_TABLE,
         claim: "Under --compliance extended, an entry of level 01 or 77 in WORKING-STORAGE or LOCAL-STORAGE with OCCURS, which Micro Focus and GnuCOBOL take, is a table in a record of its own, its occurrences one after another as a table at level 02 would be, and each occurrence starts where the one before it ends, as cobc 3.2 lays it out. A reference to it takes a subscript, as any table's does. An entry with REDEFINES, EXTERNAL or GLOBAL, one in the LINKAGE SECTION or a file's records, and one with a level-49 entry under it stay refused as Enterprise COBOL refuses them, OCCURS being taken only at levels 02 to 49",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended)]],
+    },
+    Assumption {
+        id: RENAMES_INSIDE_A_RECORD,
+        claim: "Under --compliance extended, level-66 entries followed by an entry of levels 02 to 49 of the same record, which cobc 3.2 takes with a warning under -std=ibm, ibm-strict and mf and refuses under -std=default, are read as following the record's last entry: the entry after them continues the record, and each RENAMES covers what it names, as cobc 3.2 lays it out. Enterprise COBOL's Language Reference has a record's RENAMES entries immediately follow its last entry; no IBM listing of the compiler's message for one inside it has been found, and strict refuses it (IWC0035). One followed by a level-88 entry stays refused (IWC0028)",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[O(Extended)]],

@@ -459,6 +459,43 @@ fn a_table_at_level_01_or_77_is_a_record_of_its_own_alike_on_both_executors() {
     assert_eq!(diagnostics_under(TOP_LEVEL_TABLES, numeric::Compliance::Strict), [(6, 8, Some("IWC0027"), Severity::Severe)]);
 }
 
+/// A level-66 entry inside its record, the entries after it continuing the record, and one
+/// after the next record's last entry.
+const RENAMES_INSIDE: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. REN66.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  DW.\n",
+    "           05  DW-BP.\n",
+    "               10  DW-BP-YY    PIC 9(02) VALUE 24.\n",
+    "               10  DW-BP-MM    PIC 9(02) VALUE 10.\n",
+    "               10  DW-BP-CYCLE PIC 9(02) VALUE 7.\n",
+    "           66  DW-BP-YYMM RENAMES DW-BP-YY THRU DW-BP-MM.\n",
+    "           05  DW-LEAP-SW      PIC X(01) VALUE 'Y'.\n",
+    "               88  DW-IS-LEAP  VALUE 'Y'.\n",
+    "           05  DW-TAIL         PIC X(02) VALUE 'ZZ'.\n",
+    "       01  K.\n",
+    "           05  K-A PIC X VALUE 'A'.\n",
+    "           05  K-B PIC X VALUE 'B'.\n",
+    "           66  K-AB RENAMES K-A THRU K-B.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY DW-BP-YYMM '|' DW-LEAP-SW '|' LENGTH OF DW '|' DW\n",
+    "           MOVE '9912' TO DW-BP-YYMM\n",
+    "           IF DW-IS-LEAP DISPLAY DW '|' K-AB END-IF\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn a_level_66_entry_inside_its_record_is_read_after_the_record_alike_on_both_executors() {
+    let walked = Harness::source(RENAMES_INSIDE).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("2410|Y|000000009|241007YZZ\n991207YZZ|AB\n", Some(&Ending::Goback)), "{}", walked.err);
+    let vm = Harness::source(RENAMES_INSIDE).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    assert_eq!(diagnostics_under(RENAMES_INSIDE, numeric::Compliance::Extended), [(10, 12, Some("IWX0032"), Severity::Warning)]);
+    assert_eq!(diagnostics_under(RENAMES_INSIDE, numeric::Compliance::Strict), [(11, 12, Some("IWC0035"), Severity::Severe)]);
+}
+
 /// Positioned DISPLAYs and ACCEPTs on the screen: AT a number and an item, LINE and COL, ERASE,
 /// UPDATE and SECURE fields, and a function key ON EXCEPTION.
 const SCREEN: &str = concat!(
