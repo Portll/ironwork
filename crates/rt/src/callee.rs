@@ -211,10 +211,13 @@ pub fn run<'w, X: UnitHost<'w>, O, T, E: From<Abend>>(x: &mut X, callee: &Callee
     let index = callee.index;
     let active = x.unit().programs[index].active;
     x.unit().calls.push(index);
-    x.unit().argument_lengths.push(callee.lengths.to_vec());
+    let start = x.unit().argument_lengths.len();
+    x.unit().argument_starts.push(start);
+    x.unit().argument_lengths.extend_from_slice(callee.lengths);
     let ran = run(x);
     x.unit().calls.pop();
-    x.unit().argument_lengths.pop();
+    x.unit().argument_starts.pop();
+    x.unit().argument_lengths.truncate(start);
     let (ending, value) = ran?;
     let unit = x.unit();
     unit.programs[index].active = active;

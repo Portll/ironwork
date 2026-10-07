@@ -303,8 +303,10 @@ pub struct RunUnit<'w, H, L: Loader<H>> {
     pub main: Option<usize>,
     /// The programs CALLs, functions and INVOKEs in progress entered, outermost first.
     pub calls: Vec<usize>,
-    /// The length of each argument the entry in `calls` was passed, 0 for one omitted.
-    pub argument_lengths: Vec<Vec<usize>>,
+    /// The length of each argument the entries in `calls` were passed, 0 for one omitted, each
+    /// entry's from its start in `argument_starts`.
+    pub argument_lengths: Vec<usize>,
+    pub argument_starts: Vec<usize>,
     /// The job step's program arguments, which ACCEPT ... FROM COMMAND-LINE and ARGUMENT-VALUE read
     /// under `--compliance extended`; empty without a PARM.
     pub arguments: crate::le::parm::Arguments,
@@ -507,6 +509,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             main: None,
             calls: Vec::new(),
             argument_lengths: Vec::new(),
+            argument_starts: Vec::new(),
             arguments: Default::default(),
             crt: None,
             environment: Default::default(),
@@ -667,7 +670,8 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
     /// activation: 0 for one omitted or not passed, and in the main program.
     pub fn argument_length_of(&self, me: usize, position: usize) -> usize {
         let Some(k) = self.calls.iter().rposition(|&p| p == me) else { return 0 };
-        position.checked_sub(1).and_then(|i| self.argument_lengths[k].get(i)).copied().unwrap_or(0)
+        let end = self.argument_starts.get(k + 1).copied().unwrap_or(self.argument_lengths.len());
+        position.checked_sub(1).and_then(|i| self.argument_lengths[self.argument_starts[k]..end].get(i)).copied().unwrap_or(0)
     }
 
     /// Program `me`'s storage holds its initial values, and its GO TOs go where they are written.

@@ -383,6 +383,7 @@ struct Spare {
     frames: Vec<Frame>,
     using: Vec<Option<usize>>,
     addresses: Vec<Option<usize>>,
+    lengths: Vec<usize>,
     args: Vec<Val>,
 }
 

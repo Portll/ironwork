@@ -107,7 +107,8 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let mark = self.unit.mem.len();
         let mut addresses = std::mem::take(&mut self.spare.addresses);
         addresses.clear();
-        let mut lengths = Vec::with_capacity(plan.args.len());
+        let mut lengths = std::mem::take(&mut self.spare.lengths);
+        lengths.clear();
         let filled = callee::addresses_into(self, &plan.args, pos, &mut addresses, &mut lengths);
         self.settle(filled)?;
         self.parmcheck_set();
@@ -155,6 +156,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         }
         self.parmcheck_test(plan, &addresses, |unit| unit.programs[index].name.clone(), pos)?;
         self.spare.addresses = addresses;
+        self.spare.lengths = lengths;
         if let (Some(target), Some(val)) = (plan.returning, returned) {
             let dest = self.loc_written(target)?;
             store::assign(&self.facts(), self.unit, dest, val, None, pos)?;
