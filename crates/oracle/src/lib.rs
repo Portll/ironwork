@@ -5,6 +5,7 @@
 
 pub mod families;
 pub mod hercules;
+pub mod witness;
 
 use numeric::Options;
 use std::collections::BTreeMap;
@@ -163,13 +164,8 @@ pub struct Output {
 
 pub fn parse_output(text: &str) -> Output {
     let mut chunks: BTreeMap<String, Vec<(u32, Vec<u8>)>> = BTreeMap::new();
-    let mut compiler = None;
+    let compiler = witness::parse_listing(text).compiler;
     for line in text.lines() {
-        if compiler.is_none()
-            && let Some(at) = line.find("IBM Enterprise COBOL")
-        {
-            compiler = Some(line[at..].split_whitespace().take_while(|t| *t != "Date").collect::<Vec<_>>().join(" "));
-        }
         let Some(at) = line.find("CASE ") else { continue };
         let mut fields = line[at + 5..].split_whitespace();
         let (Some(id), Some(offset), Some(hex)) = (fields.next(), fields.next(), fields.next()) else { continue };
@@ -208,6 +204,33 @@ pub struct Finding {
     pub id: String,
     pub assumptions: Vec<&'static str>,
     pub verdict: Verdict,
+}
+
+pub struct Tally {
+    pub matched: usize,
+    pub mismatched: usize,
+    pub missing: usize,
+    /// Per assumption id: cases that held it and cases that broke it, among those the output carried.
+    pub by_assumption: BTreeMap<&'static str, (usize, usize)>,
+}
+
+pub fn tally(findings: &[Finding]) -> Tally {
+    let mut tally = Tally { matched: 0, mismatched: 0, missing: 0, by_assumption: BTreeMap::new() };
+    for f in findings {
+        match f.verdict {
+            Verdict::Match => tally.matched += 1,
+            Verdict::Mismatch { .. } => tally.mismatched += 1,
+            Verdict::Missing => {
+                tally.missing += 1;
+                continue;
+            }
+        }
+        for &id in &f.assumptions {
+            let entry = tally.by_assumption.entry(id).or_default();
+            if f.verdict == Verdict::Match { entry.0 += 1 } else { entry.1 += 1 }
+        }
+    }
+    tally
 }
 
 pub fn check(programs: &[Program], observed: &BTreeMap<String, Vec<u8>>) -> Vec<Finding> {

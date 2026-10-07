@@ -1,6 +1,7 @@
-use numeric::assumptions::{self, Basis, Oracle};
+use numeric::assumptions::{self, Oracle};
 use ironwork_oracle::hercules::{self, Case, Op, Outcome};
-use ironwork_oracle::{Finding, Verdict, check, hex, parse_output, programs};
+use ironwork_oracle::witness::{self, basis_name, files};
+use ironwork_oracle::{Finding, Verdict, check, hex, parse_output, programs, tally};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -10,6 +11,9 @@ const USAGE: &str = "ironwork for COBOL: the conformance oracle
 usage:
   ironwork-oracle generate <dir>   write each program's COBOL source, its JCL, and expected.tsv
   ironwork-oracle check <dir>      score job output saved in <dir> against the predictions
+  ironwork-oracle witness <dir> [--runner TEXT] [--out FILE]
+                                   write the publishable record of a run: the deck, the compiler and its
+                                   options, each spool file's hash and the scores, never the compiler's bytes
   ironwork-oracle smoke <dir>      compile and run the programs with GnuCOBOL (a syntax check, not an oracle)
   ironwork-oracle hercules <dir>   run the decimal and HFP cases under Hercules and compare with the model";
 
@@ -18,6 +22,7 @@ fn main() -> ExitCode {
     let result = match args.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
         ["generate", dir] => generate(Path::new(dir)),
         ["check", dir] => score(Path::new(dir)),
+        ["witness", dir, rest @ ..] => witness_record(Path::new(dir), rest),
         ["smoke", dir] => smoke(Path::new(dir)),
         ["hercules", dir] => hercules_run(Path::new(dir)),
         _ => Err(USAGE.into()),
@@ -66,54 +71,48 @@ fn score(dir: &Path) -> Result<bool, String> {
     Ok(report(&check(&programs(), &observed)))
 }
 
-fn files(dir: &Path) -> Result<Vec<PathBuf>, String> {
-    let mut paths: Vec<PathBuf> = fs::read_dir(dir)
-        .map_err(|e| format!("{}: {e}", dir.display()))?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.is_file())
-        .collect();
-    paths.sort();
-    Ok(paths)
+fn witness_record(dir: &Path, rest: &[&str]) -> Result<bool, String> {
+    let (mut runner, mut out) = (None, None);
+    let mut args = rest.iter();
+    while let Some(flag) = args.next() {
+        match (*flag, args.next()) {
+            ("--runner", Some(text)) => runner = Some(*text),
+            ("--out", Some(path)) => out = Some(PathBuf::from(path)),
+            _ => return Err(USAGE.into()),
+        }
+    }
+    let witness = witness::witness(dir, runner)?;
+    let text = witness::text(&witness.record);
+    let t = &witness.tally;
+    match out {
+        Some(path) => {
+            write(&path, &text)?;
+            println!("wrote {}: {} match, {} mismatch, {} not in the output", path.display(), t.matched, t.mismatched, t.missing);
+        }
+        None => print!("{text}"),
+    }
+    Ok(true)
 }
 
 fn report(findings: &[Finding]) -> bool {
-    let mut by_assumption: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
-    let (mut matched, mut mismatched, mut missing) = (0, 0, 0);
     for f in findings {
-        match &f.verdict {
-            Verdict::Match => matched += 1,
-            Verdict::Missing => missing += 1,
-            Verdict::Mismatch { expected, observed } => {
-                mismatched += 1;
-                println!("MISMATCH {}\n  expected {}\n  observed {}", f.id, hex(expected), hex(observed));
-            }
-        }
-        if f.verdict == Verdict::Missing {
-            continue;
-        }
-        for &id in &f.assumptions {
-            let entry = by_assumption.entry(id).or_default();
-            if f.verdict == Verdict::Match { entry.0 += 1 } else { entry.1 += 1 }
+        if let Verdict::Mismatch { expected, observed } = &f.verdict {
+            println!("MISMATCH {}\n  expected {}\n  observed {}", f.id, hex(expected), hex(observed));
         }
     }
-    println!("\n{matched} match, {mismatched} mismatch, {missing} not in the output\n");
+    let t = tally(findings);
+    println!("\n{} match, {} mismatch, {} not in the output\n", t.matched, t.mismatched, t.missing);
     println!("assumption  held  broken  basis     settled by        claim");
     for a in assumptions::ASSUMPTIONS {
-        let (held, broken) = by_assumption.get(a.id).copied().unwrap_or_default();
-        let basis = match a.basis {
-            Basis::Documented => "documented",
-            Basis::Recalled => "recalled",
-            Basis::Chosen => "chosen",
-            Basis::Observed => "observed",
-        };
+        let (held, broken) = t.by_assumption.get(a.id).copied().unwrap_or_default();
         let oracle = match a.oracle {
             Oracle::Hercules => "Hercules",
             Oracle::EnterpriseCobol => "Enterprise COBOL",
             Oracle::Db2 => "Db2 for z/OS",
         };
-        println!("{:<11} {held:>4}  {broken:>6}  {basis:<9} {oracle:<17} {}", a.id, a.claim);
+        println!("{:<11} {held:>4}  {broken:>6}  {:<9} {oracle:<17} {}", a.id, basis_name(a.basis), a.claim);
     }
-    mismatched == 0
+    t.mismatched == 0
 }
 
 fn smoke(dir: &Path) -> Result<bool, String> {

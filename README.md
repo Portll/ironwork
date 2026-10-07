@@ -771,6 +771,8 @@ these tables, which is right for record-oriented data sets. z/OS UNIX text files
 
     cargo run -p ironwork-oracle -- generate out/     # ORAC01..04 .cbl and .jcl, and expected.tsv
     cargo run -p ironwork-oracle -- check goldens/    # score saved job output against the predictions
+    cargo run -p ironwork-oracle -- witness goldens/ --runner "who ran it" --out witness.json
+                                                      # the publishable record of a run: no IBM bytes in it
     cargo run -p ironwork-oracle -- smoke /tmp/smoke  # compile and run with GnuCOBOL: a syntax check only
 
 Each program pins TRUNC, NUMPROC and ARITH on its CBL card rather than trusting the installation's
@@ -787,8 +789,10 @@ Keep one directory per target: compiler level, `ARCH` and `OPT` all change the g
 with it the answers to chosen assumptions.
 
 Goldens are IBM's outputs, so they live in a private repository cloned here as `goldens/`, which
-`.gitignore` keeps out of this one. They come from IBM Test Accelerator for Z's On-Demand
-Environments (Enterprise COBOL 6.4, Db2 13.1, CICS 6.2) on a Linux x86-64 host.
+`.gitignore` keeps out of this one. It holds none yet. [docs/witness.md](docs/witness.md) is the
+deck as a site with Enterprise COBOL runs it, and the record it sends back: the compiler, its
+options, the spool's hashes and the scores, with no byte of the compiler's output. Records
+received are listed there and kept under `witness/`.
 
 ### Hercules, a second reading of the machine
 

@@ -59,6 +59,7 @@ name = "ironwork-oracle"
 version = "0.8.0"
 dependencies = [
  "ironwork-numeric",
+ "ironwork-rt",
  "ironwork-zarch",
 ]
 
