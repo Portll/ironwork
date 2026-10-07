@@ -188,7 +188,7 @@ impl Walk<'_> {
                 self.reference(target);
                 self.screen(screen.as_deref());
             }
-            Stmt::Open { .. } | Stmt::Close { .. } | Stmt::Delete { .. } => f.statement(S::FileIo),
+            Stmt::Open { .. } | Stmt::Close { .. } | Stmt::Delete { .. } | Stmt::DeleteFile { .. } => f.statement(S::FileIo),
             Stmt::Read(r) => {
                 f.statement(S::FileIo);
                 r.into.iter().chain(&r.key).for_each(|x| self.reference(x));

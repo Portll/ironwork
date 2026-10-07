@@ -950,6 +950,7 @@ impl<'a> Printer<'a> {
             }
             FileVerb::Rewrite { record, from } => (format!("REWRITE {}{}", self.place(*record), self.sender(from.as_ref())), false),
             FileVerb::Delete => (format!("DELETE {file}"), false),
+            FileVerb::DeleteFile => (format!("DELETE FILE {file}"), false),
             FileVerb::Start { rel, key } => {
                 let rel = match rel {
                     StartRel::Equal => "=",

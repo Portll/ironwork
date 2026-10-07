@@ -755,6 +755,11 @@ impl<'w, 'p> Walk<'w, 'p> {
                 self.file_status(file, *pos, &mut st);
                 st = self.handlers(invalid, st);
             }
+            Stmt::DeleteFile { files, pos } => {
+                for file in files {
+                    self.file_status(file, *pos, &mut st);
+                }
+            }
             Stmt::Start { file, key, invalid, pos } => {
                 if let Some((_, k)) = key {
                     self.read(k, *pos, &st);

@@ -255,6 +255,16 @@ impl<'p> Machine<'p, '_, '_> {
         self.conclude(k, status, invalid, '2', "REWRITE", pos)
     }
 
+    pub(super) fn delete_files(&mut self, names: &[String], pos: Pos) -> R<()> {
+        for name in names {
+            let k = self.file_index(name, pos)?;
+            let file = self.file_desc(k);
+            let outcome = fileio::delete_file(self, &file, pos)?;
+            self.settle(k, outcome, None, pos)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn delete_stmt(&mut self, file: &str, invalid: &'p Handlers, pos: Pos) -> R<Flow> {
         let k = self.file_index(file, pos)?;
         let desc = self.file_desc(k);

@@ -1209,6 +1209,7 @@ impl Check<'_> {
                 }
             }
             Stmt::Open { files, pos } => files.iter().for_each(|(_, f)| self.file(f, *pos)),
+            Stmt::DeleteFile { files, pos } => files.iter().for_each(|name| self.file(name, *pos)),
             Stmt::Close { files, pos } => {
                 for (name, closing) in files {
                     self.file(name, *pos);

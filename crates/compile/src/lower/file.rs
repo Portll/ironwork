@@ -298,6 +298,12 @@ impl Lower<'_> {
                 let op = FileOp { file, verb: FileVerb::Rewrite { record, from }, phrase: phrase(invalid), end_of_page: None };
                 self.file_op(op, bodies(invalid, None), pos, ctx)?;
             }
+            Stmt::DeleteFile { files, pos: _ } => {
+                for name in files {
+                    let file = self.file_index(name, pos)?;
+                    self.file_op(FileOp { file, verb: FileVerb::DeleteFile, phrase: None, end_of_page: None }, [None, None, None, None], pos, ctx)?;
+                }
+            }
             Stmt::Delete { file, invalid, pos: _ } => {
                 let file = self.file_index(file, pos)?;
                 self.file_op(FileOp { file, verb: FileVerb::Delete, phrase: phrase(invalid), end_of_page: None }, bodies(invalid, None), pos, ctx)?;

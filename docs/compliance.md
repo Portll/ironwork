@@ -864,6 +864,19 @@ all are spaces, as cobc 3.2 gives it. A national argument counts its characters 
 is not a national space, where cobc 3.2, whose national handling it calls unfinished, counts more.
 CobolCraft measures names and channels with it. Strict refuses it (IWC0312).
 
+### IWX0043-W DELETE FILE
+
+`IWX0043-W DELETE FILE (Micro Focus and GnuCOBOL; Enterprise COBOL has no such statement): each closed
+file's data set is removed`, at FILE.
+
+    DELETE FILE file-name ...
+
+Each file must be closed. The data set of the DD it is assigned to, by its ASSIGN or by its ASSIGN
+item's value at the statement, is removed, and FILE STATUS is 00, as cobc 3.2 removes the file. An
+open file gives 41, and a missing DD or data set 35, each taking the file's error path as any I/O
+status does. Tangram removes its work files this way. Assumption C485. Strict refuses the statement
+(IWC0313).
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

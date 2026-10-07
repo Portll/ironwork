@@ -1555,3 +1555,52 @@ fn stored_char_length_and_doubled_periods_are_warned_under_extended_and_refused_
     let refused = syntax::parse(DOUBLED_PERIODS).unwrap_err();
     assert_eq!((refused.pos.line, refused.id), (5, Some("IWS0026")), "{refused}");
 }
+
+/// DELETE FILE on an open file, a closed one, and one already deleted.
+const DELETE_FILE: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. DELFILE.\n",
+    "       ENVIRONMENT DIVISION.\n",
+    "       INPUT-OUTPUT SECTION.\n",
+    "       FILE-CONTROL.\n",
+    "           SELECT F ASSIGN TO DELDD\n",
+    "               ORGANIZATION IS LINE SEQUENTIAL\n",
+    "               FILE STATUS IS FS.\n",
+    "       DATA DIVISION.\n",
+    "       FILE SECTION.\n",
+    "       FD  F.\n",
+    "       01  F-REC PIC X(5).\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  FS PIC XX.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           OPEN OUTPUT F\n",
+    "           MOVE 'hello' TO F-REC WRITE F-REC\n",
+    "           DELETE FILE F\n",
+    "           DISPLAY 'DELETE OPEN ' FS\n",
+    "           CLOSE F\n",
+    "           DELETE FILE F\n",
+    "           DISPLAY 'DELETE ' FS\n",
+    "           OPEN INPUT F\n",
+    "           DISPLAY 'OPEN AFTER ' FS\n",
+    "           DELETE FILE F\n",
+    "           DISPLAY 'DELETE AGAIN ' FS\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn delete_file_removes_a_closed_files_data_set_alike_on_both_executors() {
+    // cobc 3.2's output.
+    let expected = "DELETE OPEN 41\nDELETE 00\nOPEN AFTER 35\nDELETE AGAIN 35\n";
+    let dir = temp("delete-file");
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, executor) in [("interpreter", Executor::Interpreter), ("vm", Executor::Vm)] {
+        let file = dir.join(format!("{name}.txt"));
+        let ran = Harness::source(DELETE_FILE).flags(EXTENDED).dds(&[format!("DELDD={}:text", file.display())]).run(executor);
+        assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{name}: {}", ran.err);
+        assert!(!file.exists(), "{name}: the data set is gone");
+    }
+    let warned: Vec<_> = diagnostics_under(DELETE_FILE, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0043")).map(|d| d.0).collect();
+    assert_eq!(warned, [18, 21, 25]);
+    let refused = syntax::parse(DELETE_FILE).unwrap_err();
+    assert_eq!((refused.pos.line, refused.id), (18, Some("IWC0313")), "{refused}");
+}

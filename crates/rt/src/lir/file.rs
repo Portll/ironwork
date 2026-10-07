@@ -167,6 +167,8 @@ pub enum FileVerb {
     Rewrite { record: PlaceId, from: Option<FromMove> },
     Delete,
     Start { rel: StartRel, key: StartKey },
+    /// Micro Focus's and GnuCOBOL's DELETE FILE under `--compliance extended`.
+    DeleteFile,
 }
 
 /// WRITE, REWRITE or RELEASE FROM: `to` is the record as a receiving item, and `check` NUMCHECK's
@@ -293,6 +295,7 @@ codec_enum!(FileVerb {
     Delete = 5,
     Start { rel, key } = 6,
     CloseWith(closing) = 7,
+    DeleteFile = 8,
 });
 codec_struct!(FromMove { from, to, plan, check });
 codec_enum!(Advance { Lines { before, count } = 0, Page { before } = 1, Mnemonic { before, space } = 2 });

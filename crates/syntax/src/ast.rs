@@ -547,6 +547,9 @@ pub enum Stmt {
     Write { record: Ref, from: Option<Operand>, advancing: Option<Advancing>, invalid: Handlers, end_of_page: Handlers, pos: Pos },
     Rewrite { record: Ref, from: Option<Operand>, invalid: Handlers, pos: Pos },
     Delete { file: String, invalid: Handlers, pos: Pos },
+    /// Micro Focus's and GnuCOBOL's DELETE FILE under `--compliance extended`: each closed file's
+    /// data set removed.
+    DeleteFile { files: Vec<String>, pos: Pos },
     Start { file: String, key: Option<(RelOp, Ref)>, invalid: Handlers, pos: Pos },
     /// INITIALIZE; `with` holds its FILLER, VALUE, REPLACING and DEFAULT phrases, None without any.
     Initialize { targets: Vec<Ref>, with: Option<Box<InitializeWith>>, pos: Pos },

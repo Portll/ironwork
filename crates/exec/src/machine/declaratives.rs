@@ -59,6 +59,7 @@ pub(super) fn statement_pos(s: &Stmt) -> Option<Pos> {
         | Stmt::Display { pos, .. }
         | Stmt::Open { pos, .. }
         | Stmt::Close { pos, .. }
+        | Stmt::DeleteFile { pos, .. }
         | Stmt::Write { pos, .. }
         | Stmt::Rewrite { pos, .. }
         | Stmt::Delete { pos, .. }

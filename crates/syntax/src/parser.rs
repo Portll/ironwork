@@ -2365,6 +2365,19 @@ impl Parser<'_> {
                 let invalid = self.invalid_key("END-REWRITE")?;
                 Stmt::Rewrite { record, from, invalid, pos }
             }
+            "DELETE" if self.is_word("FILE") => {
+                let at = self.pos();
+                self.at += 1;
+                if !self.extended {
+                    return Err(crate::messages::IWC0313.at(at, "DELETE FILE: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it"));
+                }
+                self.messages.push(crate::messages::IWX0043.at(at, "DELETE FILE (Micro Focus and GnuCOBOL; Enterprise COBOL has no such statement): each closed file's data set is removed"));
+                let mut files = vec![self.name("a file name")?];
+                while self.word().is_some_and(|w| !self.is_verb(w) && !w.starts_with("END-") && !PHRASE_WORDS.contains(&w)) {
+                    files.push(self.name("a file name")?);
+                }
+                Stmt::DeleteFile { files, pos }
+            }
             "DELETE" => {
                 let file = self.name("a file name")?;
                 self.accept_word("RECORD");

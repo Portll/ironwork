@@ -323,6 +323,7 @@ impl Tested<'_> {
             Stmt::Display { .. }
             | Stmt::Open { .. }
             | Stmt::Close { .. }
+            | Stmt::DeleteFile { .. }
             | Stmt::Initialize { .. }
             | Stmt::GoTo { .. }
             | Stmt::GoToDepending { .. }

@@ -384,6 +384,7 @@ pub const ANY_LENGTH: &str = "C481";
 pub const ASSIGN_TO_DISK: &str = "C482";
 pub const START_BACKWARD: &str = "C483";
 pub const SPLIT_KEYS: &str = "C484";
+pub const DELETE_FILE: &str = "C485";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2717,6 +2718,13 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[O(Extended), S(FileIo), U(IndexedFile)]],
+    },
+    Assumption {
+        id: DELETE_FILE,
+        claim: "Under --compliance extended, Micro Focus's and GnuCOBOL's DELETE FILE removes the data set of the DD each named file is assigned to, the DD named by its ASSIGN or by its ASSIGN item's value at the statement, as cobc 3.2 removes the file: status 00 when it is removed, 41 when the file is open, and 35 when no DD is given or no data set is there, each taking the file's error path as any I/O status does. Enterprise COBOL has no such statement",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), S(FileIo)]],
     },
     Assumption {
         id: COMMAND_LINE_FROM_PARM,

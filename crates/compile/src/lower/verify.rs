@@ -253,7 +253,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
         let Some(f) = p.services.files.get(op.file as usize) else { return Err(format!("file {} of {}", op.file, p.services.files.len())) };
         let keys = f.keys.as_ref().map_or(0, |k| k.alternates.len() + 1);
         match &op.verb {
-            FileVerb::Open(_) | FileVerb::Close | FileVerb::CloseWith(_) | FileVerb::Delete => {}
+            FileVerb::Open(_) | FileVerb::Close | FileVerb::CloseWith(_) | FileVerb::Delete | FileVerb::DeleteFile => {}
             FileVerb::Read { into, key, .. } => {
                 into.map_or(Ok(()), |(q, _)| place(q))?;
                 if *key != 0 && usize::from(*key) >= keys {

@@ -1323,6 +1323,8 @@ pub enum FileVerb {
     Rewrite { record: PlaceId, from: Option<FromMove> },
     Delete,
     Start { rel: StartRel, key: StartKey },
+    /// DELETE FILE under `--compliance extended`, tag 8: the closed file's data set removed.
+    DeleteFile,
 }
 /// `check` is NUMCHECK's test of `from` (§9.2).
 pub struct FromMove { pub from: Operand, pub to: PlaceId, pub plan: MovePlan, pub check: SenderCheck }

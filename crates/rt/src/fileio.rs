@@ -840,6 +840,29 @@ pub fn delete<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>,
     .unwrap_or(FileStatus::NotOpenInputOutput))
 }
 
+/// DELETE FILE under `--compliance extended`: the data set of the DD the file is assigned to removed
+/// while the file is closed (assumption C485). Open, status 41; no DD or no data set, 35.
+pub fn delete_file<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, pos: Pos) -> R<Outcome> {
+    let name = file.name;
+    if x.slot(file.index).is_some() {
+        return Ok(failed(x, file, FileStatus::AlreadyOpen, true, format!("DELETE FILE {name}: the file is open")));
+    }
+    let assigned = match file.assign_item {
+        Some((item, select)) => Some(assigned_dd(x, item, select)?),
+        None => None,
+    };
+    let assign = assigned.as_ref().map_or(file.assign, |(dd, _)| dd.as_str());
+    let path = if assign.is_empty() { None } else { x.dd(assign).map(|d| d.path.clone()) };
+    match path.map(|p| std::fs::remove_file(&p).map(|()| p)) {
+        Some(Ok(_)) => {
+            set_status(x, file, FileStatus::Success, pos)?;
+            Ok(Outcome::Done)
+        }
+        Some(Err(e)) => Ok(failed(x, file, FileStatus::FileNotFound, true, format!("DELETE FILE {name}: {e}"))),
+        None => Ok(failed(x, file, FileStatus::FileNotFound, true, format!("DELETE FILE {name}: no DD {assign} was given (--dd {assign}=path)"))),
+    }
+}
+
 /// START; `key` is START ... KEY, and its phrase is INVALID KEY.
 pub fn start<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, rel: StartRel, key: Option<P>, pos: Pos) -> R<FileStatus> {
     let (wanted, or_equal) = match rel {

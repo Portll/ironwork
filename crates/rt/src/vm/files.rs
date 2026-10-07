@@ -220,6 +220,10 @@ impl<'p, L: Loader<Rc<Code>>> Io<'_, 'p, '_, '_, L> {
                 let status = fileio::rewrite(self, &file, loc, pos)?;
                 self.conclude(&file, status, op.phrase, '2', "REWRITE", pos)
             }
+            FileVerb::DeleteFile => {
+                let outcome = fileio::delete_file(self, &file, pos)?;
+                self.settle(&file, outcome, None, pos)
+            }
             FileVerb::Delete => {
                 let status = fileio::delete(self, &file, pos)?;
                 self.conclude(&file, status, op.phrase, '2', "DELETE", pos)

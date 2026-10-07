@@ -451,7 +451,7 @@ impl Lower<'_> {
                     }
                 }
             }
-            Stmt::Open { .. } | Stmt::Close { .. } | Stmt::Read(_) | Stmt::Write { .. } | Stmt::Rewrite { .. } | Stmt::Delete { .. } | Stmt::Start { .. } => {
+            Stmt::Open { .. } | Stmt::Close { .. } | Stmt::Read(_) | Stmt::Write { .. } | Stmt::Rewrite { .. } | Stmt::Delete { .. } | Stmt::DeleteFile { .. } | Stmt::Start { .. } => {
                 self.file_statement(s, pos, &inner)?
             }
             Stmt::Set { set, pos: _ } => self.set(set, pos)?,
@@ -912,6 +912,7 @@ fn stmt_pos(s: &Stmt) -> Option<Pos> {
         | Stmt::Write { pos, .. }
         | Stmt::Rewrite { pos, .. }
         | Stmt::Delete { pos, .. }
+        | Stmt::DeleteFile { pos, .. }
         | Stmt::Start { pos, .. }
         | Stmt::Initialize { pos, .. }
         | Stmt::GoTo { pos, .. }
