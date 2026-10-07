@@ -202,7 +202,8 @@ pub(super) fn abend<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, at: &
 }
 
 /// The transaction abend code an abend is in a CICS task, when a HANDLE ABEND exit can intercept
-/// it: a program check is ASRA; ASPx and APSJ, and ironwork's own refusals, cannot be.
+/// it: a program check is ASRA; ASPx and APSJ, a Language Environment condition's 4038 (C454) and
+/// ironwork's own refusals cannot be.
 fn interceptable(abend: &Abend) -> Option<String> {
     match &abend.code {
         AbendCode::Check(_) | AbendCode::Protection => Some("ASRA".into()),

@@ -2958,6 +2958,21 @@ fn a_language_environment_condition_in_a_cics_task_is_transaction_abend_4038() {
     assert_eq!(abend.message, "IGZ0163S Argument-1 for function RANDOM was less than zero. (-1) (U4038, which CICS reports as transaction abend 4038)");
 }
 
+/// 'CICS HANDLE ABEND does not gain control in the event of a Language Environment software
+/// condition': the task ends 4038 with the exit still active (assumption C454).
+#[test]
+fn a_handle_abend_exit_does_not_take_a_language_environment_condition() {
+    let source = cics_program(
+        "CICS9",
+        "       01  X COMP-2.\n",
+        "",
+        &["       MAIN-LINE.\n", &line("EXEC CICS HANDLE ABEND LABEL(RECOVER) END-EXEC"), &line("COMPUTE X = FUNCTION RANDOM(-1)."), "       RECOVER.\n", &line("DISPLAY 'RECOVERED'.")].concat(),
+    );
+    let (out, ending) = run_cics(&source, task("TR09"), None, unit::Clock::System);
+    assert_eq!(out, "");
+    assert_eq!(ending.unwrap_err().code, "4038");
+}
+
 #[test]
 fn exec_cics_outside_a_task_names_the_harness() {
     let source = cics_program("CICS6", "", "", &line("EXEC CICS RETURN END-EXEC."));
