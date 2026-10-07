@@ -160,10 +160,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
                 let packed_pfd = matches!(loc.kind, Kind::Packed { .. }) && self.p.options.options.numproc == Numproc::Pfd;
                 if packed_pfd { None } else { store::read_integer(&self.facts(), &self.unit.mem, loc) }
             }
-            (Comparand::Operand(Operand::Const(k)), _) => match &self.p.consts[*k as usize] {
-                Const::Number(f) if f.places.dec == 0 && !(f.negative && f.magnitude.is_zero()) => f.to_i128().and_then(|n| i64::try_from(n).ok()),
-                _ => None,
-            },
+            (Comparand::Operand(Operand::Const(k)), _) => self.code.ints[*k as usize].map(|(n, _)| n),
             _ => None,
         }
     }
