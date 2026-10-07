@@ -37,7 +37,7 @@ const KEYS: [&str; 29] = [
 ];
 
 /// The COMMAREA the program reads, by its length and fields.
-struct Commarea {
+pub(crate) struct Commarea {
     length: usize,
     fields: Vec<Field>,
 }
@@ -56,11 +56,11 @@ const ANY_FIELD: Slot = Slot { length: 12, numeric: false };
 /// each map it RECEIVEs that its mapset gives, the mapsets no library holds, the transaction ids
 /// RETURN names where the source gives them, and the AID keys the program names.
 #[derive(Default)]
-struct Terminal {
+pub(crate) struct Terminal {
     used: bool,
     reads: bool,
     maps: Vec<Vec<Slot>>,
-    missing: BTreeSet<String>,
+    pub(crate) missing: BTreeSet<String>,
     transids: BTreeSet<String>,
     keys: Vec<&'static str>,
 }
@@ -68,7 +68,7 @@ struct Terminal {
 /// One turn at the terminal: text typed into some of the screen's unprotected fields, by their Tab
 /// order, then an AID key.
 #[derive(Clone)]
-struct Turn {
+pub(crate) struct Turn {
     fields: Vec<Option<String>>,
     key: &'static str,
 }
@@ -76,10 +76,10 @@ struct Turn {
 /// What one task is given: its COMMAREA, and the operator's turns when the program uses a terminal;
 /// and whether it is compiled with OPTIMIZE(2), a kept abend's re-check.
 #[derive(Clone, Default)]
-struct Inputs {
-    commarea: Option<Vec<u8>>,
-    turns: Option<Vec<Turn>>,
-    optimized: bool,
+pub(crate) struct Inputs {
+    pub(crate) commarea: Option<Vec<u8>>,
+    pub(crate) turns: Option<Vec<Turn>>,
+    pub(crate) optimized: bool,
 }
 
 /// Every statement of the program, nested ones included.
@@ -266,7 +266,7 @@ fn turn(rng: &mut Rng, terminal: &Terminal) -> Turn {
     Turn { fields, key }
 }
 
-fn generate(rng: &mut Rng, shape: Option<&Commarea>, terminal: &Terminal) -> Inputs {
+pub(crate) fn generate(rng: &mut Rng, shape: Option<&Commarea>, terminal: &Terminal) -> Inputs {
     let commarea = shape.and_then(|s| commarea(rng, s));
     let turns = terminal.used.then(|| if terminal.reads || !terminal.transids.is_empty() { (0..1 + rng.below(4)).map(|_| turn(rng, terminal)).collect() } else { Vec::new() });
     Inputs { commarea, turns, optimized: false }
@@ -274,7 +274,7 @@ fn generate(rng: &mut Rng, shape: Option<&Commarea>, terminal: &Terminal) -> Inp
 
 /// The operator's turns as a screen script: each field reached from the first by Home and Tab,
 /// its text typed there, then the turn's AID key.
-fn script(turns: &[Turn]) -> String {
+pub(crate) fn script(turns: &[Turn]) -> String {
     let mut out = String::new();
     for t in turns {
         for (k, text) in t.fields.iter().enumerate() {
@@ -300,10 +300,10 @@ fn abend(line: &str, roots: &[PathBuf]) -> Option<Outcome> {
 
 /// A --file the runs are given: its name, its data set, and the rest of its spec. Each run gets its
 /// own copy of the data set, since a task writes its files back when it ends.
-struct GivenFile {
-    name: String,
-    data_set: PathBuf,
-    spec: String,
+pub(crate) struct GivenFile {
+    pub(crate) name: String,
+    pub(crate) data_set: PathBuf,
+    pub(crate) spec: String,
 }
 
 /// One task as its own process, so a task that loops is stopped and one that fails stops nothing else.
@@ -377,28 +377,34 @@ impl Runner<'_> {
     }
 }
 
-/// The smallest input found that still ends at the same abend: turns dropped, the COMMAREA
-/// dropped or each of its fields put back to a value that breaks nothing, then each typed field
-/// left untyped; and whether the search finished within its budget of runs.
-fn minimize(runner: &mut Runner, shape: Option<&Commarea>, mut inputs: Inputs, place: &(String, String, i64), budget: u32) -> (Inputs, bool) {
+/// The smallest input found that still ends at the same abend, and whether the search finished
+/// within its budget of runs.
+fn minimize(runner: &mut Runner, shape: Option<&Commarea>, inputs: Inputs, place: &(String, String, i64), budget: u32) -> (Inputs, bool) {
     let mut left = budget;
-    let mut holds = |runner: &mut Runner, candidate: &Inputs| -> bool {
+    let small = smaller(shape, inputs, &mut |candidate| {
         if left == 0 {
             return false;
         }
         left -= 1;
         runner.run(candidate, None).ok().and_then(|o| o.place()).as_ref() == Some(place)
-    };
+    });
+    (small, left > 0)
+}
+
+/// `inputs` made smaller wherever `holds` says the task still ends as it did: turns dropped, the
+/// COMMAREA dropped or each of its fields put back to a value that breaks nothing, then each typed
+/// field left untyped.
+pub(crate) fn smaller(shape: Option<&Commarea>, mut inputs: Inputs, holds: &mut dyn FnMut(&Inputs) -> bool) -> Inputs {
     for k in (0..inputs.turns.as_ref().map_or(0, Vec::len)).rev() {
         let mut candidate = inputs.clone();
         candidate.turns.as_mut().expect("turns").remove(k);
-        if holds(runner, &candidate) {
+        if holds(&candidate) {
             inputs = candidate;
         }
     }
     if inputs.commarea.is_some() {
         let candidate = Inputs { commarea: None, ..inputs.clone() };
-        if holds(runner, &candidate) {
+        if holds(&candidate) {
             inputs = candidate;
         }
     }
@@ -410,7 +416,7 @@ fn minimize(runner: &mut Runner, shape: Option<&Commarea>, mut inputs: Inputs, p
         }
         let mut candidate = inputs.clone();
         candidate.commarea.as_mut().expect("commarea")[f.offset..f.offset + f.size].copy_from_slice(&quiet);
-        if holds(runner, &candidate) {
+        if holds(&candidate) {
             inputs = candidate;
         }
     }
@@ -418,11 +424,11 @@ fn minimize(runner: &mut Runner, shape: Option<&Commarea>, mut inputs: Inputs, p
     for (t, k) in typed {
         let mut candidate = inputs.clone();
         candidate.turns.as_mut().expect("turns")[t].fields[k] = None;
-        if holds(runner, &candidate) {
+        if holds(&candidate) {
             inputs = candidate;
         }
     }
-    (inputs, left > 0)
+    inputs
 }
 
 /// The program compiled, and its source text and copy libraries.
@@ -437,24 +443,43 @@ fn compile(req: &fuzz::Request) -> Result<(exec::Compiled, String, syntax::copy:
     Ok((compiled, text, libraries))
 }
 
-pub fn run(req: Request) -> ExitCode {
-    let fail = |message: String| {
-        eprintln!("ironwork fuzz: {message}");
-        ExitCode::from(2)
-    };
+/// What a CICS fuzz run takes: the program compiled, its path from --root, the COMMAREA it reads
+/// and what it does at its terminal, the cics flags every task is given but --file and --td, each
+/// --file and --td queue, the transaction RETURN TRANSID names where it runs the program, the
+/// terminal's id, and the directories the runs read.
+pub(crate) struct Plan {
+    pub(crate) compiled: exec::Compiled,
+    pub(crate) file: String,
+    pub(crate) shape: Option<Commarea>,
+    pub(crate) terminal: Terminal,
+    pub(crate) passed: Vec<(String, String)>,
+    pub(crate) files: Vec<GivenFile>,
+    pub(crate) queues: Vec<String>,
+    pub(crate) inferred: Option<String>,
+    pub(crate) termid: String,
+    pub(crate) roots: Vec<PathBuf>,
+}
+
+fn fail(message: String) -> ExitCode {
+    eprintln!("ironwork fuzz: {message}");
+    ExitCode::from(2)
+}
+
+/// `req`'s plan, or the exit status once standard error says why there is none.
+pub(crate) fn plan(req: &Request) -> Result<Plan, ExitCode> {
     let f = &req.fuzz;
     let (compiled, source, libraries) = match compile(f) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("{e}");
-            return ExitCode::from(12);
+            return Err(ExitCode::from(12));
         }
     };
     let Some(file) = from_root(&f.program, &f.root) else {
-        return fail(format!("{} is not under --root {}", f.program.display(), f.root.display()));
+        return Err(fail(format!("{} is not under --root {}", f.program.display(), f.root.display())));
     };
-    if let Some((name, _)) = req.options.iter().find(|(n, _)| matches!(n.as_str(), "--commarea" | "--commarea-out" | "--screens" | "--serve")) {
-        return fail(format!("fuzz --cics makes each task's COMMAREA and terminal input itself, so it takes no {name}"));
+    if let Some((name, _)) = req.options.iter().find(|(n, _)| matches!(n.as_str(), "--commarea" | "--commarea-out" | "--task-out" | "--screens" | "--serve")) {
+        return Err(fail(format!("fuzz --cics makes each task's COMMAREA and terminal input itself, so it takes no {name}")));
     }
     let mut all = Vec::new();
     for p in &compiled.program.paragraphs {
@@ -464,7 +489,7 @@ pub fn run(req: Request) -> ExitCode {
     let shape = commarea_of(&compiled, &all, &upper_source);
     let terminal = terminal_of(&compiled, &all, &upper_source, &libraries);
     if shape.is_none() && !terminal.reads {
-        return fail(format!("{} declares no DFHCOMMAREA and reads no terminal, so there is nothing to vary", compiled.program.id));
+        return Err(fail(format!("{} declares no DFHCOMMAREA and reads no terminal, so there is nothing to vary", compiled.program.id)));
     }
 
     let mut passed = Vec::new();
@@ -472,13 +497,13 @@ pub fn run(req: Request) -> ExitCode {
     for (name, value) in &req.options {
         match name.as_str() {
             "--file" => {
-                let Some((file, rest)) = value.split_once('=') else { return fail(format!("--file {value}: expected NAME=path,...")) };
+                let Some((file, rest)) = value.split_once('=') else { return Err(fail(format!("--file {value}: expected NAME=path,..."))) };
                 let (data_set, spec) = rest.split_once(',').unwrap_or((rest, ""));
                 files.push(GivenFile { name: file.to_string(), data_set: data_set.into(), spec: spec.to_string() });
             }
             "--td" => match value.split_once('=') {
                 Some((queue, _)) => queues.push(queue.to_string()),
-                None => return fail(format!("--td {value}: expected QUEUE=path")),
+                None => return Err(fail(format!("--td {value}: expected QUEUE=path"))),
             },
             _ => passed.push((name.clone(), value.clone())),
         }
@@ -490,8 +515,16 @@ pub fn run(req: Request) -> ExitCode {
         passed.push(("--transid".into(), t.clone()));
     }
     let termid = req.options.iter().rev().find(|(n, _)| n == "--termid").map_or_else(|| "TERM".to_string(), |(_, v)| v.to_ascii_uppercase());
-
     let roots: Vec<PathBuf> = std::iter::once(f.program.parent().map(Path::to_path_buf).unwrap_or_default()).chain(f.libraries.iter().cloned()).chain(f.program_dirs.iter().cloned()).collect();
+    Ok(Plan { compiled, file, shape, terminal, passed, files, queues, inferred, termid, roots })
+}
+
+pub fn run(req: Request) -> ExitCode {
+    let f = &req.fuzz;
+    let Plan { compiled, file, shape, terminal, passed, files, queues, inferred, termid, roots } = match plan(&req) {
+        Ok(p) => p,
+        Err(code) => return code,
+    };
     let evidence = f.out.join("evidence");
     let coverage = f.out.join("coverage");
     let work = match prepare(&f.out, &roots) {

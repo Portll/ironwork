@@ -1,8 +1,12 @@
-//! `ironwork fuzz --differential`: runs a batch program on each generated input twice, through
-//! `ironwork run` and `ironwork run --vm` under one statement limit, and keeps each input on which
-//! the interpreter and the VM differ (docs/codegen-runtime.md B2, docs/lir.md §12.3).
+//! `ironwork fuzz --differential`: runs a program on each generated input twice, through `ironwork
+//! run` (or `ironwork cics`) with --interpret and with --vm under one statement limit, and keeps each
+//! input on which the interpreter and the VM differ (docs/codegen-runtime.md B2, docs/lir.md §12.3).
+//! This module runs a batch program and holds what every mode shares; `cics` runs a CICS task and
+//! `interface` a subprogram as a caller would.
 
-use std::collections::BTreeMap;
+pub(crate) mod cics;
+pub(crate) mod interface;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
@@ -19,16 +23,27 @@ const BUDGET: u32 = 100;
 const ABEND: [i32; 2] = [240, 244];
 const VM_STOPPED: [i32; 2] = [242, 243];
 
+/// Something a run leaves besides its output that the two runs are compared on: what it is, as a
+/// difference names it ("DD OUTFILE"), the file a kept divergence holds it in, and its bytes, None
+/// where there is none.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct Left {
+    what: String,
+    file: String,
+    bytes: Option<Vec<u8>>,
+}
+
 /// One executor's run: whether it was stopped at the timeout; its exit status, None when a signal
-/// ended it; standard output; standard error; and each DD's data set as the run left it, None
-/// where there was none.
+/// ended it; standard output; standard error; what it left; and a CICS run's task record
+/// (--task-out), a line for each task that ended without an abend.
 #[derive(PartialEq, Eq)]
-struct Ran {
+pub(crate) struct Ran {
     timed_out: bool,
     status: Option<i32>,
     out: Vec<u8>,
     err: String,
-    files: BTreeMap<String, Option<Vec<u8>>>,
+    left: Vec<Left>,
+    tasks: Vec<u8>,
 }
 
 impl Ran {
@@ -93,77 +108,83 @@ fn verdict(interpreter: &Ran, vm: &Ran) -> Verdict {
     }
     found.extend(first_line_differing("standard output", &interpreter.out, &vm.out));
     found.extend(first_line_differing("standard error", interpreter.err.as_bytes(), vm.err.as_bytes()));
-    for (dd, a) in &interpreter.files {
-        let b = vm.files.get(dd).cloned().flatten();
-        if *a != b {
+    found.extend(first_line_differing("the task record", &interpreter.tasks, &vm.tasks));
+    for (a, b) in interpreter.left.iter().zip(&vm.left) {
+        if a.bytes != b.bytes {
             let size = |f: &Option<Vec<u8>>| f.as_ref().map_or("none".to_string(), |f| format!("{} bytes", f.len()));
-            found.push(format!("DD {dd} differs: interpreter {}, VM {}", size(a), size(&b)));
+            let at = match (&a.bytes, &b.bytes) {
+                (Some(x), Some(y)) => format!(", first at offset {}", x.iter().zip(y).position(|(p, q)| p != q).unwrap_or(x.len().min(y.len()))),
+                _ => String::new(),
+            };
+            found.push(format!("{} differs: interpreter {}, VM {}{at}", a.what, size(&a.bytes), size(&b.bytes)));
         }
     }
     Verdict::Differ(found)
 }
 
-/// Runs inputs on either executor, each run in the same directory, made afresh.
-struct Runner<'a> {
+/// One executor's run as a subject gives it: the command, what it leaves (what each is, the file a
+/// kept divergence holds it in, and where the run leaves it), where it writes its task record, and
+/// the paths standard error gives by name instead, as a run elsewhere would say them alike.
+pub(crate) struct Launch {
+    command: Command,
+    left: Vec<(String, String, PathBuf)>,
+    tasks: Option<PathBuf>,
+    named: Vec<(PathBuf, String)>,
+}
+
+/// What a differential fuzz run varies and how it runs one input.
+pub(crate) trait Subject {
+    type Input: Clone;
+    fn generate(&self, rng: &mut Rng) -> Self::Input;
+    /// Writes what `input` gives a run into `dir`, an empty directory, and gives the run on the VM
+    /// or the interpreter that reads it there. A kept divergence's `input/` is such a directory.
+    fn launch(&self, input: &Self::Input, dir: &Path, vm: bool) -> std::io::Result<Launch>;
+    /// `input` made smaller wherever `holds` says the runs still differ in the same way.
+    fn smaller(&self, input: Self::Input, holds: &mut dyn FnMut(&Self::Input) -> bool) -> Self::Input;
+}
+
+/// `ironwork COMMAND PROGRAM` with the clock, compile flags and libraries every run of `req` takes.
+pub(crate) fn command(req: &Request, command: &str) -> std::io::Result<Command> {
+    let mut c = Command::new(std::env::current_exe()?);
+    c.arg(command).arg(&req.program).arg("--clock").arg(&req.clock).args(&req.flags);
+    // Each run compiles the program afresh, so WHEN-COMPILED is fixed at the clock's time
+    // unless the environment already fixes it.
+    if std::env::var_os("SOURCE_DATE_EPOCH").is_none()
+        && let Some(exec::unit::Clock::Fixed(seconds, _)) = crate::parse_clock(&req.clock)
+        && seconds >= 0
+    {
+        c.env("SOURCE_DATE_EPOCH", seconds.to_string());
+    }
+    for d in &req.libraries {
+        c.arg("-I").arg(d);
+    }
+    for d in &req.program_dirs {
+        c.arg("-L").arg(d);
+    }
+    Ok(c)
+}
+
+/// `command` finished with the statement limit and the executor every run of `req` takes.
+pub(crate) fn limited(mut command: Command, req: &Request, vm: bool) -> Command {
+    command.arg("--statement-limit").arg(req.hang_limit.to_string());
+    command.arg(if vm { "--vm" } else { "--interpret" });
+    command
+}
+
+/// Runs a subject's inputs on either executor, each run in the same directory, made afresh.
+struct Runner<'a, S: Subject> {
     req: &'a Request,
-    others: &'a Others,
-    rdw: Vec<String>,
+    subject: &'a S,
     work: PathBuf,
 }
 
-impl Runner<'_> {
-    /// The data sets and SYSIN a run is given, by DD, and the bytes each starts with.
-    fn given(&self, inputs: &Inputs) -> Vec<(String, Option<Vec<u8>>)> {
-        let mut given: Vec<(String, Option<Vec<u8>>)> = inputs.files.iter().map(|(dd, records)| (dd.clone(), Some(super::data_set(records, self.rdw.contains(dd))))).collect();
-        given.extend(self.others.unfed.iter().map(|dd| (dd.clone(), Some(Vec::new()))));
-        given.extend(self.others.written.iter().map(|dd| (dd.clone(), None)));
-        if let Some(lines) = inputs.lines.get("SYSIN") {
-            given.push(("SYSIN".into(), Some(super::sysin_text(lines))));
-        }
-        given
-    }
-
-    /// The command that runs the program on `inputs` with each DD's data set in `dir`.
-    fn command(&self, inputs: &Inputs, dir: &Path, given: &[(String, Option<Vec<u8>>)], vm: bool) -> std::io::Result<Command> {
-        let mut command = Command::new(std::env::current_exe()?);
-        command.arg("run").arg(&self.req.program).arg("--clock").arg(&self.req.clock).args(&self.req.flags);
-        // Each run compiles the program afresh, so WHEN-COMPILED is fixed at the clock's time
-        // unless the environment already fixes it.
-        if std::env::var_os("SOURCE_DATE_EPOCH").is_none()
-            && let Some(exec::unit::Clock::Fixed(seconds, _)) = crate::parse_clock(&self.req.clock)
-            && seconds >= 0
-        {
-            command.env("SOURCE_DATE_EPOCH", seconds.to_string());
-        }
-        for d in &self.req.libraries {
-            command.arg("-I").arg(d);
-        }
-        for d in &self.req.program_dirs {
-            command.arg("-L").arg(d);
-        }
-        for (k, (dd, _)) in given.iter().enumerate() {
-            command.arg("--dd").arg(format!("{dd}={}", dir.join(format!("dd{k}")).display()));
-        }
-        if let Some(parm) = inputs.parms.get("PARM") {
-            command.arg("--parm").arg(String::from_utf8_lossy(parm).as_ref());
-        }
-        command.arg("--statement-limit").arg(self.req.hang_limit.to_string());
-        command.arg(if vm { "--vm" } else { "--interpret" });
-        Ok(command)
-    }
-
-    fn run(&self, inputs: &Inputs, vm: bool) -> std::io::Result<Ran> {
+impl<S: Subject> Runner<'_, S> {
+    fn run(&self, input: &S::Input, vm: bool) -> std::io::Result<Ran> {
         let dir = self.work.join("run");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir)?;
-        let given = self.given(inputs);
-        for (k, (_, bytes)) in given.iter().enumerate() {
-            if let Some(bytes) = bytes {
-                fs::write(dir.join(format!("dd{k}")), bytes)?;
-            }
-        }
+        let Launch { mut command, left, tasks, mut named } = self.subject.launch(input, &dir, vm)?;
         let (stdout, stderr) = (self.work.join("stdout"), self.work.join("stderr"));
-        let mut command = self.command(inputs, &dir, &given, vm)?;
         command.stdin(Stdio::null()).stdout(fs::File::create(&stdout)?).stderr(fs::File::create(&stderr)?);
         let mut child = command.spawn()?;
         let began = Instant::now();
@@ -178,16 +199,18 @@ impl Runner<'_> {
             }
             std::thread::sleep(Duration::from_millis(5));
         };
-        let files = given.iter().enumerate().map(|(k, (dd, _))| (dd.clone(), fs::read(dir.join(format!("dd{k}"))).ok())).collect();
+        let left = left.into_iter().map(|(what, file, path)| Left { what, file, bytes: fs::read(path).ok() }).collect();
         let mut err = without_thread_numbers(&String::from_utf8_lossy(&fs::read(&stderr)?));
-        for (k, (dd, _)) in given.iter().enumerate() {
-            err = err.replace(&dir.join(format!("dd{k}")).display().to_string(), dd);
+        // The longest first, as one path may begin another.
+        named.sort_by_key(|(path, _)| std::cmp::Reverse(path.as_os_str().len()));
+        for (path, name) in &named {
+            err = err.replace(&path.display().to_string(), name);
         }
-        Ok(Ran { timed_out, status, out: fs::read(&stdout)?, err, files })
+        Ok(Ran { timed_out, status, out: fs::read(&stdout)?, err, left, tasks: tasks.and_then(|t| fs::read(t).ok()).unwrap_or_default() })
     }
 
-    fn both(&self, inputs: &Inputs) -> std::io::Result<(Ran, Ran)> {
-        Ok((self.run(inputs, false)?, self.run(inputs, true)?))
+    fn both(&self, input: &S::Input) -> std::io::Result<(Ran, Ran)> {
+        Ok((self.run(input, false)?, self.run(input, true)?))
     }
 }
 
@@ -208,10 +231,11 @@ fn signature(interpreter: &Ran, vm: &Ran, found: &[String]) -> String {
     format!("{} / {}: {}", interpreter.ending(), vm.ending(), kinds.join(", "))
 }
 
-/// `inputs` with records, lines and PARM text dropped while the runs still differ in the same way.
-fn smaller(runner: &Runner, mut inputs: Inputs, key: &str) -> Inputs {
+/// `input` made smaller by the subject while the runs still differ in the way `key` names, within
+/// [`BUDGET`] run pairs.
+fn smaller<S: Subject>(runner: &Runner<S>, input: S::Input, key: &str) -> S::Input {
     let mut left = BUDGET;
-    let mut holds = |candidate: &Inputs| -> bool {
+    runner.subject.smaller(input, &mut |candidate| {
         if left == 0 {
             return false;
         }
@@ -220,68 +244,32 @@ fn smaller(runner: &Runner, mut inputs: Inputs, key: &str) -> Inputs {
             Ok((a, b)) => matches!(verdict(&a, &b), Verdict::Differ(found) if signature(&a, &b, &found) == key),
             Err(_) => false,
         }
-    };
-    for dd in inputs.files.keys().cloned().collect::<Vec<_>>() {
-        for k in (0..inputs.files[&dd].len()).rev() {
-            let mut candidate = inputs.clone();
-            candidate.files.get_mut(&dd).expect("fed").remove(k);
-            if holds(&candidate) {
-                inputs = candidate;
-            }
-        }
-    }
-    for name in inputs.lines.keys().cloned().collect::<Vec<_>>() {
-        for k in (0..inputs.lines[&name].len()).rev() {
-            let mut candidate = inputs.clone();
-            candidate.lines.get_mut(&name).expect("given").remove(k);
-            if holds(&candidate) {
-                inputs = candidate;
-            }
-        }
-    }
-    for name in inputs.parms.keys().cloned().collect::<Vec<_>>() {
-        let parm = inputs.parms[&name].clone();
-        for keep in [0, parm.len() / 2].into_iter().filter(|&k| k < parm.len()) {
-            let mut candidate = inputs.clone();
-            candidate.parms.insert(name.clone(), parm[..keep].to_vec());
-            if holds(&candidate) {
-                inputs = candidate;
-                break;
-            }
-        }
-    }
-    inputs
+    })
 }
 
 /// The file a kept data set is written to: its DD name where that is a plain DD name, else its
 /// place among the run's data sets, as an ASSIGN literal may name a path anywhere. The other
 /// files kept beside them have a period in their names, which no DD name has.
-fn kept_name(k: usize, dd: &str) -> String {
+pub(crate) fn kept_name(k: usize, dd: &str) -> String {
     if jcl::is_name(dd) { dd.to_string() } else { format!("dd.{k}") }
 }
 
-/// Writes a kept input to `dir`: each data set the run is given under `input/`, the PARM as
-/// `input/parm.txt`, what each executor wrote and left under `interpreter/` and `vm/`, and
-/// `report.txt`.
-fn keep(dir: &Path, runner: &Runner, inputs: &Inputs, interpreter: &Ran, vm: &Ran, found: &[String]) -> std::io::Result<()> {
-    let given = runner.given(inputs);
+/// Writes a kept input to `dir`: what it gives a run under `input/`, what each executor wrote and
+/// left under `interpreter/` and `vm/`, and `report.txt` with the command that repeats the run.
+fn keep<S: Subject>(dir: &Path, subject: &S, input: &S::Input, interpreter: &Ran, vm: &Ran, found: &[String]) -> std::io::Result<()> {
     fs::create_dir_all(dir.join("input"))?;
-    for (k, (dd, bytes)) in given.iter().enumerate() {
-        if let Some(bytes) = bytes {
-            fs::write(dir.join("input").join(kept_name(k, dd)), bytes)?;
-        }
-    }
-    if let Some(parm) = inputs.parms.get("PARM") {
-        fs::write(dir.join("input").join("parm.txt"), parm)?;
-    }
+    let launch = subject.launch(input, &super::resolved(&dir.join("input")), true)?;
     for (name, ran) in [("interpreter", interpreter), ("vm", vm)] {
         let to = dir.join(name);
         fs::create_dir_all(&to)?;
         fs::write(to.join("stdout.txt"), &ran.out)?;
         fs::write(to.join("stderr.txt"), &ran.err)?;
-        for (k, (dd, _)) in given.iter().enumerate() {
-            if let Some(Some(bytes)) = ran.files.get(dd) {
-                fs::write(to.join(kept_name(k, dd)), bytes)?;
+        if !ran.tasks.is_empty() {
+            fs::write(to.join("tasks.jsonl"), &ran.tasks)?;
+        }
+        for left in &ran.left {
+            if let Some(bytes) = &left.bytes {
+                fs::write(to.join(&left.file), bytes)?;
             }
         }
     }
@@ -290,73 +278,51 @@ fn keep(dir: &Path, runner: &Runner, inputs: &Inputs, interpreter: &Ran, vm: &Ra
         report.push_str(f);
         report.push('\n');
     }
-    let input = super::resolved(&dir.join("input"));
-    let command = runner.command(inputs, &input, &given, true)?;
-    let mut args: Vec<String> = command.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
-    for (k, (dd, _)) in given.iter().enumerate() {
-        let at = format!("{dd}={}", input.join(format!("dd{k}")).display());
-        if let Some(arg) = args.iter_mut().find(|a| **a == at) {
-            *arg = format!("{dd}={}", input.join(kept_name(k, dd)).display());
-        }
-    }
-    let envs: Vec<String> = command.get_envs().filter_map(|(k, v)| v.map(|v| format!("{}={} ", k.to_string_lossy(), v.to_string_lossy()))).collect();
+    let args: Vec<String> = launch.command.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+    let envs: Vec<String> = launch.command.get_envs().filter_map(|(k, v)| v.map(|v| format!("{}={} ", k.to_string_lossy(), v.to_string_lossy()))).collect();
     report.push_str(&format!("\nrun it again where fuzz ran, with --interpret and with --vm, on a fresh copy of input/ each time:\n  {}ironwork {}\n", envs.concat(), args.join(" ")));
     fs::write(dir.join("report.txt"), report)
 }
 
-pub fn run(req: Request) -> ExitCode {
-    let fail = |message: String| {
-        eprintln!("ironwork fuzz: {message}");
-        ExitCode::from(2)
-    };
-    let (compiled, rest) = match super::compile(&req) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("{e}");
-            return ExitCode::from(12);
-        }
-    };
-    if let Err(e) = exec::vm::lowered(&compiled) {
+/// Checks that the VM takes the program, as one that does not lower differs on every input, and
+/// that `-o` is empty; then runs `subject`'s inputs and gives the exit status: 1 when any differs.
+pub(crate) fn fuzz<S: Subject>(req: &Request, compiled: &exec::Compiled, subject: &S) -> ExitCode {
+    if let Err(e) = exec::vm::lowered(compiled) {
         eprintln!("{}", syntax::Error::from(e).place(&req.program.display().to_string()));
         return ExitCode::from(12);
     }
-    let parm = super::takes_parm(&compiled);
-    if !compiled.program.using.is_empty() && !parm {
-        return fail(format!("{} takes PROCEDURE DIVISION USING parameters that are not a PARM's halfword length and text: fuzz runs a main program", compiled.program.id));
-    }
-    let (feeds, sysin, others) = super::inputs_of(&compiled, &rest);
-    if feeds.is_empty() && !sysin && !parm {
-        return fail(format!("{} reads no sequential, indexed or relative file on a DD of its own, no SYSIN and no PARM, so there is nothing to vary", compiled.program.id));
-    }
     if req.out.exists() && fs::read_dir(&req.out).map(|mut d| d.next().is_some()).unwrap_or(true) {
-        return fail(format!("-o {} is not empty: each fuzz run gets a directory of its own", req.out.display()));
+        eprintln!("ironwork fuzz: -o {} is not empty: each fuzz run gets a directory of its own", req.out.display());
+        return ExitCode::from(2);
     }
     let work = req.out.join(".work");
     if let Err(e) = fs::create_dir_all(&work) {
-        return fail(format!("-o {}: {e}", req.out.display()));
+        eprintln!("ironwork fuzz: -o {}: {e}", req.out.display());
+        return ExitCode::from(2);
     }
-    let rdw = feeds.iter().filter(|f| f.variable.is_some()).map(|f| f.dd.clone()).collect();
-    let runner = Runner { req: &req, others: &others, rdw, work: work.clone() };
-    let varied = Varied { feeds, lines: sysin.then(|| "SYSIN".to_string()).into_iter().collect(), parms: parm.then(|| "PARM".to_string()).into_iter().collect() };
-    let found = drive(&req, &runner, &varied);
+    let runner = Runner { req, subject, work: work.clone() };
+    let found = drive(req, &runner);
     let _ = fs::remove_dir_all(&work);
     match found {
         Ok(differ) if differ => ExitCode::from(1),
         Ok(_) => ExitCode::SUCCESS,
-        Err(e) => fail(format!("a run could not start: {e}")),
+        Err(e) => {
+            eprintln!("ironwork fuzz: a run could not start: {e}");
+            ExitCode::from(2)
+        }
     }
 }
 
 /// Runs `req.runs` generated inputs on both executors and keeps the differing ones; whether any
 /// differed.
-fn drive(req: &Request, runner: &Runner, varied: &Varied) -> std::io::Result<bool> {
+fn drive<S: Subject>(req: &Request, runner: &Runner<S>) -> std::io::Result<bool> {
     let mut rng = Rng(req.seed.max(1));
     let (mut agree, mut at_limit, mut timed_out, mut differ) = (0, 0, 0, 0);
-    let mut unimplemented: BTreeMap<String, usize> = BTreeMap::new();
-    let mut kept: Vec<(String, Inputs)> = Vec::new();
+    let mut unimplemented: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    let mut kept: Vec<(String, S::Input)> = Vec::new();
     for _ in 0..req.runs {
-        let inputs = super::generate(&mut rng, varied);
-        let (interpreter, vm) = runner.both(&inputs)?;
+        let input = runner.subject.generate(&mut rng);
+        let (interpreter, vm) = runner.both(&input)?;
         match verdict(&interpreter, &vm) {
             Verdict::Agree => {
                 agree += 1;
@@ -368,20 +334,20 @@ fn drive(req: &Request, runner: &Runner, varied: &Varied) -> std::io::Result<boo
                 differ += 1;
                 let key = signature(&interpreter, &vm, &found);
                 if kept.len() < KEPT && !kept.iter().any(|(k, _)| *k == key) {
-                    kept.push((key, inputs));
+                    kept.push((key, input));
                 }
             }
         }
     }
-    for (n, (key, inputs)) in kept.iter().enumerate() {
-        let small = smaller(runner, inputs.clone(), key);
+    for (n, (key, input)) in kept.iter().enumerate() {
+        let small = smaller(runner, input.clone(), key);
         let (interpreter, vm) = runner.both(&small)?;
         let Verdict::Differ(found) = verdict(&interpreter, &vm) else {
             eprintln!("ironwork fuzz: {key}: not kept, as its input ran alike when run again");
             continue;
         };
         let dir = req.out.join(format!("divergence-{n}"));
-        keep(&dir, runner, &small, &interpreter, &vm, &found)?;
+        keep(&dir, runner.subject, &small, &interpreter, &vm, &found)?;
         eprintln!("ironwork fuzz: {}: {}", dir.display(), found.first().map_or(key.as_str(), String::as_str));
     }
     for (what, n) in &unimplemented {
@@ -397,12 +363,124 @@ fn drive(req: &Request, runner: &Runner, varied: &Varied) -> std::io::Result<boo
     Ok(differ > 0)
 }
 
+/// A batch program: its fed data sets, SYSIN and PARM varied, its other DDs given empty or new.
+struct Batch<'a> {
+    others: &'a Others,
+    rdw: Vec<String>,
+    varied: Varied,
+    req: &'a Request,
+}
+
+impl Batch<'_> {
+    /// The data sets and SYSIN a run is given, by DD, and the bytes each starts with.
+    fn given(&self, inputs: &Inputs) -> Vec<(String, Option<Vec<u8>>)> {
+        let mut given: Vec<(String, Option<Vec<u8>>)> = inputs.files.iter().map(|(dd, records)| (dd.clone(), Some(super::data_set(records, self.rdw.contains(dd))))).collect();
+        given.extend(self.others.unfed.iter().map(|dd| (dd.clone(), Some(Vec::new()))));
+        given.extend(self.others.written.iter().map(|dd| (dd.clone(), None)));
+        if let Some(lines) = inputs.lines.get("SYSIN") {
+            given.push(("SYSIN".into(), Some(super::sysin_text(lines))));
+        }
+        given
+    }
+}
+
+impl Subject for Batch<'_> {
+    type Input = Inputs;
+
+    fn generate(&self, rng: &mut Rng) -> Inputs {
+        super::generate(rng, &self.varied)
+    }
+
+    fn launch(&self, inputs: &Inputs, dir: &Path, vm: bool) -> std::io::Result<Launch> {
+        let mut command = command(self.req, "run")?;
+        let (mut left, mut named) = (Vec::new(), Vec::new());
+        for (k, (dd, bytes)) in self.given(inputs).into_iter().enumerate() {
+            let name = kept_name(k, &dd);
+            let path = dir.join(&name);
+            if let Some(bytes) = bytes {
+                fs::write(&path, bytes)?;
+            }
+            command.arg("--dd").arg(format!("{dd}={}", path.display()));
+            left.push((format!("DD {dd}"), name, path.clone()));
+            named.push((path, dd));
+        }
+        if let Some(parm) = inputs.parms.get("PARM") {
+            fs::write(dir.join("parm.txt"), parm)?;
+            command.arg("--parm").arg(String::from_utf8_lossy(parm).as_ref());
+        }
+        Ok(Launch { command: limited(command, self.req, vm), left, tasks: None, named })
+    }
+
+    /// Records, lines and PARM text dropped while the runs still differ in the same way.
+    fn smaller(&self, mut inputs: Inputs, holds: &mut dyn FnMut(&Inputs) -> bool) -> Inputs {
+        for dd in inputs.files.keys().cloned().collect::<Vec<_>>() {
+            for k in (0..inputs.files[&dd].len()).rev() {
+                let mut candidate = inputs.clone();
+                candidate.files.get_mut(&dd).expect("fed").remove(k);
+                if holds(&candidate) {
+                    inputs = candidate;
+                }
+            }
+        }
+        for name in inputs.lines.keys().cloned().collect::<Vec<_>>() {
+            for k in (0..inputs.lines[&name].len()).rev() {
+                let mut candidate = inputs.clone();
+                candidate.lines.get_mut(&name).expect("given").remove(k);
+                if holds(&candidate) {
+                    inputs = candidate;
+                }
+            }
+        }
+        for name in inputs.parms.keys().cloned().collect::<Vec<_>>() {
+            let parm = inputs.parms[&name].clone();
+            for keep in [0, parm.len() / 2].into_iter().filter(|&k| k < parm.len()) {
+                let mut candidate = inputs.clone();
+                candidate.parms.insert(name.clone(), parm[..keep].to_vec());
+                if holds(&candidate) {
+                    inputs = candidate;
+                    break;
+                }
+            }
+        }
+        inputs
+    }
+}
+
+pub fn run(req: Request) -> ExitCode {
+    let fail = |message: String| {
+        eprintln!("ironwork fuzz: {message}");
+        ExitCode::from(2)
+    };
+    let (compiled, rest) = match super::compile(&req) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::from(12);
+        }
+    };
+    let parm = super::takes_parm(&compiled);
+    if !compiled.program.using.is_empty() && !parm {
+        return fail(format!("{} takes PROCEDURE DIVISION USING parameters that are not a PARM's halfword length and text: fuzz runs a main program", compiled.program.id));
+    }
+    let (feeds, sysin, others) = super::inputs_of(&compiled, &rest);
+    if feeds.is_empty() && !sysin && !parm {
+        return fail(format!("{} reads no sequential, indexed or relative file on a DD of its own, no SYSIN and no PARM, so there is nothing to vary", compiled.program.id));
+    }
+    let rdw = feeds.iter().filter(|f| f.variable.is_some()).map(|f| f.dd.clone()).collect();
+    let varied = Varied { feeds, lines: sysin.then(|| "SYSIN".to_string()).into_iter().collect(), parms: parm.then(|| "PARM".to_string()).into_iter().collect() };
+    fuzz(&req, &compiled, &Batch { others: &others, rdw, varied, req: &req })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn ran(status: i32, out: &str, err: &str) -> Ran {
-        Ran { timed_out: false, status: Some(status), out: out.as_bytes().to_vec(), err: err.into(), files: BTreeMap::new() }
+        Ran { timed_out: false, status: Some(status), out: out.as_bytes().to_vec(), err: err.into(), left: Vec::new(), tasks: Vec::new() }
+    }
+
+    fn outfile(bytes: &[u8]) -> Vec<Left> {
+        vec![Left { what: "DD OUTFILE".into(), file: "OUTFILE".into(), bytes: Some(bytes.to_vec()) }]
     }
 
     #[test]
@@ -413,12 +491,16 @@ mod tests {
         assert_eq!(found, ["standard output differs at line 1: interpreter \"TOTAL 1\", VM \"TOTAL 2\""]);
         assert_eq!(signature(&interpreter, &vm, &found), "exit status 0 / exit status 0: standard output");
 
-        let abend = Ran { files: [("OUTFILE".to_string(), Some(b"AB".to_vec()))].into(), ..ran(240, "", "P.cbl:7:12: ABEND S0C7: data exception\n") };
-        let written = Ran { files: [("OUTFILE".to_string(), Some(b"ABC".to_vec()))].into(), ..ran(0, "", "") };
+        let abend = Ran { left: outfile(b"AB"), ..ran(240, "", "P.cbl:7:12: ABEND S0C7: data exception\n") };
+        let written = Ran { left: outfile(b"ABC"), ..ran(0, "", "") };
         let Verdict::Differ(found) = verdict(&written, &abend) else { panic!("they differ") };
         assert_eq!(found[0], "the ending differs: interpreter exit status 0, VM S0C7 at P.cbl:7:12");
         assert_eq!(Ran { status: Some(240), ..ran(0, "", "P.cbl:7:12: ABEND S0C7: data exception\n") }.ending(), "S0C7 at P.cbl:7:12");
-        assert_eq!(found.last().map(String::as_str), Some("DD OUTFILE differs: interpreter 3 bytes, VM 2 bytes"));
+        assert_eq!(found.last().map(String::as_str), Some("DD OUTFILE differs: interpreter 3 bytes, VM 2 bytes, first at offset 2"));
+
+        let task = |record: &str| Ran { tasks: record.as_bytes().to_vec(), ..ran(0, "", "") };
+        let Verdict::Differ(found) = verdict(&task("task 1\nts none\n"), &task("task 1\nts Q\n")) else { panic!("the task records differ") };
+        assert_eq!(found, ["the task record differs at line 2: interpreter \"ts none\", VM \"ts Q\""]);
     }
 
     #[test]
@@ -461,11 +543,11 @@ mod tests {
             clock: "2026-01-01T00:00:00".into(),
         };
         let others = Others { written: vec!["OUTFILE".into(), "../ESCAPE".into()], ..Default::default() };
-        let runner = Runner { req: &req, others: &others, rdw: Vec::new(), work: dir.join(".work") };
+        let batch = Batch { others: &others, rdw: Vec::new(), varied: Varied { feeds: Vec::new(), lines: Vec::new(), parms: Vec::new() }, req: &req };
         let inputs = Inputs { files: [("INFILE".to_string(), vec![b"AB".to_vec(), b"CD".to_vec()])].into(), lines: [("SYSIN".to_string(), vec![b"X".to_vec()])].into(), ..Default::default() };
         let interpreter = ran(0, "TOTAL 1\n", "");
-        let vm = Ran { files: [("../ESCAPE".to_string(), Some(b"OUT".to_vec()))].into(), ..ran(0, "TOTAL 2\n", "") };
-        keep(&dir.join("divergence-0"), &runner, &inputs, &interpreter, &vm, &["standard output differs".into()]).unwrap();
+        let vm = Ran { left: vec![Left { what: "DD ../ESCAPE".into(), file: "dd.2".into(), bytes: Some(b"OUT".to_vec()) }], ..ran(0, "TOTAL 2\n", "") };
+        keep(&dir.join("divergence-0"), &batch, &inputs, &interpreter, &vm, &["standard output differs".into()]).unwrap();
         let kept = dir.join("divergence-0");
         assert_eq!(fs::read(kept.join("input/INFILE")).unwrap(), b"ABCD");
         assert_eq!(fs::read(kept.join("input/SYSIN")).unwrap(), b"X\n");

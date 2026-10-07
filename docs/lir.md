@@ -2540,16 +2540,29 @@ The front-end fuzz test's mutated programs that compile run through the `Harness
 limit of 20,000 (exec/src/tests/differential.rs), so one that loops ends in S322 at the same
 statement on both; each failing input is written to the temp directory.
 `ironwork fuzz --differential` runs each input it generates for a batch program on both, under one
-statement limit, and passes when they agree. Two runs that reach the limit stop at the same statement
+statement limit, and passes when they agree on the exit status, the abend, standard output and
+error, and every DD's data set. Two runs that reach the limit stop at the same statement
 and are compared like any other; a run either executor ends at the timeout is counted as timed out
 and not compared, and a run the VM stops at what it does not run yet is counted. It keeps each input on which they differ, made smaller, with what each
-executor wrote and the command that repeats the run. The golden programs of §12.2 run in both,
-which exercises C99.
+executor wrote and the command that repeats the run. `fuzz --cics --differential` does the same for
+a CICS task on a generated COMMAREA and operator's typing, through `ironwork cics`: besides the exit
+status, abend and output, the screens the tasks sent among it, it compares the record `--task-out`
+writes of each task of the pseudo-conversation that ends without an abend (RETURN's TRANSID and
+COMMAREA, the TS queues, the TD queues no `--td` names), each `--file` data set and each `--td`
+queue's file; `cics` takes `--statement-limit` for it, each task held to the limit. `fuzz
+--interface --differential` does it for a subprogram on generated arguments, through `ironwork run
+--argument`: besides RETURN-CODE (the exit status), the abend, the output and each DD's data set, it
+compares each argument as the caller sees it after the CALL, which `--arguments-out` writes from the
+run unit's memory at the end or at the abend (`Remains::arguments`). Each kept input of either is
+made smaller as `fuzz --cics` and `fuzz --interface` make an abend's input smaller. The golden
+programs of §12.2 run in both, which exercises C99.
 
-**Campaign.** `tools/differential-campaign.py` runs `fuzz --differential` over a corpus of batch
+**Campaign.** `tools/differential-campaign.py` runs `fuzz --differential` over a corpus of
 programs, round after round with a new seed, until it has spent a stated number of CPU-hours, and
 writes `campaign.json`: the runs, how many agree, time out, stop at what the VM does not run yet or
-differ, each program's share, and each differing input kept. CPU time is each fuzz process's user
+differ, each program's share and the mode it was fuzzed in, and each differing input kept. A program
+with EXEC CICS is fuzzed with `--cics`, a subprogram whose PROCEDURE DIVISION USING is not a PARM
+with `--interface`, and any other as a batch program. CPU time is each fuzz process's user
 and system time with its runs', so the figure does not depend on the machine's load. The
 Differential campaign workflow (`.github/workflows/differential.yml`, run by hand) builds a release
 binary, takes NIST's CCVS85 routines with their X-cards filled in as the corpus, shares it among 8

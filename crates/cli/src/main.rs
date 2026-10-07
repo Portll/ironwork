@@ -8,7 +8,7 @@ const USAGE: &str = "ironwork for COBOL
 usage:
   ironwork run <program.cbl> [-silent] [-strict-sort-keys] [-warnings-block] [--fastsrt-adv-print=exclude|include]
                [-debug] [--cics-return-warning=once|always|never] [--optimize=0|1|2] [-I <dir>]... [-L <dir>]... [--vm | --interpret]
-               [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT | --argument path|OMITTED...]
+               [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT | --argument path|OMITTED... [--arguments-out DIR]]
                [--exit-code] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
                [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind] [--screens path]
@@ -25,12 +25,13 @@ usage:
                [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
                                                        compile only
   ironwork cics <program.cbl> [run flags] [--transid T] [--termid T] [--userid U] [--applid A] [--sysid S]
-               [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]... [--td QUEUE=path]...
+               [--commarea path[:text]] [--commarea-out path[:text]] [--task-out path] [--file SPEC]... [--td QUEUE=path]...
+               [--statement-limit N] [--time-limit SECONDS] [--storage-limit BYTES]
                [--screens path | --serve HOST:PORT [--serve-public] [--transaction TRAN=PROGRAM]... [--csd path]]
                                                        run as the first program of a CICS task
-  ironwork cics <module.iwm> [run's flags for a module but --parm and the three limits] [--transid T] [--termid T]
-               [--userid U] [--applid A] [--sysid S] [--commarea path[:text]] [--commarea-out path[:text]] [--file SPEC]...
-               [--td QUEUE=path]... [--screens path [--transaction TRAN=PROGRAM]... [--csd path]]
+  ironwork cics <module.iwm> [run's flags for a module but --parm] [--transid T] [--termid T]
+               [--userid U] [--applid A] [--sysid S] [--commarea path[:text]] [--commarea-out path[:text]] [--task-out path]
+               [--file SPEC]... [--td QUEUE=path]... [--screens path [--transaction TRAN=PROGRAM]... [--csd path]]
                                                        run a load module's first program on the VM as the first
                                                        program of a CICS task; --serve takes a source
   ironwork compile <program.cbl>... [-o <dir>] [--bundle NAME] [--source-prefix DIR] [-silent] [-strict-sort-keys]
@@ -44,7 +45,8 @@ usage:
   ironwork job <job.jcl> --datasets DIR[:text] [--proclib DIR]... [--user ID] [run flags] [-I <dir>]... [-L <dir>]... [--clock <time>] [--sql-replay path]
                [--exit-code]
                                                        run a job's steps in order
-  ironwork fuzz [--job|--differential] <program.cbl|job.jcl> -o <dir> [--runs N] [--seed N] [--timeout SECONDS] [--hang-limit N]
+  ironwork fuzz [--job | [--cics|--interface] [--differential]] <program.cbl|job.jcl> -o <dir> [--runs N] [--seed N]
+               [--timeout SECONDS] [--hang-limit N]
                [--root DIR] [--clock <time>]
                [-I <dir>]... [-L <dir>]... [-silent] [-strict-sort-keys] [-debug] [--optimize=0|1|2]
                [--compliance strict|extended] [--dialect ibm|gnucobol] [--assume ID=VALUE]...
@@ -149,17 +151,18 @@ flags:
              the virtual printer: CALL 'SYSTEM' or 'C$SYSTEM' with an lp or lpr command appends
              the files it names, each a DD, there and returns 0, and runs nothing
   --statement-limit N
-             with run or job, end the run with S322 at the statement after the Nth to start, as z/OS
-             ends a step that runs past its TIME= (each job step gets N); a count stands in for CPU
-             time so the end falls at the same statement on every run (assumption C241)
+             with run, job or cics, end the run with S322 at the statement after the Nth to start,
+             as z/OS ends a step that runs past its TIME= (each job step, and each task of a CICS
+             run, gets N); a count stands in for CPU time so the end falls at the same statement on
+             every run (assumption C241)
   --env NAME=VALUE
              under --compliance extended, an environment variable ACCEPT ... FROM ENVIRONMENT
              reads; the run sees these, and those it sets, never the process's own (C464)
   --time-limit SECONDS
-             with run or job, end the run with S322 at a statement that starts once SECONDS have
-             passed (each job step gets SECONDS); there is no limit without it
+             with run, job or cics, end the run with S322 at a statement that starts once SECONDS
+             have passed (each job step and each task gets SECONDS); there is no limit without it
   --storage-limit BYTES[K|M|G]
-             with run or job, end the run at the next statement once the run unit's storage, its
+             with run, job or cics, end the run at the next statement once the run unit's storage, its
              programs' data, arguments, EXTERNAL data and heap, passes BYTES; there is no limit
              without it, and each CICS GETMAIN or CEEGTST grants at most 256 MiB
   --parm TEXT
@@ -171,6 +174,10 @@ flags:
              subprogram a caller passed the file's bytes to, or OMITTED, a null address. Each
              argument is input to the run, and EXIT PROGRAM returns as it does under a caller. Not
              with --parm. The run's journal does not record the arguments
+  --arguments-out DIR
+             with --argument, write each argument as the run left it, the bytes the caller sees
+             after its CALL, to DIR/arg1, DIR/arg2 and on in USING order, when the run ends, by an
+             abend too; an OMITTED argument has no file
   --provenance FILE
              write what the compile read and decided as an in-toto statement with the SLSA
              Provenance v1 predicate: the source and every COPY member by digest, the option cards
@@ -263,6 +270,11 @@ cics flags:
              its length, and without it EIBCALEN is 0
   --commarea-out path[:text]
              where RETURN's COMMAREA is written
+  --task-out path
+             write a line of JSON for each task of the run that ends without an abend: its number
+             (task) and transaction (transid), RETURN's TRANSID and COMMAREA (returnTransid,
+             returnCommarea, null without), and its temporary-storage (ts) and transient-data (td)
+             queues, each item in hexadecimal; a --td queue's items are in its file instead
   --file NAME=path,KSDS,key=OFFSET:LENGTH,len=RECLEN[,text|,variable]
   --file NAME=path,RRDS,len=RECLEN[,text|,variable]
              a CICS file: its data set holds the records in key order, as a REPRO unload does, and
@@ -392,16 +404,24 @@ fuzz flags:
              data set and its own --td queues; without --transid or --csd, the one transaction
              RETURN TRANSID names, where the source names one, runs the program. AEI0, AEIL, AEYQ
              and AEI1 say what the region lacks and are counted refused. An abend the task gives
-             with no COMMAREA and no operator input is not kept
+             with no COMMAREA and no operator input is not kept. --hang-limit only with
+             --differential
   --differential
-             run the batch program on each generated input twice, through run --interpret and run
-             --vm, each with --statement-limit --hang-limit (1000000 without it), and keep each
-             input on which the interpreter and the VM differ in exit status, abend, standard
-             output, standard error or a DD's data set, one to each way of differing, made smaller
-             while it still differs that way: divergence-N/ holds its input, what each executor
-             wrote, and a report of the differences with the command that repeats the run. Runs that
-             both reach the limit or time out, and runs that reach what the VM does not run yet,
-             pass and are counted. Exit status 1 when any input differs
+             run each generated input twice, on the interpreter (--interpret) and on the VM (--vm),
+             each with --statement-limit --hang-limit (1000000 without it), and keep each input on
+             which they differ, one to each way of differing, made smaller while it still differs
+             that way: divergence-N/ holds its input, what each executor wrote and left, and a
+             report of the differences with the command that repeats the run. A batch program runs
+             through run, compared on exit status, abend, standard output, standard error and each
+             DD's data set. With --cics each task runs through cics --task-out, compared on exit
+             status, abend, standard output with the screens sent, standard error, the task record
+             of each task of the pseudo-conversation (RETURN's TRANSID and COMMAREA, the TS and TD
+             queues), each --file data set and each --td queue's file. With --interface each
+             argument set runs through run --argument --arguments-out, compared on exit status
+             (RETURN-CODE), abend, standard output, standard error, each argument as the caller sees
+             it after the CALL, and each DD's data set. Runs that both reach the limit or time out,
+             and runs that reach what the VM does not run yet, pass and are counted. No manifest,
+             evidence or coverage is written. Exit status 1 when any input differs
   --interface
              run a subprogram as a caller would, through ironwork run --argument: each PROCEDURE
              DIVISION USING item gets bytes built field by field from its LINKAGE record. Where a
@@ -464,7 +484,7 @@ exit status: for check and compile, the compile's return code, the highest of it
   2 for usage";
 
 const FLAGS: &[&str] = &["-silent", "-strict-sort-keys", "-warnings-block", "-debug"];
-const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid", "--sysid", "--commarea", "--commarea-out", "--file", "--td", "--screens", "--serve", "--transaction", "--csd"];
+const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid", "--sysid", "--commarea", "--commarea-out", "--task-out", "--file", "--td", "--screens", "--serve", "--transaction", "--csd"];
 
 mod compare;
 mod compile;
@@ -597,6 +617,7 @@ fn driver() -> ExitCode {
     let mut hang_limit: Option<u64> = None;
     let (mut fuzz_job, mut fuzz_cics, mut fuzz_interface, mut fuzz_differential) = (false, false, false, false);
     let mut arguments: Vec<Option<std::path::PathBuf>> = Vec::new();
+    let mut arguments_out: Option<std::path::PathBuf> = None;
     let mut step_parms: Vec<(String, String)> = Vec::new();
     let mut instream: Vec<(String, std::path::PathBuf)> = Vec::new();
     let mut exit_code = false;
@@ -643,6 +664,10 @@ fn driver() -> ExitCode {
                 Some(a) if a == "OMITTED" => arguments.push(None),
                 Some(path) => arguments.push(Some(path.into())),
                 None => refuse!("--argument needs a file holding the argument's bytes, or OMITTED"),
+            },
+            "--arguments-out" => match args.next() {
+                Some(dir) => arguments_out = Some(dir.into()),
+                None => refuse!("--arguments-out needs a directory"),
             },
             "--env" => match args.next().and_then(|v| v.split_once('=').map(|(n, v)| (n.to_owned(), v.to_owned()))).filter(|(n, _)| !n.is_empty()) {
                 Some((name, value)) => {
@@ -884,7 +909,7 @@ fn driver() -> ExitCode {
         || trace_statements.is_some() || trace_input || provenance_file.is_some() || coverage_file.is_some() || !cics_options.is_empty() || !matches!(clock, exec::unit::Clock::System)
         || compare_base.is_some() || compare_head.is_some() || declare.is_some() || statement.is_some() || !expected.is_empty() || datasets.is_some()
         || !proclibs.is_empty() || user.is_some()
-        || vm || interpret || parm.is_some() || statement_limit.is_some() || time_limit.is_some() || storage_limit.is_some() || !arguments.is_empty();
+        || vm || interpret || parm.is_some() || statement_limit.is_some() || time_limit.is_some() || storage_limit.is_some() || !arguments.is_empty() || arguments_out.is_some();
     let dump_flags = !dump_options.only.is_empty() || dump_options.strings || !dump_options.check;
     let fuzz_flags = fuzz_root.is_some() || fuzz_runs.is_some() || fuzz_seed.is_some() || fuzz_timeout.is_some() || hang_limit.is_some() || fuzz_job || fuzz_cics || fuzz_interface || fuzz_differential;
     if (vm || interpret) && !matches!(rest.first().map(String::as_str), Some("run" | "cics")) {
@@ -894,11 +919,11 @@ fn driver() -> ExitCode {
         return usage_error("--vm and --interpret name different executors; give one");
     }
     let executor = if vm { Executor::Vm } else if interpret { Executor::Interpreter } else { Executor::Default };
-    if statement_limit.is_some() && !matches!(rest.first().map(String::as_str), Some("run" | "job")) {
-        return usage_error("--statement-limit is for run and job; fuzz sets its own");
+    if statement_limit.is_some() && !matches!(rest.first().map(String::as_str), Some("run" | "job" | "cics")) {
+        return usage_error("--statement-limit is for run, job and cics; fuzz sets its own");
     }
-    if (time_limit.is_some() || storage_limit.is_some()) && !matches!(rest.first().map(String::as_str), Some("run" | "job")) {
-        return usage_error("--time-limit and --storage-limit are for run and job");
+    if (time_limit.is_some() || storage_limit.is_some()) && !matches!(rest.first().map(String::as_str), Some("run" | "job" | "cics")) {
+        return usage_error("--time-limit and --storage-limit are for run, job and cics");
     }
     if parm.is_some() && rest.first().map(String::as_str) != Some("run") {
         return usage_error("--parm is for run; a job's PARM comes from its EXEC, and fuzz makes its own");
@@ -906,17 +931,20 @@ fn driver() -> ExitCode {
     if !arguments.is_empty() && (rest.first().map(String::as_str) != Some("run") || parm.is_some()) {
         return usage_error("--argument is for run, and not with --parm; fuzz --interface makes its own");
     }
+    if arguments_out.is_some() && arguments.is_empty() {
+        return usage_error("--arguments-out goes with --argument, for run");
+    }
     if (!step_parms.is_empty() || !instream.is_empty()) && rest.first().map(String::as_str) != Some("job") {
         return usage_error("--step-parm and --instream are for job");
     }
     if rest.first().is_some_and(|c| c == "fuzz") {
         let [_, file] = rest.as_slice() else { return usage_error("fuzz needs one program, or one job with --job") };
         let Some(out) = out_dir else { return usage_error("fuzz needs -o DIR") };
-        if [fuzz_job, fuzz_cics, fuzz_interface, fuzz_differential].iter().filter(|&&on| on).count() > 1 {
-            return usage_error("fuzz takes one of --job, --cics, --interface and --differential");
+        if [fuzz_job, fuzz_cics, fuzz_interface].iter().filter(|&&on| on).count() > 1 || fuzz_job && fuzz_differential {
+            return usage_error("fuzz takes one of --job, --cics and --interface, and --differential goes with a program, --cics or --interface, not --job");
         }
-        if fuzz_cics && hang_limit.is_some() {
-            return usage_error("--hang-limit is for fuzz and fuzz --job; fuzz --cics does not run a timed-out task again");
+        if fuzz_cics && !fuzz_differential && hang_limit.is_some() {
+            return usage_error("--hang-limit is for fuzz, fuzz --job and --differential; fuzz --cics does not run a timed-out task again");
         }
         // Fuzz makes every input, DD, journal and coverage report itself; a flag it would not use is
         // refused rather than ignored.
@@ -924,7 +952,7 @@ fn driver() -> ExitCode {
         let elsewhere = compare_base.is_some() || compare_head.is_some() || declare.is_some() || statement.is_some() || !expected.is_empty() || dump_flags || bundle.is_some() || source_prefix.is_some();
         let job_only = !fuzz_job && (!proclibs.is_empty() || user.is_some() || datasets.is_some()) || datasets.as_deref().is_some_and(|d| d.ends_with(":text"));
         let cics_only = !fuzz_cics && !cics_options.is_empty();
-        let cics_made = cics_options.iter().any(|(n, _)| matches!(n.as_str(), "--commarea" | "--commarea-out" | "--screens" | "--serve"));
+        let cics_made = cics_options.iter().any(|(n, _)| matches!(n.as_str(), "--commarea" | "--commarea-out" | "--task-out" | "--screens" | "--serve"));
         if made || elsewhere || job_only || cics_only || cics_made {
             let taken = match (fuzz_job, fuzz_cics) {
                 (true, _) => ", --datasets (without :text), --proclib, --user",
@@ -950,10 +978,11 @@ fn driver() -> ExitCode {
             return fuzz::job::run(fuzz::job::Request { fuzz: request, datasets: datasets.map(std::path::PathBuf::from), proclibs, user });
         }
         if fuzz_cics {
-            return fuzz_cics::run(fuzz_cics::Request { fuzz: request, options: cics_options });
+            let request = fuzz_cics::Request { fuzz: request, options: cics_options };
+            return if fuzz_differential { fuzz::differential::cics::run(request) } else { fuzz_cics::run(request) };
         }
         if fuzz_interface {
-            return fuzz::interface::run(request);
+            return if fuzz_differential { fuzz::differential::interface::run(request) } else { fuzz::interface::run(request) };
         }
         if fuzz_differential {
             return fuzz::differential::run(request);
@@ -1245,9 +1274,10 @@ fn driver() -> ExitCode {
         Ok(a) => a,
         Err(e) => return usage_error(&format!("--argument: {e}")),
     };
+    let mut kept = None;
     let ended = match (&code, &parm) {
-        (None, None) if !passed_arguments.is_empty() => compiled.execute_with_arguments(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, &passed_arguments).map_err(exec::vm::Halt::Abend),
-        (Some(code), None) if !passed_arguments.is_empty() => exec::vm::execute(&compiled, code, library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, exec::Passed::Arguments(&passed_arguments), &mut None),
+        (None, None) if !passed_arguments.is_empty() => compiled.execute_with_arguments(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, &passed_arguments, &mut kept).map_err(exec::vm::Halt::Abend),
+        (Some(code), None) if !passed_arguments.is_empty() => exec::vm::execute(&compiled, code, library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, exec::Passed::Arguments(&passed_arguments), &mut kept),
         (None, Some(p)) => compiled.execute_main(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, p).map_err(exec::vm::Halt::Abend),
         (None, None) => compiled.execute_observed(library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer).map_err(exec::vm::Halt::Abend),
         (Some(code), parm) => exec::vm::execute(&compiled, code, library, dds, Some(sysin), clock, database.as_deref_mut(), &mut out, &mut err, observer, parm.as_deref().map_or(exec::Passed::Nothing, exec::Passed::Parm), &mut None),
@@ -1273,6 +1303,11 @@ fn driver() -> ExitCode {
             eprintln!("ironwork: --coverage {}: {e}", file.display());
         }
     }
+    if let (Some(dir), Some(kept)) = (&arguments_out, &kept)
+        && let Err(e) = write_arguments(dir, &kept.arguments)
+    {
+        eprintln!("ironwork: --arguments-out {}: {e}", dir.display());
+    }
     if let Some(run) = shared {
         let run = std::rc::Rc::try_unwrap(run).map(std::cell::RefCell::into_inner);
         if let Ok(run) = run {
@@ -1284,6 +1319,18 @@ fn driver() -> ExitCode {
         Some(abend) => report_abend(&compiled, path, abend),
         None => exit::status(outcome),
     }
+}
+
+/// Writes each argument as a run left it to `dir`, as arg1, arg2 and on in USING order; an OMITTED
+/// argument has no file.
+fn write_arguments(dir: &std::path::Path, arguments: &[Option<Vec<u8>>]) -> io::Result<()> {
+    fs::create_dir_all(dir)?;
+    for (n, argument) in arguments.iter().enumerate() {
+        if let Some(bytes) = argument {
+            fs::write(dir.join(format!("arg{}", n + 1)), bytes)?;
+        }
+    }
+    Ok(())
 }
 
 /// Closes the journal on how the run ended and gives the exit status.
@@ -1729,8 +1776,8 @@ fn run_cics(
         if executor == Executor::Vm {
             return usage_error("--vm is not for --serve, whose tasks run on the interpreter");
         }
-        if get("--screens").is_some() || get("--commarea").is_some() || get("--commarea-out").is_some() {
-            return usage_error("--serve cannot be combined with --screens, --commarea or --commarea-out");
+        if get("--screens").is_some() || get("--commarea").is_some() || get("--commarea-out").is_some() || get("--task-out").is_some() {
+            return usage_error("--serve cannot be combined with --screens, --commarea, --commarea-out or --task-out");
         }
         return serve_cics(compiled, library, dds, clock, database, options);
     }
@@ -1817,6 +1864,7 @@ fn cics_tasks(
     let shared = evidence.map(|run| std::rc::Rc::new(std::cell::RefCell::new(run)));
     let covered = coverage.map(|(_, _, roots)| std::rc::Rc::new(std::cell::RefCell::new(coverage::Coverage::naming(path, roots))));
     let mut number = 1;
+    let mut ended_tasks = Vec::new();
     let ran = loop {
         let observer = (shared.is_some() || covered.is_some()).then(|| {
             let (run, cov) = (shared.clone(), covered.clone());
@@ -1829,10 +1877,14 @@ fn cics_tasks(
                 }
             }) as exec::unit::Observer<'_>
         });
+        let transid = task.transid.clone();
         let ran = match tasks.run(dds.clone(), task, clock, &mut out, &mut err, observer) {
             Ok(ran) => ran,
             Err(stopped) => break Err(stopped),
         };
+        if let Ok((_, ended)) = &ran {
+            ended_tasks.push(task_state(number, &transid, ended));
+        }
         let (Some(terminal), Ok((_, ended))) = (&conversation, &ran) else { break Ok(ran) };
         terminal.borrow_mut().discard_pending();
         let Some(next) = ended.next_transid.as_deref().map(|t| t.trim().to_ascii_uppercase()) else { break Ok(ran) };
@@ -1873,6 +1925,11 @@ fn cics_tasks(
     };
     drop(out);
     print_screens();
+    if let Some(file) = get("--task-out")
+        && let Err(e) = fs::write(&file, ended_tasks.concat())
+    {
+        eprintln!("ironwork: --task-out {file}: {e}");
+    }
     if let (Some((file, outlines, _)), Some(c)) = (coverage, &covered) {
         let text = format!("{}\n", exec::evidence::canonical(&c.borrow().report(outlines)));
         if let Err(e) = fs::write(file, text) {
@@ -1919,6 +1976,24 @@ fn cics_tasks(
             exit::status(Outcome::of_abend(&abend.code))
         }
     }
+}
+
+/// What a task that ended without an abend left, as a line of JSON for --task-out: its number and
+/// transaction, RETURN's TRANSID and COMMAREA, and its temporary-storage and transient-data queues,
+/// bytes in hexadecimal.
+fn task_state(number: u32, transid: &str, task: &exec::cics::Task) -> String {
+    use exec::evidence::Value;
+    let hex = |bytes: &[u8]| Value::from(bytes.iter().map(|b| format!("{b:02X}")).collect::<String>());
+    let items = |items: &[Vec<u8>]| Value::Arr(items.iter().map(|i| hex(i)).collect());
+    let pairs = [
+        ("task", Value::from(i64::from(number))),
+        ("transid", Value::from(transid)),
+        ("returnTransid", task.next_transid.as_deref().map_or(Value::Null, Value::from)),
+        ("returnCommarea", task.returned_commarea.as_deref().map_or(Value::Null, hex)),
+        ("ts", Value::Obj(task.ts.iter().map(|(name, q)| (name.clone(), items(&q.items))).collect())),
+        ("td", Value::Obj(task.td.iter().filter(|(_, q)| !q.is_empty()).map(|(name, q)| (name.clone(), items(q))).collect())),
+    ];
+    format!("{}\n", exec::evidence::canonical(&Value::Obj(pairs.into_iter().map(|(k, v)| (k.to_owned(), v)).collect())))
 }
 
 /// One task's run on `executor`; Err with how and why when the VM does not run the program.

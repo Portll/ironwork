@@ -22,7 +22,7 @@ const MANIFEST_FORMAT: &str = "ironwork-fuzz-interface/v1";
 const MINIMIZE_BUDGET: u32 = 200;
 
 /// One run's arguments in USING order, None for OMITTED.
-type Arguments = Vec<Option<Vec<u8>>>;
+pub(crate) type Arguments = Vec<Option<Vec<u8>>>;
 
 /// An abend's code, file and line.
 type Place = (String, String, i64);
@@ -437,9 +437,9 @@ fn callers(req: &Request) -> Vec<(String, exec::Compiled)> {
 /// The data sets an interface run gives the subprogram's files, as the main fuzz gives those it
 /// does not vary: an empty one for each file it reads and a new one for each it only writes. The
 /// runs vary the arguments alone, which the manifest records.
-struct DataSets {
-    empty: Vec<String>,
-    new: Vec<String>,
+pub(crate) struct DataSets {
+    pub(crate) empty: Vec<String>,
+    pub(crate) new: Vec<String>,
 }
 
 /// One run as its own `ironwork run` with the arguments in files of the run's directory.
@@ -508,11 +508,30 @@ impl Runner<'_> {
     }
 }
 
-/// The smallest arguments found that still end at `place`: each field of each argument passed put
-/// back to a value that breaks nothing wherever the abend still comes, and whether that finished
-/// within [`MINIMIZE_BUDGET`] runs.
-fn minimize(runner: &mut Runner, params: &[Param], mut arguments: Arguments, place: &Place) -> std::io::Result<(Arguments, bool)> {
-    let mut budget = MINIMIZE_BUDGET;
+/// The smallest arguments found that still end at `place`, and whether the search finished within
+/// [`MINIMIZE_BUDGET`] runs.
+fn minimize(runner: &mut Runner, params: &[Param], arguments: Arguments, place: &Place) -> std::io::Result<(Arguments, bool)> {
+    let (mut budget, mut exhausted, mut failed) = (MINIMIZE_BUDGET, false, None);
+    let small = smaller(params, arguments, &mut |trial| {
+        if failed.is_some() || budget == 0 {
+            exhausted |= failed.is_none();
+            return false;
+        }
+        budget -= 1;
+        match runner.run(trial, false, None) {
+            Ok(outcome) => outcome.place().as_ref() == Some(place),
+            Err(e) => {
+                failed = Some(e);
+                false
+            }
+        }
+    });
+    failed.map_or(Ok((small, !exhausted)), Err)
+}
+
+/// `arguments` with each field of each argument passed put back to a value that breaks nothing
+/// wherever `holds` says the run still ends as it did.
+pub(crate) fn smaller(params: &[Param], mut arguments: Arguments, holds: &mut dyn FnMut(&Arguments) -> bool) -> Arguments {
     for (i, param) in params.iter().enumerate() {
         for &f in &param.fields {
             let value = neutral(f);
@@ -520,20 +539,16 @@ fn minimize(runner: &mut Runner, params: &[Param], mut arguments: Arguments, pla
             if bytes.get(f.offset..f.offset + f.size).is_none_or(|now| now == value) {
                 continue;
             }
-            if budget == 0 {
-                return Ok((arguments, false));
-            }
-            budget -= 1;
             let mut trial = arguments.clone();
             if let Some(Some(b)) = trial.get_mut(i) {
                 b[f.offset..f.offset + f.size].copy_from_slice(&value);
             }
-            if runner.run(&trial, false, None)?.place().as_ref() == Some(place) {
+            if holds(&trial) {
                 arguments = trial;
             }
         }
     }
-    Ok((arguments, true))
+    arguments
 }
 
 /// Lists each of a kept run's arguments in `out` as the manifest gives them, and returns their ids.
@@ -577,7 +592,7 @@ struct Found {
 /// once more compiled with OPTIMIZE(2).
 /// A program name a run may give a CALL whose target an argument supplies, with the items the
 /// sources beside the subprogram store it in.
-struct Candidate {
+pub(crate) struct Candidate {
     name: String,
     receivers: BTreeSet<String>,
 }
@@ -651,7 +666,7 @@ const NAME_WIDTH: usize = 8;
 
 /// Where an argument held the program name a CALL took: the argument's place in USING order and
 /// the offset in it.
-type NameSlot = (usize, usize);
+pub(crate) type NameSlot = (usize, usize);
 
 /// Where each CALL of a data item takes its program name from in the arguments, with the item's
 /// name in upper case: the item itself where it lies in a USING record, or the field a chain of
@@ -730,7 +745,7 @@ fn name_slot(arguments: &Arguments, name: &str) -> Option<NameSlot> {
 /// `arguments` with `name` at `slot`, padded with spaces to the elementary item that starts there
 /// when it is narrower than a program name, to a program name's width otherwise, and never past
 /// the argument's end.
-fn with_name(arguments: &mut Arguments, params: &[Param], (i, at): NameSlot, name: &str) {
+pub(crate) fn with_name(arguments: &mut Arguments, params: &[Param], (i, at): NameSlot, name: &str) {
     let Some(Some(argument)) = arguments.get_mut(i) else { return };
     let field = params.get(i).and_then(|p| p.fields.iter().find(|f| f.offset == at)).map_or(NAME_WIDTH, |f| f.size.min(NAME_WIDTH));
     let width = field.min(argument.len().saturating_sub(at));
@@ -741,16 +756,23 @@ fn with_name(arguments: &mut Arguments, params: &[Param], (i, at): NameSlot, nam
     }
 }
 
+/// Where each CALL whose program name the arguments supply takes it from, with the names runs give
+/// it there, each told on standard error; none without candidates.
+pub(crate) fn name_slots(compiled: &exec::Compiled, params: &[Param], candidates: &[Candidate]) -> Vec<(NameSlot, Vec<String>)> {
+    let slots: Vec<(NameSlot, Vec<String>)> = if candidates.is_empty() { Vec::new() } else { linkage_targets(compiled).into_iter().map(|(slot, target)| (slot, names_for(candidates, Some(&target)))).collect() };
+    for ((i, at), names) in &slots {
+        eprintln!("ironwork fuzz: a CALL takes its program name from {} at offset {at}; runs give it one of {}", params[*i].name, names.join(", "));
+    }
+    slots
+}
+
 fn drive(req: &Request, compiled: &exec::Compiled, params: &[Param], sites: &[CallSite], candidates: &[Candidate], runner: &mut Runner) -> Result<Found, String> {
     let started = |e: std::io::Error| format!("a run could not start: {e}");
     let baseline = runner.run(&neutral_arguments(params), false, None).map_err(started)?.place();
     let mut rng = Rng(req.seed.max(1));
     let mut tally = Tally::new();
     let mut kept: Vec<(Place, Arguments)> = Vec::new();
-    let mut slots: Vec<(NameSlot, Vec<String>)> = if candidates.is_empty() { Vec::new() } else { linkage_targets(compiled).into_iter().map(|(slot, target)| (slot, names_for(candidates, Some(&target)))).collect() };
-    for ((i, at), names) in &slots {
-        eprintln!("ironwork fuzz: a CALL takes its program name from {} at offset {at}; runs give it one of {}", params[*i].name, names.join(", "));
-    }
+    let mut slots = name_slots(compiled, params, candidates);
     let mut corpus: Vec<Arguments> = Vec::new();
     for _ in 0..req.runs {
         let site = (!sites.is_empty()).then(|| &sites[rng.below(sites.len())]);
@@ -810,6 +832,45 @@ fn drive(req: &Request, compiled: &exec::Compiled, params: &[Param], sites: &[Ca
     Ok(Found { inputs, runs, codes, tally, baseline })
 }
 
+/// What runs of a subprogram take besides their arguments: its params, the programs in its
+/// directory and the -L libraries, the CALLs among them that pass its arguments, the program names
+/// a CALL may take from the arguments, the data sets its files get, and the DDs no --dd can carry.
+pub(crate) struct Setup {
+    pub(crate) params: Vec<Param>,
+    pub(crate) callers: Vec<(String, exec::Compiled)>,
+    pub(crate) sites: Vec<CallSite>,
+    pub(crate) candidates: Vec<Candidate>,
+    pub(crate) data_sets: DataSets,
+    pub(crate) ungiven: Vec<String>,
+}
+
+/// `compiled`'s setup, `rest` holding the other programs of its source and those its CALLs reach.
+pub(crate) fn setup(req: &Request, compiled: &exec::Compiled, mut rest: Vec<Program>) -> Setup {
+    let params = params(compiled);
+    let callers = callers(req);
+    let sites = call_sites(&compiled.program.id, &callers);
+    let (candidates, named) = candidates(compiled, &callers, req);
+    rest.extend(named);
+    let names: Vec<String> = candidates.iter().map(|c| c.name.clone()).collect();
+    let (feeds, _, others) = super::inputs_reaching(compiled, &rest, &names);
+    let mut empty: Vec<String> = feeds.into_iter().map(|f| f.dd).chain(others.unfed.iter().cloned()).collect();
+    empty.sort();
+    empty.dedup();
+    Setup { params, callers, sites, candidates, data_sets: DataSets { empty, new: others.written }, ungiven: others.ungiven }
+}
+
+impl DataSets {
+    /// Says on standard error which files are given empty data sets, and which DDs, `ungiven`, none.
+    pub(crate) fn tell(&self, ungiven: &[String]) {
+        if !self.empty.is_empty() {
+            eprintln!("ironwork fuzz: not varied, given empty: {}", self.empty.join(", "));
+        }
+        if !ungiven.is_empty() {
+            eprintln!("ironwork fuzz: no --dd can carry these names, so they are given no data set: {}", ungiven.join(", "));
+        }
+    }
+}
+
 /// `ironwork fuzz --interface`: runs the subprogram `req` names as a caller would, many times, and
 /// keeps each abend the arguments caused (docs/evidence.md §5.2).
 pub fn run(req: Request) -> ExitCode {
@@ -817,7 +878,7 @@ pub fn run(req: Request) -> ExitCode {
         eprintln!("ironwork fuzz: {message}");
         ExitCode::from(2)
     };
-    let (compiled, mut rest) = match super::compile(&req) {
+    let (compiled, rest) = match super::compile(&req) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("{e}");
@@ -830,31 +891,17 @@ pub fn run(req: Request) -> ExitCode {
     if let Some(why) = refusal(&compiled) {
         return fail(why);
     }
-    let params = params(&compiled);
-    let callers = callers(&req);
-    let sites = call_sites(&compiled.program.id, &callers);
+    let calls = short_calls(&file, &compiled, &rest, &req.flags);
+    let Setup { params, callers, sites, candidates, data_sets, ungiven } = setup(&req, &compiled, rest);
     let callers_compiled: Vec<(String, &exec::Compiled)> = callers.iter().map(|(f, c)| (f.clone(), c)).collect();
-    for short in short_arguments(compiled.program.load_name(), &callers_compiled, &params).into_iter().chain(short_calls(&file, &compiled, &rest, &req.flags)) {
+    for short in short_arguments(compiled.program.load_name(), &callers_compiled, &params).into_iter().chain(calls) {
         eprintln!("ironwork fuzz: {short}");
     }
-    let (candidates, named) = candidates(&compiled, &callers, &req);
-    rest.extend(named);
-    let names: Vec<String> = candidates.iter().map(|c| c.name.clone()).collect();
     let work = match super::prepare(&req.out, &req.roots()) {
         Ok(w) => w,
         Err(e) => return fail(e),
     };
-    let (feeds, _, others) = super::inputs_reaching(&compiled, &rest, &names);
-    let mut empty: Vec<String> = feeds.into_iter().map(|f| f.dd).chain(others.unfed.iter().cloned()).collect();
-    empty.sort();
-    empty.dedup();
-    let data_sets = DataSets { empty, new: others.written.clone() };
-    if !data_sets.empty.is_empty() {
-        eprintln!("ironwork fuzz: not varied, given empty: {}", data_sets.empty.join(", "));
-    }
-    if !others.ungiven.is_empty() {
-        eprintln!("ironwork fuzz: no --dd can carry these names, so they are given no data set: {}", others.ungiven.join(", "));
-    }
+    data_sets.tell(&ungiven);
     let mut runner = Runner { req: &req, work, count: 0, covered: super::RunCoverage::default(), data_sets };
     let found = drive(&req, &compiled, &params, &sites, &candidates, &mut runner);
     let _ = fs::remove_dir_all(&runner.work);

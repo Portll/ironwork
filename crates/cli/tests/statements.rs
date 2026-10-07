@@ -143,7 +143,7 @@ fn a_time_or_storage_limit_ends_the_run_on_both_executors() {
         assert!(room.status.success(), "{vm:?} {}", String::from_utf8_lossy(&room.stderr));
     }
     for (flags, code, message) in [
-        (&["check", "--time-limit", "1"][..], 2, "--time-limit and --storage-limit are for run and job"),
+        (&["check", "--time-limit", "1"][..], 2, "--time-limit and --storage-limit are for run, job and cics"),
         (&["run", "--storage-limit", "0"], 246, "--storage-limit needs a number of bytes, or of K, M or G"),
         (&["run", "--storage-limit", "12Q"], 246, "--storage-limit needs a number of bytes, or of K, M or G"),
         (&["run", "--time-limit", "soon"], 246, "--time-limit needs a number of seconds"),

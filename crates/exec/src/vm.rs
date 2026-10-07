@@ -196,13 +196,13 @@ fn run_unit<'w>(
 
 /// Runs the first program of `run_unit`, `me`, as `code`, given `passed`, then settles the
 /// database and closes every file, unless an abend the PARM's TRAP(OFF) keeps from Language
-/// Environment ended it.
-fn run_main(code: &Code, id: &str, me: usize, run_unit: &mut RunUnit<'_, Rc<Code>, VmLibrary>, passed: Passed<'_>, page: &CodePage) -> Result<(Ending, i16), Halt> {
+/// Environment ended it. `addresses` takes where each argument passed is.
+fn run_main(code: &Code, id: &str, me: usize, run_unit: &mut RunUnit<'_, Rc<Code>, VmLibrary>, passed: Passed<'_>, page: &CodePage, addresses: &mut Vec<Option<usize>>) -> Result<(Ending, i16), Halt> {
     let trap_off = matches!(passed, Passed::Parm(p) if rt::le::parm::trap_off(p));
     passed.apply_parm(run_unit);
-    let addresses = passed.addresses(run_unit, page);
+    *addresses = passed.addresses(run_unit, page);
     let last_paragraph = code.program().and_then(|p| p.paragraphs.last().and_then(|para| p.debug.positions.get(para.at as usize).copied()));
-    let ending = rt::vm::run(code, me, run_unit, &addresses, passed.main()).and_then(|e| crate::past_the_end(e, passed.main(), id, last_paragraph).map_err(Halt::Abend));
+    let ending = rt::vm::run(code, me, run_unit, addresses, passed.main()).and_then(|e| crate::past_the_end(e, passed.main(), id, last_paragraph).map_err(Halt::Abend));
     let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.settle(id, ending.is_ok()).map(drop));
     let closed = run_unit.close_all(matches!(&ending, Err(Halt::Abend(a)) if a.code.skips_termination(trap_off)));
     let ending = ending?;
@@ -232,8 +232,9 @@ pub fn execute<'w>(
     oo::refuse_to_run(&compiled.program)?;
     let mut run_unit = run_unit(VmLibrary::new(library), dds, sysin, clock, database, out, err, observer);
     let me = run_unit.add_named(None, compiled.program.id.to_ascii_uppercase(), compiled.program.files.len(), compiled.layout.size as usize);
-    let ran = run_main(code, &compiled.program.id, me, &mut run_unit, passed, compiled.options.code_page());
-    *kept = Some(Remains::of(&run_unit));
+    let mut addresses = Vec::new();
+    let ran = run_main(code, &compiled.program.id, me, &mut run_unit, passed, compiled.options.code_page(), &mut addresses);
+    *kept = Some(Remains { arguments: passed.returned(&addresses, &run_unit.mem), ..Remains::of(&run_unit) });
     ran
 }
 
@@ -271,7 +272,7 @@ pub fn execute_module<'w>(
     let page = program.options.options.code_page();
     let mut run_unit = run_unit(library, dds, sysin, clock, database, out, err, observer);
     let me = run_unit.add_named(None, main.name, main.files, main.size);
-    run_main(&code, &id, me, &mut run_unit, parm.map_or(Passed::Nothing, Passed::Parm), page)
+    run_main(&code, &id, me, &mut run_unit, parm.map_or(Passed::Nothing, Passed::Parm), page, &mut Vec::new())
 }
 
 /// Whether a CICS task of a run that began with `module` can begin with the program `name`, as a

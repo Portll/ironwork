@@ -108,6 +108,8 @@ pub trait Execute {
     /// Runs as [`Execute::execute_observed`] does, as a subprogram whose caller passed `arguments`,
     /// one per PROCEDURE DIVISION USING item: the bytes of the item passed, or None for OMITTED,
     /// which passes a null address. Each argument is input to the run, and EXIT PROGRAM returns.
+    /// `kept` takes what the run left in its run unit, with each argument as the caller sees it
+    /// after the CALL.
     #[allow(clippy::too_many_arguments)]
     fn execute_with_arguments<'w>(
         &self,
@@ -120,6 +122,7 @@ pub trait Execute {
         err: &'w mut dyn Write,
         observer: Option<unit::Observer<'w>>,
         arguments: &[Option<Vec<u8>>],
+        kept: &mut Option<unit::Remains>,
     ) -> Result<(Ending, i16), Abend>;
 
     /// Runs as [`Execute::execute_observed`] does, and puts what the run left in its run unit in
@@ -256,8 +259,9 @@ impl Execute for Compiled {
         err: &'w mut dyn Write,
         observer: Option<unit::Observer<'w>>,
         arguments: &[Option<Vec<u8>>],
+        kept: &mut Option<unit::Remains>,
     ) -> Result<(Ending, i16), Abend> {
-        run_main(self, library, dds, sysin, clock, database, out, err, observer, Passed::Arguments(arguments), &mut None)
+        run_main(self, library, dds, sysin, clock, database, out, err, observer, Passed::Arguments(arguments), kept)
     }
 
     fn execute_kept<'w>(
@@ -448,6 +452,20 @@ impl Passed<'_> {
         !matches!(self, Passed::Arguments(_))
     }
 
+    /// Each argument's bytes at `addresses` in `mem` as the run left them, None for OMITTED; none
+    /// for a run given no arguments.
+    pub(crate) fn returned(self, addresses: &[Option<usize>], mem: &[u8]) -> Vec<Option<Vec<u8>>> {
+        let Passed::Arguments(arguments) = self else { return Vec::new() };
+        arguments
+            .iter()
+            .zip(addresses)
+            .map(|(a, at)| match (a, at) {
+                (Some(a), Some(at)) => mem.get(*at..at + a.len()).map(<[u8]>::to_vec),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// Gives the run unit what a job step's PARM sets: the program arguments, and the UPSI switches
     /// its runtime options give, which are off otherwise; a malformed UPSI is named on standard
     /// error.
@@ -505,7 +523,7 @@ fn run_main<'w>(
     let ending = ending.and_then(|e| past_the_end(e, passed.main(), &compiled.program.id, last_paragraph));
     let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.settle(&compiled.program.id, ending.is_ok()).map(drop));
     let closed = run_unit.close_all(ending.as_ref().is_err_and(|a| a.code.skips_termination(trap_off)));
-    *kept = Some(unit::Remains::of(&run_unit));
+    *kept = Some(unit::Remains { arguments: passed.returned(&addresses, &run_unit.mem), ..unit::Remains::of(&run_unit) });
     let ending = ending?;
     settled.map_err(|a| Abend { code: a.code.into(), message: a.message, pos: Pos::default(), file: None })?;
     closed.map_err(|m| Abend { code: AbendCode::Ironwork, message: m, pos: Pos::default(), file: None })?;

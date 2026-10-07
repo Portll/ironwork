@@ -665,9 +665,9 @@ status). An abend names the source the debug table gives (§9.1), so it reads as
 run does from the source's directory.
 
 `ironwork cics x.iwm` runs program 0 as the first program of a CICS task on the VM, as `ironwork
-cics` runs a source's, and exits as `cics` does. It takes what `run` takes of a module, but
-`--parm` and the three limits, which `cics` refuses for a source too, and the cics flags but
-`--serve` and `--serve-public`, which serve a source's tasks on the interpreter and are refused for
+cics` runs a source's, and exits as `cics` does. It takes what `run` takes of a module but
+`--parm`, which `cics` refuses for a source too, each limit holding each task, and the cics flags
+but `--serve` and `--serve-public`, which serve a source's tasks on the interpreter and are refused for
 a module with 246. Under `--screens`, the program a transaction names (`--transaction`, `--csd`)
 is found as a CALL of it finds one: in the module first, then as `NAME.iwm` or as source in the
 directories.

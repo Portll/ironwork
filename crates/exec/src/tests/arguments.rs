@@ -57,8 +57,10 @@ fn every_argument_is_input_to_the_run() {
     });
     let library = unit::Library { programs, trace_input: true, ..Default::default() };
     let (mut out, mut err) = (Vec::new(), Vec::new());
-    let ended = compiled.execute_with_arguments(library, files::Dds::default(), None, unit::Clock::Fixed(0, 0), None, &mut out, &mut err, Some(observer), &arguments("00041"));
+    let mut kept = None;
+    let ended = compiled.execute_with_arguments(library, files::Dds::default(), None, unit::Clock::Fixed(0, 0), None, &mut out, &mut err, Some(observer), &arguments("00041"), &mut kept);
     assert!(ended.is_ok(), "{ended:?} {}", String::from_utf8_lossy(&err));
+    assert_eq!(kept.map(|k| k.arguments), Some(vec![Some(ebcdic("00042")), Some(ebcdic("ALICE   ")), None]), "the caller sees the ADD in QTY");
     let seen = seen.borrow();
     let input_of = |text: &str| seen.iter().find(|(operand, _)| operand.contains(text)).unwrap_or_else(|| panic!("no sink shows {text}: {seen:?}")).1;
     assert_eq!(input_of("ALICE"), Some(true));

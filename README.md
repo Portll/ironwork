@@ -148,7 +148,13 @@ arguments for its PROCEDURE DIVISION USING items, shaped by the CALLs that pass 
 `-L` libraries hold any (§5.2). `fuzz --differential` runs each generated input on the interpreter
 and on the VM under one statement limit, and keeps each input on which they differ in
 `divergence-N/`, with what each wrote and the command that repeats it; its exit status is 1 when
-any input differs.
+any input differs. A batch program's runs are compared on exit status, abend, standard output and
+error and each DD's data set. `fuzz --cics --differential` compares each task's run the same way,
+the screens it sent among its output, with the record `cics --task-out` writes of each task of the
+pseudo-conversation (RETURN's TRANSID and COMMAREA, the TS and TD queues), each `--file` data set
+and each `--td` queue's file; `fuzz --interface --differential` compares a subprogram's runs on its
+RETURN-CODE, output, data sets and each argument as the caller sees it after the CALL, which `run
+--arguments-out` writes.
 
     cargo run -p ironwork -- job payroll.jcl --datasets data[:text] [--proclib procs]... [--user ID] [-L proglib]... [-I copylib]... [--clock 2026-09-27T12:00:00] [--sql-replay calls.txt]
 
