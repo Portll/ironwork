@@ -235,7 +235,7 @@ fn line_end(d: &Draft) -> usize {
 /// The size of each CONTROL item, from a layout of the program as written.
 fn measure_controls(program: &Program, reports: &[rw::Report], qualify: numeric::Qualify) -> Vec<Vec<usize>> {
     let files: Vec<(&[DataEntry], Option<u32>)> = program.files.iter().map(|f| (f.records.as_slice(), f.record_max)).collect();
-    let built = layout::build(&program.working_storage, &files, &[], &program.linkage, &program.local_storage, crate::picture::Notation::of(&program.environment), qualify, None).ok();
+    let built = layout::build(&program.working_storage, &files, &[], &program.linkage, program.linkage.len(), &program.local_storage, crate::picture::Notation::of(&program.environment), qualify, None).ok();
     reports
         .iter()
         .map(|r| {

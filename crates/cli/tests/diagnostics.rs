@@ -262,3 +262,13 @@ fn diagnostics_takes_text_or_json_on_the_commands_that_compile() {
         assert!(stderr(&o).contains(said), "{args:?}: {}", stderr(&o));
     }
 }
+
+#[test]
+fn a_scope_terminator_no_verb_is_open_for_is_return_code_8() {
+    let source = Source::new(
+        "stray",
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  A PIC 9 VALUE 1.\n       PROCEDURE DIVISION.\n           IF A = 1 MOVE 2 TO A.\n           END-IF.\n           GOBACK.\n",
+    );
+    let out = ironwork(&["check", source.path()]);
+    assert_eq!((out.status.code(), stderr(&out)), (Some(8), format!("{}:8:12: IWS0104-E END-IF: an explicit scope terminator with no verb open for it; it was discarded\n", source.path())));
+}

@@ -33,7 +33,8 @@ From a checkout:
 every source's programs go into NAME.iwm under `--bundle NAME`. A program lowering refuses is
 named with the construct and its position, and its source writes nothing. The same source,
 libraries and options give the same bytes from any process or directory; a program that uses
-FUNCTION WHEN-COMPILED holds the compile time, SOURCE_DATE_EPOCH's when it is set. `dump` prints a
+FUNCTION WHEN-COMPILED holds the compile time, SOURCE_DATE_EPOCH's when it is set, and the
+WHEN-COMPILED special register holds it as MM/DD/YYhh.mm.ss. `dump` prints a
 module one fact per line, in section order, and exits 1 for a damaged one; each program's generated
 code prints as a listing of its blocks, one op to a line with data names and source positions
 ([docs/lir.md](docs/lir.md) §13). `run program.iwm` runs a module's first program on the VM of
@@ -324,7 +325,9 @@ messages', 0 when there is none (Enterprise COBOL Programming Guide SC27-8714-03
 | S, severe | 12 | refuse |
 | U, unrecoverable | 16 | refuse |
 
-Every refusal ironwork makes is S (assumption C45). Every message a compile gives opens with its id
+Every refusal ironwork makes is S (assumption C45). An explicit scope terminator no verb is open
+for, END-IF after a period for one, is discarded at E (IWS0104), as Enterprise COBOL discards it
+with IGYPS2113-E. Every message a compile gives opens with its id
 from ironwork's catalogue: `IW`, the area's letter, four digits and the severity it was given, as
 `IWR0001-S` refuses XML PARSE VALIDATING. IWS is syntax, IWC Enterprise COBOL's compile rules, IWO
 options, IWP EXEC blocks, BMS and CSD, IWR an Enterprise COBOL construct ironwork does not run yet,
@@ -460,7 +463,7 @@ The subset the interpreter runs today:
   PACKED-DECIMAL, COMP-1, COMP-2, NATIONAL, DISPLAY-1, POINTER and INDEX; numeric-edited and
   alphanumeric-edited PICTUREs (zero suppression, `*`, floating `$ + -`, CR, DB, insertion, BLANK
   WHEN ZERO); scaling positions P at either end of the digits; VALUE, REDEFINES, OCCURS with KEY,
-  INDEXED BY and DEPENDING ON, SIGN, SYNCHRONIZED with IBM's slack bytes before an item and after
+  INDEXED BY and DEPENDING ON, SIGN, VOLATILE (read, without effect), SYNCHRONIZED with IBM's slack bytes before an item and after
   each occurrence of a table, level-66 RENAMES of one item or a THRU range, and level-88
   conditions with THRU ranges and WHEN SET TO FALSE. SPECIAL-NAMES DECIMAL-POINT IS COMMA
   exchanges the comma and the period in PICTUREs, numeric literals and NUMVAL and NUMVAL-C, and
@@ -532,9 +535,9 @@ The subset the interpreter runs today:
   CALLs nest at most 100 deep. EXTERNAL records and files are the run unit's, one of each name for
   every program that describes it (C180); the GLOBAL records and files of a program reach the
   programs it contains, a name declared again nearer hiding it (C181). Not yet: LINAGE or REPORT
-  on an EXTERNAL file, or on a GLOBAL file of a program that contains others; INDEXED BY in such a
-  GLOBAL record; a GLOBAL file whose FILE STATUS or keys are not GLOBAL names; SET ADDRESS OF a
-  GLOBAL LINKAGE record from a contained program.
+  on an EXTERNAL file, or on a GLOBAL file of a program that contains others; a GLOBAL file whose
+  FILE STATUS or keys are not GLOBAL names; SET ADDRESS OF a GLOBAL LINKAGE record from a
+  contained program. An index of a GLOBAL table is the declaring program's, as the table is.
 - **User-defined functions:** FUNCTION-ID definitions and prototypes (AS, IS PROTOTYPE, ENTRY-NAME,
   ENTRY-INTERFACE) to END FUNCTION, invoked wherever an intrinsic function can be, as FUNCTION
   name(arguments) or, when the REPOSITORY paragraph lists FUNCTION name, by the name alone. An

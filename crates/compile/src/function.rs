@@ -47,7 +47,7 @@ impl Udf {
 
 /// The function as its prototype's LINKAGE SECTION and PROCEDURE DIVISION header describe it.
 pub fn signature(p: &Prototype, qualify: Qualify) -> Result<Udf, Error> {
-    let layout = layout::build(&[], &[], &[], &p.linkage, &[], Notation::of(&p.environment), qualify, None)?;
+    let layout = layout::build(&[], &[], &[], &p.linkage, p.linkage.len(), &[], Notation::of(&p.environment), qualify, None)?;
     let alphabetic: Vec<Pos> = p.linkage.iter().filter(|e| e.picture.as_deref().is_some_and(is_alphabetic)).map(|e| e.pos).collect();
     let formal = |name: &str, by_value: bool| -> Result<Formal, Error> {
         let root = layout.linkage_roots.iter().copied().find(|&i| layout.items[i].name.as_deref() == Some(name));

@@ -541,3 +541,34 @@ fn a_global_file_written_as_a_print_file_by_one_program_only_ends_the_run() {
     let (_, ending) = on_both(&source, &[format!("GDD={}", path.display())], reset);
     assert_eq!(ending.unwrap_err().message, "IWR0074-S GF, a GLOBAL file of OUTER, is written as a print file in one of OUTER and READER and not the other, which is not supported yet");
 }
+
+#[test]
+fn an_index_of_a_global_table_is_the_declaring_programs() {
+    let source = cobol(&[
+        "IDENTIFICATION DIVISION.",
+        "PROGRAM-ID. OUTER.",
+        "DATA DIVISION.",
+        "WORKING-STORAGE SECTION.",
+        "01  TBL GLOBAL.",
+        "    05  ROW OCCURS 3 TIMES INDEXED BY IDX.",
+        "        10  CH PIC X.",
+        "PROCEDURE DIVISION.",
+        "    MOVE 'ABC' TO TBL",
+        "    SET IDX TO 1",
+        "    CALL 'INNER'",
+        "    DISPLAY 'OUTER ' CH(IDX)",
+        "    GOBACK.",
+        "IDENTIFICATION DIVISION.",
+        "PROGRAM-ID. INNER.",
+        "PROCEDURE DIVISION.",
+        "    SET IDX UP BY 2",
+        "    DISPLAY 'INNER ' CH(IDX)",
+        "    GOBACK.",
+        "END PROGRAM INNER.",
+        "END PROGRAM OUTER.",
+    ]);
+    let walked = Harness::source(&source).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("INNER C\nOUTER C\n", Some(&Ending::Goback)), "{}", walked.err);
+    let vm = Harness::source(&source).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+}

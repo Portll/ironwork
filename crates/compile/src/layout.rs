@@ -158,6 +158,7 @@ pub fn build(
     files: &[(&[DataEntry], Option<u32>)],
     shared: &[usize],
     linkage: &[DataEntry],
+    own_linkage: usize,
     local: &[DataEntry],
     notation: picture::Notation,
     qualify: Qualify,
@@ -183,6 +184,9 @@ pub fn build(
     let mut linkage_roots = Vec::new();
     let mut after_renames = false;
     let bound = bound_records(&tagged);
+    // The LINKAGE entries after the program's own are the GLOBAL records of the programs containing
+    // it; an index of one of their tables is the declaring program's item, bound as the record is.
+    let inherited: Vec<bool> = std::iter::repeat_n(false, tagged.len() - linkage.len() - local.len()).chain((0..linkage.len()).map(|i| i >= own_linkage)).chain(std::iter::repeat_n(false, local.len())).collect();
     let mut bound_roots = Vec::new();
     for (&(region, e), &bound) in tagged.iter().zip(&bound) {
         if region != group {
@@ -338,8 +342,9 @@ pub fn build(
             aligns[index] = alignment(items[index].kind);
         }
     }
-    for (_, e) in &tagged {
+    for ((_, e), &inherited) in tagged.iter().zip(&inherited) {
         for name in &e.indexed_by {
+            let index = items.len();
             items.push(Item {
                 name: Some(name.clone()),
                 level: 77,
@@ -368,6 +373,10 @@ pub fn build(
                 alphabetic: false,
                 pos: e.pos,
             });
+            if inherited {
+                items[index].linkage = Some(linkage_roots.len() as u16);
+                linkage_roots.push(index);
+            }
         }
     }
     aligns.resize(items.len(), 1);

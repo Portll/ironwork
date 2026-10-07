@@ -25,6 +25,7 @@ mod operands;
 pub mod picture;
 pub mod printer;
 pub mod report;
+mod registers;
 mod reserved;
 mod scope;
 mod screens;
@@ -166,7 +167,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     let mut errors = std::mem::take(&mut program.messages);
     reserved::check(&program, &mut errors);
     let mut declared = program.working_storage.len();
-    let mut program = declaratives::with_debug_item(markup::with_special_registers(sort::with_special_registers(program)));
+    let mut program = declaratives::with_debug_item(markup::with_special_registers(sort::with_special_registers(registers::with_when_compiled(program, when_compiled))));
     switches::declare(&mut program, &mut errors);
     qualify_in_own_section(&mut program);
     let mut options = Options::default();
@@ -247,7 +248,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         errors.push(e);
         (0..files.len()).collect()
     });
-    let mut layout = match layout::build(&program.working_storage, &files, &shared, &linkage, &program.local_storage, crate::picture::Notation::of(&program.environment), options.qualify, options.parmcheck.map(|p| (declared, p.bytes.into()))) {
+    let mut layout = match layout::build(&program.working_storage, &files, &shared, &linkage, program.linkage.len(), &program.local_storage, crate::picture::Notation::of(&program.environment), options.qualify, options.parmcheck.map(|p| (declared, p.bytes.into()))) {
         Ok(l) => l,
         Err(e) => {
             errors.push(e);

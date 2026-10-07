@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::lexer::{Tok, Token};
-use crate::messages::{IWS0097, IWS0098, IWS0100, IWX0013, IWX0014, IWX0017};
+use crate::messages::{IWS0097, IWS0098, IWS0100, IWS0104, IWX0013, IWX0014, IWX0017};
 use crate::{Error, Pos};
 
 mod communication;
@@ -109,6 +109,14 @@ const PHRASE_WORDS: &[&str] = &[
     "END-CALL", "OMITTED", "CONTENT", "REFERENCE", "VALUE", "UP", "DOWN", "DELIMITED", "DELIMITER", "COUNT", "POINTER", "TALLYING",
     "REPLACING", "CONVERTING", "INITIAL", "FOR", "CHARACTERS", "LEADING", "FIRST", "ALL", "END-STRING", "END-UNSTRING", "END-SEARCH",
     "NEXT", "INVALID", "KEY", "END-REWRITE", "END-DELETE", "END-START", "END-INVOKE", "END-RETURN", "END-OF-PAGE", "EOP", "END-JSON", "END-XML",
+];
+
+/// The explicit scope terminators (Language Reference SC27-8713-03, p. 291), as END-EXEC is the
+/// precompiler's.
+const SCOPE_TERMINATORS: &[&str] = &[
+    "END-ACCEPT", "END-ADD", "END-CALL", "END-COMPUTE", "END-DELETE", "END-DISPLAY", "END-DIVIDE", "END-EVALUATE", "END-IF", "END-INVOKE",
+    "END-JSON", "END-MULTIPLY", "END-PERFORM", "END-READ", "END-RETURN", "END-REWRITE", "END-SEARCH", "END-START", "END-STRING",
+    "END-SUBTRACT", "END-UNSTRING", "END-WRITE", "END-XML",
 ];
 
 /// The phrases of JSON GENERATE, which end a list of NAME or SUPPRESS operands; NAME, INDICATING
@@ -354,6 +362,12 @@ struct Parser<'a> {
     debugging: bool,
     /// Messages about the program being parsed that do not stop the parse.
     messages: Vec<Error>,
+    /// The explicit scope terminators the constructs being parsed will take, the innermost last.
+    /// One no construct takes is discarded with IWS0104-E, as Enterprise COBOL discards it with
+    /// IGYPS2113-E.
+    open: Vec<String>,
+    /// Special registers the PROCEDURE DIVISION being parsed names: WHEN-COMPILED.
+    registers: Vec<String>,
     /// Which tokens' own messages a program has taken, so a container leaves its contained
     /// programs' to them.
     reported: Vec<bool>,
@@ -396,6 +410,8 @@ impl<'a> Parser<'a> {
             classes: Vec::new(),
             debugging: false,
             messages: Vec::new(),
+            open: Vec::new(),
+            registers: Vec::new(),
             reported: vec![false; tokens.len()],
             functions: Vec::new(),
             defined: Vec::new(),
@@ -501,11 +517,13 @@ impl Parser<'_> {
         let (start, first) = (self.at, out.len());
         let outer = (std::mem::take(&mut self.exec_declarations), std::mem::take(&mut self.cics), std::mem::take(&mut self.dli), std::mem::take(&mut self.sql.blocks), self.mnemonics.clone(), self.debugging);
         let outer_messages = std::mem::take(&mut self.messages);
+        let outer_registers = std::mem::take(&mut self.registers);
         let (outer_intrinsics, outer_functions, outer_switches, outer_classes) = (self.intrinsics.clone(), self.repository_functions.clone(), self.switches.clone(), self.classes.clone());
         let parsed = self.one_program(options, out);
         (self.intrinsics, self.repository_functions, self.switches, self.classes) = (outer_intrinsics, outer_functions, outer_switches, outer_classes);
         (self.exec_declarations, self.cics, self.dli, self.sql.blocks, self.mnemonics, self.debugging) = outer;
         let own = std::mem::replace(&mut self.messages, outer_messages);
+        self.registers = outer_registers;
         parsed?;
         let mut messages = Vec::new();
         for i in start..self.at {
@@ -693,6 +711,7 @@ impl Parser<'_> {
             oo: oo::program_oo(repository),
             environment,
             nested: contained,
+            registers: std::mem::take(&mut self.registers),
             prototypes: self.functions.clone(),
             repository_functions: self.repository_functions.clone(),
             screens,
@@ -1658,6 +1677,7 @@ impl Parser<'_> {
                     }
                     e.based = true;
                 }
+                "VOLATILE" => {}
                 "ANY" if self.is_word("LENGTH") => {
                     let at = self.tokens[self.at - 1].pos;
                     self.at += 1;
@@ -2098,6 +2118,9 @@ impl Parser<'_> {
             return Ok(false);
         }
         let start = self.at;
+        if self.stray_terminator() {
+            return Ok(false);
+        }
         let block = self.block(&[])?;
         if block.is_empty() {
             return Err(self.error("a statement"));
@@ -2126,10 +2149,21 @@ impl Parser<'_> {
 
     /// Statements up to a period, a paragraph header, or one of `stops`, none of them consumed.
     fn block(&mut self, stops: &[&str]) -> R<Vec<Stmt>> {
+        let depth = self.open.len();
+        self.open.extend(stops.iter().map(|s| s.to_string()));
+        let body = self.block_within(stops);
+        self.open.truncate(depth);
+        body
+    }
+
+    fn block_within(&mut self, stops: &[&str]) -> R<Vec<Stmt>> {
         let mut out = Vec::new();
         while let Some(tok) = self.peek() {
             if *tok == Tok::Period || self.paragraph_header() || self.section_header() || self.word().is_some_and(|w| stops.contains(&w)) {
                 break;
+            }
+            if self.stray_terminator() {
+                continue;
             }
             if let Some(Tok::Exec(text)) = self.peek().cloned() {
                 let block = self.exec_block(&text, self.pos());
@@ -2145,6 +2179,19 @@ impl Parser<'_> {
             out.push(statement);
         }
         Ok(out)
+    }
+
+    /// An explicit scope terminator no open construct takes: Enterprise COBOL discards it with
+    /// IGYPS2113-E and compiles on, and so does this parser.
+    fn stray_terminator(&mut self) -> bool {
+        let Some(word) = self.word().map(str::to_owned) else { return false };
+        if !SCOPE_TERMINATORS.contains(&word.as_str()) || self.open.contains(&word) {
+            return false;
+        }
+        let pos = self.pos();
+        self.messages.push(IWS0104.at(pos, format!("{word}: an explicit scope terminator with no verb open for it; it was discarded")));
+        self.at += 1;
+        true
     }
 
     fn statement(&mut self) -> R<Stmt> {
@@ -3849,6 +3896,9 @@ impl Parser<'_> {
     fn reference(&mut self) -> R<Ref> {
         let pos = self.pos();
         let name = self.name("a data name")?;
+        if name == "WHEN-COMPILED" && !self.registers.contains(&name) {
+            self.registers.push(name.clone());
+        }
         let mut qualifiers = Vec::new();
         while self.accept_any(&["OF", "IN"]).is_some() {
             qualifiers.push(self.name("a qualifier")?);
@@ -4241,7 +4291,7 @@ fn is_clause_word(w: &str) -> bool {
     matches!(
         w,
         "PIC" | "PICTURE" | "USAGE" | "VALUE" | "VALUES" | "REDEFINES" | "OCCURS" | "SIGN" | "LEADING" | "TRAILING" | "JUSTIFIED"
-            | "JUST" | "SYNC" | "SYNCHRONIZED" | "GLOBAL" | "EXTERNAL" | "BLANK"
+            | "JUST" | "SYNC" | "SYNCHRONIZED" | "GLOBAL" | "EXTERNAL" | "BLANK" | "VOLATILE"
     ) || usage_word(w).is_some()
 }
 
@@ -4773,4 +4823,20 @@ mod tests {
         let err = crate::parse(&program("           SELECT S ASSIGN TO SDD ORGANIZATION LINE SEQUENTIAL\n               RECORD DELIMITER STANDARD-1.\n")).unwrap_err();
         assert_eq!(err.message, "RECORD DELIMITER on S: the clause is for a file of ORGANIZATION SEQUENTIAL");
     }
+    #[test]
+    fn volatile_is_a_clause_without_effect() {
+        let p = program("       01  SQLCA GLOBAL VOLATILE.\n           05 SQLCAID PIC X(8).\n       01  N PIC 9 VOLATILE VALUE 1.\n       PROCEDURE DIVISION.\n           GOBACK.\n");
+        assert_eq!((p.working_storage[0].global, p.working_storage[2].picture.as_deref(), p.working_storage[2].value.is_some()), (true, Some("9"), true));
+    }
+
+    #[test]
+    fn a_scope_terminator_no_verb_is_open_for_is_discarded_at_e() {
+        let p = program("       01  A PIC 9.\n       PROCEDURE DIVISION.\n           IF A = 1 MOVE 2 TO A.\n           END-IF.\n           PERFORM 2 TIMES MOVE 3 TO A END-ADD END-PERFORM\n           IF A = 2 END-IF\n           GOBACK.\n");
+        let messages: Vec<(Option<&str>, crate::Severity, &str)> = p.messages.iter().map(|m| (m.id, m.severity, m.message.as_str())).collect();
+        let text = |t: &str| format!("{t}: an explicit scope terminator with no verb open for it; it was discarded");
+        assert_eq!(messages, [(Some("IWS0104"), crate::Severity::Error, text("END-IF").as_str()), (Some("IWS0104"), crate::Severity::Error, text("END-ADD").as_str())]);
+        let statements = format!("{:?}", p.paragraphs[0].statements);
+        assert_eq!((p.paragraphs[0].statements.len(), statements.matches("Move").count(), statements.contains("END-ADD")), (6, 2, false), "{statements}");
+    }
+
 }

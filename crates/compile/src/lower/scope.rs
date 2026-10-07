@@ -15,6 +15,21 @@ fn file_index(k: usize) -> R<u16> {
     u16::try_from(k).map_err(|_| LowerError::Exceeds("files", Pos::default()))
 }
 
+/// The index-names of the tables in the GLOBAL records among `entries`, or in every record when
+/// `all`, as a GLOBAL file's records are.
+fn global_index_names(entries: &[DataEntry], all: bool) -> impl Iterator<Item = &str> {
+    let mut global = false;
+    entries
+        .iter()
+        .filter(move |e| {
+            if matches!(e.level, 1 | 77) {
+                global = all || e.global;
+            }
+            global
+        })
+        .flat_map(|e| e.indexed_by.iter().map(String::as_str))
+}
+
 /// The names of the GLOBAL records among `entries`.
 fn global_names(entries: &[DataEntry]) -> impl Iterator<Item = &str> {
     entries.iter().filter(|e| matches!(e.level, 1 | 77) && e.global).filter_map(|e| e.name.as_deref())
@@ -90,6 +105,16 @@ impl Lower<'_> {
         for name in global_names(&program.linkage) {
             if let Some(o) = layout.linkage_roots.iter().position(|&i| layout.items[i].name.as_deref() == Some(name)) {
                 found.push((lir::Section::Linkage, name, GlobalAt::Linkage(ordinal(o)?)));
+            }
+        }
+        // An index is a WORKING-STORAGE item whatever section its table is in.
+        let sections = [&program.working_storage, &program.local_storage, &program.linkage].into_iter().map(|e| (e, false));
+        let files = program.files.iter().filter(|f| f.global && f.declared_in.is_none()).map(|f| (&f.records, true));
+        for (entries, all) in sections.chain(files) {
+            for name in global_index_names(entries, all) {
+                if let Some(item) = root(name, false) {
+                    found.push((lir::Section::WorkingStorage, name, GlobalAt::Program(item.offset)));
+                }
             }
         }
         for f in program.files.iter().filter(|f| f.global && f.declared_in.is_none()) {

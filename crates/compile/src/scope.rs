@@ -13,7 +13,8 @@ pub(crate) struct Inherited {
     /// Their entries, laid out after the program's own LINKAGE records.
     pub entries: Vec<DataEntry>,
     /// For each of their 01 records, in order, where it is, the declaring program's depth, and
-    /// for a file's record the file among the program's own.
+    /// for a file's record the file among the program's own; then, in the same order, each index
+    /// of their tables, the declaring program's WORKING-STORAGE item of that name.
     records: Vec<(Binding, u8, Option<usize>)>,
 }
 
@@ -59,9 +60,6 @@ pub(crate) fn rules(program: &Program, errors: &mut Vec<Error>) {
             if let Some(r) = record.filter(|r| r.external && e.level != 88 && e.value.is_some()) {
                 errors.push(syntax::messages::IWC0197.at(e.pos, format!("{name}: an item of EXTERNAL record {} takes no VALUE clause", r.name.as_deref().unwrap_or_default())));
             }
-            if contains && !e.indexed_by.is_empty() && record.is_some_and(|r| r.global) {
-                errors.push(syntax::messages::IWR0015.at(e.pos, format!("{name}: INDEXED BY in a GLOBAL record, in a program that contains others, is not supported yet")));
-            }
         }
     }
     for f in &program.files {
@@ -89,6 +87,7 @@ pub(crate) fn rules(program: &Program, errors: &mut Vec<Error>) {
 pub(crate) fn inherit(program: &mut Program) -> Inherited {
     let mut inherited = Inherited::default();
     let containers = std::mem::take(&mut program.containers);
+    let mut indexes = Vec::new();
     for (n, c) in containers.iter().enumerate() {
         let depth = u8::try_from(n + 1).unwrap_or(u8::MAX);
         let sections = [(Section::WorkingStorage, &c.working_storage), (Section::LocalStorage, &c.local_storage), (Section::Linkage, &c.linkage)];
@@ -98,6 +97,9 @@ pub(crate) fn inherit(program: &mut Program) -> Inherited {
                     let record = e.name.clone().unwrap_or_default();
                     let binding = if e.external { Binding::External { name: record, size: 0 } } else { Binding::Global { program: c.id.clone(), record, section: section.clone() } };
                     inherited.records.push((binding, depth, None));
+                }
+                for name in &e.indexed_by {
+                    indexes.push((Binding::Global { program: c.id.clone(), record: name.clone(), section: Section::WorkingStorage }, depth, None));
                 }
                 inherited.entries.push(e.clone());
             }
@@ -116,11 +118,15 @@ pub(crate) fn inherit(program: &mut Program) -> Inherited {
                     let binding = if f.external { Binding::ExternalFile(k as u16) } else { Binding::Global { program: c.id.clone(), record: String::new(), section: Section::File(f.name.clone()) } };
                     inherited.records.push((binding, depth, Some(k)));
                 }
+                for name in &e.indexed_by {
+                    indexes.push((Binding::Global { program: c.id.clone(), record: name.clone(), section: Section::WorkingStorage }, depth, None));
+                }
                 inherited.entries.push(e);
             }
             program.files.push(copy);
         }
     }
+    inherited.records.extend(indexes);
     program.containers = containers;
     inherited
 }

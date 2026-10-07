@@ -3319,3 +3319,16 @@ fn abbreviated_combined_relations_mean_what_they_abbreviate() {
     assert_eq!(w, y);
     assert!(w.as_bytes().chunks(2).all(|n| n != b"00" && n != b"81"), "{w}");
 }
+
+#[test]
+fn the_when_compiled_register_holds_the_compile_time_as_ibm_formats_it() {
+    let source = program("", "       01  W PIC X(16).\n", &[line("MOVE WHEN-COMPILED TO W"), line("DISPLAY W ' ' WHEN-COMPILED"), line("GOBACK.")].concat());
+    let at = rt::lir::CompileTime { seconds: 1_790_510_400, hundredths: 42, source: rt::lir::TimeSource::Clock };
+    let walked = Harness::source(&source).compiled_at(at).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("09/27/2612.00.00 09/27/2612.00.00\n", Some(&Ending::Goback)), "{}", walked.err);
+    let vm = Harness::source(&source).compiled_at(at).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    let silent = syntax::parse(&program("", "       01  W PIC X(16).\n", &line("GOBACK."))).unwrap();
+    let compiled = compile(silent, &[]).unwrap();
+    assert!(!compiled.layout.items.iter().any(|i| i.name.as_deref() == Some("WHEN-COMPILED")));
+}

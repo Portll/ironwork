@@ -41,6 +41,9 @@ pub struct Program {
     pub environment: Environment,
     /// The PROGRAM-IDs of the programs it directly contains.
     pub nested: Vec<String>,
+    /// Special registers the PROCEDURE DIVISION names and no entry declares, which the compiler
+    /// declares: WHEN-COMPILED.
+    pub registers: Vec<String>,
     /// The contained programs of its compilation a CALL from it reaches (Language Reference,
     /// Conventions for program-names): those it directly contains, and each COMMON one that a
     /// program containing it directly contains, but itself and those that contain it.

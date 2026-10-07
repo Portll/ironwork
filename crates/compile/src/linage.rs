@@ -20,7 +20,7 @@ pub(crate) fn add_counters(program: &mut Program, qualify: numeric::Qualify) -> 
     let by_data = |f: &FileDecl| matches!(f.linage.as_ref().map(|l| &l.lines), Some(LinageValue::Data(_)));
     let built = program.files.iter().any(by_data).then(|| {
         let files: Vec<(&[DataEntry], Option<u32>)> = program.files.iter().map(|f| (f.records.as_slice(), f.record_max)).collect();
-        layout::build(&program.working_storage, &files, &[], &program.linkage, &program.local_storage, crate::picture::Notation::of(&program.environment), qualify, None).ok()
+        layout::build(&program.working_storage, &files, &[], &program.linkage, program.linkage.len(), &program.local_storage, crate::picture::Notation::of(&program.environment), qualify, None).ok()
     });
     let mut added = Vec::new();
     for (k, f) in program.files.iter().enumerate() {
