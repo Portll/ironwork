@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::lexer::{Tok, Token};
-use crate::messages::{IWS0097, IWS0098, IWS0100, IWS0104, IWX0013, IWX0014, IWX0017, IWX0059};
+use crate::messages::{IWS0097, IWS0098, IWS0100, IWS0104, IWX0013, IWX0014, IWX0017, IWX0059, IWX0061};
 use crate::{Error, Pos};
 
 mod communication;
@@ -2155,8 +2155,15 @@ impl Parser<'_> {
 
     /// A user-defined word or digits in Area A, then a period. A reserved word there, as in `EXIT.`,
     /// begins a statement: Enterprise COBOL reads it as though it began in Area B (IGYPS0009-E).
+    /// Under `--compliance extended` the word may begin in Area B where a separator period comes
+    /// before it, as cobc reads it.
     fn paragraph_header(&self) -> bool {
-        self.tokens.get(self.at).is_some_and(|t| t.area_a && (matches!(&t.tok, Tok::Word(w) if !rt::reserved_words::is_reserved(w)) || digits(&t.tok))) && self.peek_at(1) == Some(&Tok::Period)
+        self.tokens.get(self.at).is_some_and(|t| (t.area_a || self.after_period_in_area_b()) && (matches!(&t.tok, Tok::Word(w) if !rt::reserved_words::is_reserved(w)) || digits(&t.tok))) && self.peek_at(1) == Some(&Tok::Period)
+    }
+
+    /// Under `--compliance extended`, the token here begins in Area B right after a separator period.
+    fn after_period_in_area_b(&self) -> bool {
+        self.extended && self.at > 0 && self.tokens[self.at - 1].tok == Tok::Period && self.tokens.get(self.at).is_some_and(|t| !t.area_a)
     }
 
     fn section_header(&self) -> bool {
@@ -2224,7 +2231,11 @@ impl Parser<'_> {
         }
         if self.paragraph_header() {
             let pos = self.pos();
+            let area_b = self.after_period_in_area_b();
             let name = self.procedure_word("a paragraph name")?;
+            if area_b {
+                self.messages.push(IWX0061.at(pos, format!("{name}. in Area B (Micro Focus and GnuCOBOL; Enterprise COBOL puts a paragraph header in Area A): a name and a period after a separator period is read as a paragraph header")));
+            }
             self.at += 1;
             let (section, priority) = paragraphs.last().map_or((None, 0), |p| (p.section.clone(), p.priority));
             paragraphs.push(Paragraph { name, statements: Vec::new(), section, is_section: false, priority, pos });

@@ -406,6 +406,19 @@ mod tests {
     }
 
     #[test]
+    fn a_name_and_a_period_after_a_period_in_area_b_is_a_paragraph_header() {
+        let procedure = "           MAIN-PARA.\n           PERFORM 100-STEP\n           MOVE A TO B C.\n           100-STEP.\n           DISPLAY A.\n";
+        let text = source("       01 A PIC X.\n       01 B PIC X.\n       01 C PIC X.\n", procedure);
+        let p = extended(&text).unwrap();
+        let names: Vec<&str> = p.paragraphs.iter().map(|q| q.name.as_str()).collect();
+        assert_eq!(names, ["MAIN-PARA", "100-STEP"]);
+        assert!(matches!(&p.paragraphs[0].statements[1], crate::ast::Stmt::Move { to, .. } if to.len() == 2));
+        let warned: Vec<(u32, Option<&str>)> = p.messages.iter().filter(|m| m.id == Some("IWX0061")).map(|m| (m.pos.line, m.id)).collect();
+        assert_eq!(warned, [(9, Some("IWX0061")), (12, Some("IWX0061"))]);
+        assert!(crate::parse_with(&text, &Libraries::default()).is_err());
+    }
+
+    #[test]
     fn returning_omitted_leaves_a_programs_header_and_nothing_else() {
         let header = "       PROCEDURE DIVISION USING A RETURNING OMITTED.\n";
         let text = format!("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n       DATA DIVISION.\n       LINKAGE SECTION.\n       01 A PIC X.\n{header}           CALL 'S' RETURNING OMITTED.\n           GOBACK.\n");

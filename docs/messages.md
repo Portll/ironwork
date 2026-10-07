@@ -873,6 +873,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0058 | W | `tab stops (GnuCOBOL and Micro Focus; Enterprise COBOL source holds no tab): {why each tab reaches the next column after a multiple of 8}` |
 | IWX0059 | W | `{construct} (--compliance relaxed): {why ironwork refuses it}; it compiles as a hole, and a run that reaches it ends with IWR0078` |
 | IWX0060 | W | `PICTURE {picture} (GnuCOBOL and Micro Focus; Enterprise COBOL's ARITH(COMPAT) allows 18 digits): the program is compiled with ARITH(EXTEND), which allows 31` |
+| IWX0061 | W | `{name}. in Area B (Micro Focus and GnuCOBOL; Enterprise COBOL puts a paragraph header in Area A): a name and a period after a separator period is read as a paragraph header` |
 
 ## Run-time refusals
 

@@ -1049,6 +1049,17 @@ ARITH, is compiled as though a card said ARITH(EXTEND): its literals may have 31
 arithmetic has ARITH(EXTEND)'s intermediate precision, not cobc's (assumption C490). A card that
 names ARITH keeps its choice, and a PICTURE of more than 31 digits stays refused.
 
+### IWX0061-W A paragraph header in Area B
+
+`IWX0061-W {name}. in Area B (Micro Focus and GnuCOBOL; Enterprise COBOL puts a paragraph header in
+Area A): a name and a period after a separator period is read as a paragraph header`, at the name.
+
+In fixed form, a user-defined word or digits that follows a separator period and is followed by a
+period is a paragraph header wherever it begins, as cobc reads it: `           100-STEP.` names a
+paragraph. Enterprise COBOL takes a header from Area A alone, and in Area B such a sentence is no
+statement, so no program Enterprise COBOL compiles reads differently. In free form every such word is
+a header already (IWX0001).
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

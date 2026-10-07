@@ -899,6 +899,7 @@ catalogue! {
     IWX0058 Warning "tab stops (GnuCOBOL and Micro Focus; Enterprise COBOL source holds no tab): {why each tab reaches the next column after a multiple of 8}";
     IWX0059 Warning "{construct} (--compliance relaxed): {why ironwork refuses it}; it compiles as a hole, and a run that reaches it ends with IWR0078";
     IWX0060 Warning "PICTURE {picture} (GnuCOBOL and Micro Focus; Enterprise COBOL's ARITH(COMPAT) allows 18 digits): the program is compiled with ARITH(EXTEND), which allows 31";
+    IWX0061 Warning "{name}. in Area B (Micro Focus and GnuCOBOL; Enterprise COBOL puts a paragraph header in Area A): a name and a period after a separator period is read as a paragraph header";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.
