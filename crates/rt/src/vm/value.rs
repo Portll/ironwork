@@ -61,8 +61,12 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             }
             Operand::Const(c) => constant(&self.p.consts[c as usize]).map_err(|a| self.abend(a, None).into()),
             Operand::LengthOf(p) => {
-                let loc = self.loc(p)?;
-                Ok(Val::Num(Fixed::new(loc.len as i128, Places::new(9, 0))))
+                // A LINKAGE item's length no OCCURS DEPENDING ON or reference modification varies is
+                // the compile's, read without its address (Language Reference, LENGTH OF).
+                let q = &self.p.places[p as usize];
+                let fixed = matches!(q.base, Base::Linkage(_)) && q.odo.is_empty() && q.refmod.is_none();
+                let len = if fixed { q.len as usize } else { self.loc(p)?.len };
+                Ok(Val::Num(Fixed::new(len as i128, Places::new(9, 0))))
             }
             Operand::AddressOf(p) => {
                 if let Base::Linkage(record) = self.p.places[p as usize].base
@@ -619,6 +623,14 @@ impl<'p, L: Loader<Rc<Code>>> Evaluator for Call<'_, 'p, '_, '_, L> {
         unit.caller_of(self.vm.me).map(|p| unit.programs[p].name.clone())
     }
 
+    fn heap_allocate(&mut self, size: usize) -> u32 {
+        self.vm.unit.heap_allocate(size)
+    }
+
+    fn heap_free(&mut self, address: u32) -> u32 {
+        self.vm.unit.heap_free(address)
+    }
+
     fn argument_length(&mut self, position: usize) -> usize {
         self.vm.unit.argument_length_of(self.vm.me, position)
     }
@@ -763,6 +775,14 @@ mod tests {
         }
         fn argument_length(&mut self, _: usize) -> usize {
             0
+        }
+
+        fn heap_allocate(&mut self, _: usize) -> u32 {
+            0
+        }
+
+        fn heap_free(&mut self, address: u32) -> u32 {
+            address
         }
     }
 

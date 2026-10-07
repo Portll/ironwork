@@ -669,6 +669,30 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
         }
     }
 
+    /// ALLOCATE's storage: `size` bytes of zeros from the heap CEEGTST also takes from, and their
+    /// address; NULL past the largest request the run grants (Language Reference, ALLOCATE).
+    pub fn heap_allocate(&mut self, size: usize) -> u32 {
+        if size == 0 || size > crate::le::HEAP_LIMIT {
+            return 0;
+        }
+        let at = self.push_temporary(&vec![0; size]);
+        self.le.heap.push((at, size, false));
+        ADDRESS_BASE + at as u32
+    }
+
+    /// FREE: the block `address` starts released, and NULL; any other address given back as it is,
+    /// nothing freed (Language Reference, FREE).
+    pub fn heap_free(&mut self, address: u32) -> u32 {
+        let offset = address.checked_sub(ADDRESS_BASE).map(|o| o as usize);
+        match self.le.heap.iter_mut().find(|(start, _, freed)| Some(*start) == offset && !*freed) {
+            Some(block) => {
+                block.2 = true;
+                0
+            }
+            None => address,
+        }
+    }
+
     /// The length of the argument in USING position `position`, from 1, of program `me`'s latest
     /// activation: 0 for one omitted or not passed, and in the main program.
     pub fn argument_length_of(&self, me: usize, position: usize) -> usize {

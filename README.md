@@ -378,7 +378,8 @@ condition (IWX0034-W), ANY LENGTH parameters (IWX0035-W), START KEY < and NOT > 
 FD with no FILE SECTION header (IWX0037-W), PERFORM UNTIL EXIT (IWX0038-W), ASSIGN TO DISK
 (IWX0039-W), split keys (IWX0040-W), periods after a period (IWX0041-W), FUNCTION
 STORED-CHAR-LENGTH (IWX0042-W), DELETE FILE (IWX0043-W), PROGRAM-POINTER (IWX0044-W), an entry with
-no period before PROCEDURE DIVISION (IWX0045-W) and BASED (IWX0046-W).
+no period before PROCEDURE DIVISION (IWX0045-W), BASED (IWX0046-W) and FREE of a record
+(IWX0047-W).
 [docs/compliance.md](docs/compliance.md) gives each one's meaning, the census that chose them, and
 what stays refused and why.
 
@@ -672,7 +673,8 @@ The subset the interpreter runs today:
   picture strings of years, months and month names, days, day of year and weekday names, hours,
   minutes, seconds, fractions and AM/PM; CEELOCT, CEEGMT, CEEUTC and CEEGMTO read the `--clock`,
   taking local time as UTC; CEEMOUT writes to DD SYSOUT and CEE3DMP to DD CEEDUMP, or both to
-  standard error; CEEGTST and CEEFRST get and free heap storage. Each returns its 12-byte
+  standard error; CEEGTST and CEEFRST get and free heap storage, the heap ALLOCATE and FREE
+  also take from and release (C487). Each returns its 12-byte
   feedback code and sets RETURN-CODE to 0, and with the feedback code OMITTED a failure ends the
   run with U4038 (L12). A CALL
   that passes fewer arguments than the service takes, as `CALL 'CEE3ABD'` with no USING does,

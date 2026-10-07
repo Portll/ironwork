@@ -78,3 +78,72 @@ fn a_statement_from_a_copy_member_names_the_member() {
     assert!(told[0].0.ends_with("STEPS.cpy") && told[0].1 == 1, "{told:?}");
     assert_eq!(told[1], (String::new(), line_of(&source, "GOBACK")));
 }
+
+/// ALLOCATE of a LINKAGE record INITIALIZED RETURNING a pointer, of CHARACTERS, of none, and FREE of two pointers.
+const ALLOCATE_FREE: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. ALLOCP.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  P USAGE POINTER.\n",
+    "       01  Q USAGE POINTER.\n",
+    "       01  N PIC 9(4) VALUE 7.\n",
+    "       LINKAGE SECTION.\n",
+    "       01  REC.\n",
+    "           05 R-A PIC X(3).\n",
+    "           05 R-N PIC 9(3).\n",
+    "       01  BUF PIC X(10).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           ALLOCATE REC INITIALIZED RETURNING P\n",
+    "           DISPLAY 'INIT [' REC ']'\n",
+    "           MOVE 'ABC' TO R-A MOVE 42 TO R-N\n",
+    "           DISPLAY 'REC ' REC\n",
+    "           IF P = ADDRESS OF REC DISPLAY 'P IS REC' END-IF\n",
+    "           ALLOCATE N CHARACTERS INITIALIZED RETURNING Q\n",
+    "           SET ADDRESS OF BUF TO Q\n",
+    "           MOVE 'XYZ' TO BUF(1:3)\n",
+    "           DISPLAY 'BUF ' BUF(1:3)\n",
+    "           FREE P Q\n",
+    "           IF P = NULL AND Q = NULL DISPLAY 'BOTH NULL' END-IF\n",
+    "           ALLOCATE 0 CHARACTERS RETURNING Q\n",
+    "           IF Q = NULL DISPLAY 'ZERO GIVES NULL' END-IF\n",
+    "           STOP RUN.\n",
+);
+
+/// LENGTH OF and FUNCTION LENGTH of a LINKAGE record that has no address yet.
+const LENGTH_OF_UNBOUND: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. LENUNB.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  N PIC 9(4).\n",
+    "       LINKAGE SECTION.\n",
+    "       01  REC.\n",
+    "           05 R-A PIC X(3).\n",
+    "           05 R-N PIC 9(3).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE LENGTH OF REC TO N\n",
+    "           DISPLAY N\n",
+    "           COMPUTE N = FUNCTION LENGTH(REC)\n",
+    "           DISPLAY N\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn allocate_and_free_take_storage_from_the_heap_alike_on_both_executors() {
+    // cobc 3.2's output for the same program with REC and BUF written BASED, which its ALLOCATE needs.
+    let expected = "INIT [   000]\nREC ABC042\nP IS REC\nBUF XYZ\nBOTH NULL\nZERO GIVES NULL\n";
+    let walked = Harness::source(ALLOCATE_FREE).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{}", walked.err);
+    let vm = Harness::source(ALLOCATE_FREE).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+}
+
+#[test]
+fn length_of_a_fixed_length_record_needs_no_address() {
+    let source = LENGTH_OF_UNBOUND.replace("           COMPUTE N = FUNCTION LENGTH(REC)\n           DISPLAY N\n", "");
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let ran = Harness::source(&source).run(executor);
+        assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), ("0006\n", Some(&Ending::StopRun)), "{}", ran.err);
+    }
+}

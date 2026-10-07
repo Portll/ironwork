@@ -86,7 +86,7 @@ const VERBS: &[&str] = &[
     "MOVE", "COMPUTE", "ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "IF", "PERFORM", "DISPLAY", "INITIALIZE", "GO", "GOBACK", "STOP",
     "CONTINUE", "EXIT", "EVALUATE", "SET", "CALL", "ACCEPT", "STRING", "UNSTRING", "INSPECT", "READ", "WRITE", "OPEN", "CLOSE",
     "REWRITE", "DELETE", "START", "SEARCH", "SORT", "MERGE", "RETURN", "RELEASE", "CANCEL", "EXEC", "NEXT", "INVOKE",
-    "INITIATE", "GENERATE", "TERMINATE", "SUPPRESS", "ALTER", "ENTRY", "JSON", "XML",
+    "INITIATE", "GENERATE", "TERMINATE", "SUPPRESS", "ALTER", "ENTRY", "JSON", "XML", "ALLOCATE", "FREE",
 ];
 
 /// Words that end a phrase or a nested block.
@@ -380,6 +380,9 @@ struct Parser<'a> {
     extended: bool,
     /// The CD names of the program being parsed.
     cds: Vec<String>,
+    /// The 01 and 77 items of the program being parsed that have no storage of their own: its
+    /// LINKAGE SECTION's and, under `--compliance extended`, its BASED ones, which FREE may name.
+    unstored: Vec<String>,
 }
 
 /// The WHENEVER actions in force, which carry on in listing order, and the EXEC SQL blocks the
@@ -418,6 +421,7 @@ impl<'a> Parser<'a> {
             in_prototype: false,
             extended: false,
             cds: Vec::new(),
+            unstored: Vec::new(),
         }
     }
 }
@@ -631,6 +635,8 @@ impl Parser<'_> {
             }
         }
         working_storage.extend(communication);
+        let records = linkage.iter().chain(working_storage.iter().chain(&local_storage).filter(|e| e.based));
+        self.unstored = records.filter(|e| matches!(e.level, 1 | 77)).filter_map(|e| e.name.clone()).collect();
         let (mut using, mut returning) = (Vec::new(), None);
         let paragraphs = if self.at_division(&["PROCEDURE"]) {
             self.at += 2;
@@ -2261,6 +2267,8 @@ impl Parser<'_> {
                 Stmt::Display { items, upon, no_advancing, screen, pos }
             }
             "INITIALIZE" => self.initialize(pos)?,
+            "ALLOCATE" => self.allocate(pos)?,
+            "FREE" => self.free(pos)?,
             "CALL" => Stmt::Call(Box::new(self.call(pos)?)),
             "INVOKE" => Stmt::Invoke(Box::new(self.invoke(pos)?)),
             "JSON" if self.accept_word("GENERATE") => Stmt::JsonGenerate(Box::new(self.json_generate(pos)?)),
@@ -3325,6 +3333,75 @@ impl Parser<'_> {
     /// INITIALIZE identifier-1 ... [WITH FILLER] [{ALL | category-name} TO VALUE] [THEN] [REPLACING
     /// {category-name [DATA] BY {identifier-2 | literal-1}} ...] [THEN TO DEFAULT] (Language
     /// Reference SC27-8713-03, pp. 350-352).
+    /// ALLOCATE (Language Reference, ALLOCATE statement) as the statements it stands for: SET
+    /// ADDRESS OF data-name-1 TO heap storage of its length, INITIALIZE it WITH FILLER ALL TO VALUE
+    /// THEN TO DEFAULT where INITIALIZED is written, and SET the RETURNING pointer TO its address;
+    /// or, for arithmetic-expression-1 CHARACTERS, SET the RETURNING pointer TO that many bytes. LOC
+    /// is read and has no effect: the run's storage has no 16 MB line or 2 GB bar.
+    fn allocate(&mut self, pos: Pos) -> R<Stmt> {
+        let ends = |w: &str| matches!(w, "INITIALIZED" | "LOC" | "RETURNING");
+        let characters = self.tokens[self.at..]
+            .iter()
+            .take_while(|t| t.tok != Tok::Period && !matches!(&t.tok, Tok::Word(w) if ends(w) || self.is_verb(w) && w != "FUNCTION"))
+            .any(|t| matches!(&t.tok, Tok::Word(w) if w == "CHARACTERS"));
+        let (item, size) = if characters {
+            let size = self.expr()?;
+            self.expect_word("CHARACTERS")?;
+            (None, size)
+        } else {
+            let r = self.reference()?;
+            (Some(r.clone()), Expr::Operand(Operand::LengthOf(r)))
+        };
+        let initialized = self.accept_word("INITIALIZED");
+        if self.accept_word("LOC") {
+            match self.peek() {
+                Some(Tok::Number(n)) if matches!(n.as_str(), "24" | "31" | "64") => self.at += 1,
+                _ => return Err(self.error("24, 31 or 64 after LOC")),
+            }
+        }
+        let returning = if self.accept_word("RETURNING") { Some(self.reference()?) } else { None };
+        let heap = Operand::Function(FunctionCall { name: "HEAP ALLOCATE".into(), args: vec![size], modifier: None, refmod: None, all_subscripts: Vec::new(), pos });
+        let Some(item) = item else {
+            let Some(pointer) = returning else { return Err(self.error("RETURNING after ALLOCATE ... CHARACTERS")) };
+            return Ok(Stmt::Set { set: SetStmt::To { targets: vec![pointer], value: heap }, pos });
+        };
+        let mut statements = vec![Stmt::Set { set: SetStmt::AddressOf { targets: vec![item.clone()], value: heap }, pos }];
+        if initialized {
+            let with = InitializeWith { filler: true, value: DataCategory::ALL.to_vec(), replacing: Vec::new(), default: true };
+            statements.push(Stmt::Initialize { targets: vec![item.clone()], with: Some(Box::new(with)), pos });
+        }
+        if let Some(pointer) = returning {
+            statements.push(Stmt::Set { set: SetStmt::To { targets: vec![pointer], value: Operand::AddressOf(item) }, pos });
+        }
+        let last = statements.pop().unwrap_or(Stmt::Continue { pos });
+        self.before.extend(statements);
+        Ok(last)
+    }
+
+    /// FREE (Language Reference, FREE statement): SET each pointer TO what freeing it gives, NULL
+    /// once its storage is released. Under `--compliance extended` a LINKAGE or BASED record named
+    /// instead, GnuCOBOL's form, has its own address freed, with IWX0047-W; refused under strict.
+    fn free(&mut self, pos: Pos) -> R<Stmt> {
+        let mut statements = Vec::new();
+        while self.starts_ref() && !self.word().is_some_and(|w| self.is_verb(w) || w.starts_with("END-") || PHRASE_WORDS.contains(&w)) {
+            let at = self.pos();
+            let r = self.reference()?;
+            let freed = |address: Operand| Operand::Function(FunctionCall { name: "HEAP FREE".into(), args: vec![Expr::Operand(address)], modifier: None, refmod: None, all_subscripts: Vec::new(), pos });
+            if r.qualifiers.is_empty() && self.unstored.contains(&r.name) {
+                if !self.extended {
+                    return Err(crate::messages::IWC0317.at(at, format!("FREE {}: GnuCOBOL's FREE of a record, not Enterprise COBOL's, which frees through a pointer; --compliance extended reads it", r.name)));
+                }
+                self.messages.push(crate::messages::IWX0047.at(at, format!("FREE {} (GnuCOBOL; Enterprise COBOL frees through a pointer): the storage ADDRESS OF {0} names is released, and the record has none", r.name)));
+                statements.push(Stmt::Set { set: SetStmt::AddressOf { targets: vec![r.clone()], value: freed(Operand::AddressOf(r)) }, pos });
+            } else {
+                statements.push(Stmt::Set { set: SetStmt::To { targets: vec![r.clone()], value: freed(Operand::Ref(r)) }, pos });
+            }
+        }
+        let last = statements.pop().ok_or_else(|| self.error("a pointer after FREE"))?;
+        self.before.extend(statements);
+        Ok(last)
+    }
+
     fn initialize(&mut self, pos: Pos) -> R<Stmt> {
         let category = |p: &Self| p.word().and_then(DataCategory::from_word);
         let mut targets = Vec::new();

@@ -904,6 +904,15 @@ to it, as a record of the LINKAGE SECTION no USING names: ADDRESS OF it is NULL 
 OF gives it storage, as cobc 3.2 gives it. BASED on another level is refused (IWR0077). Assumption
 C486. Strict refuses the clause (IWC0316).
 
+### IWX0047-W FREE of a record
+
+`IWX0047-W FREE REC (GnuCOBOL; Enterprise COBOL frees through a pointer): the storage ADDRESS OF REC
+names is released, and the record has none`, at the record's name.
+
+Enterprise COBOL's FREE names pointers (C487). GnuCOBOL's also takes a LINKAGE or BASED record:
+the storage ALLOCATE gave it is released and ADDRESS OF it becomes NULL, as cobc 3.2 does. Strict
+refuses it (IWC0317).
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

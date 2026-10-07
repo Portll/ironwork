@@ -386,6 +386,7 @@ pub const START_BACKWARD: &str = "C483";
 pub const SPLIT_KEYS: &str = "C484";
 pub const DELETE_FILE: &str = "C485";
 pub const BASED_ITEMS: &str = "C486";
+pub const ALLOCATE_HEAP: &str = "C487";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2733,6 +2734,13 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[O(Extended)]],
+    },
+    Assumption {
+        id: ALLOCATE_HEAP,
+        claim: "ALLOCATE takes its storage from the heap CEEGTST also takes from, where it persists until FREE or the end of the run unit (Language Reference, ALLOCATE statement): a data-name-1's length, which LENGTH OF gives without the record's address, or arithmetic-expression-1 rounded up. Its bytes are binary zeros whether or not INITIALIZED is written, where IBM leaves them undefined without it, and INITIALIZED on a data-name-1 then initializes it WITH FILLER ALL TO VALUE THEN TO DEFAULT. LOC 24, 31 and 64 are read and change nothing, as the run's storage has no 16 MB line or 2 GB bar. A request of zero or fewer bytes, or more than CEEGTST grants (256 MB), gives NULL, IBM's answer when storage is not available. FREE of a pointer to the start of a block ALLOCATE gave releases it and sets the pointer to NULL; any other address, NULL among them, is left as it is and nothing is freed, where IBM calls the behaviour undefined. Under --compliance extended FREE also names a LINKAGE or BASED record, GnuCOBOL's form, whose address it frees",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[S(Set)]],
     },
     Assumption {
         id: COMMAND_LINE_FROM_PARM,

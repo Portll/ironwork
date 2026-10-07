@@ -756,7 +756,7 @@ fn statement_payloads_round_trip_with_every_tag() {
     every_variant(&numeric, 7);
     every_variant(&[FloatFrom::Float, FloatFrom::Fixed, FloatFrom::Zero], 3);
     every_variant(&[SenderCheck::None, SenderCheck::Item, SenderCheck::Integer], 3);
-    every_variant(Func::ALL, 85);
+    every_variant(Func::ALL, 87);
     for &func in Func::ALL {
         assert_eq!(Func::named(func.name()), Some(func));
     }

@@ -1698,3 +1698,35 @@ fn program_pointers_missing_periods_and_based_items_are_warned_under_extended_an
     let nested = BASED_ITEMS.replace("05 R-A PIC X(3).", "05 R-A PIC X(3) BASED.");
     assert!(diagnostics_under(&nested, numeric::Compliance::Extended).iter().any(|d| (d.0, d.2) == (6, Some("IWR0077"))));
 }
+
+/// GnuCOBOL's ALLOCATE of a BASED record and FREE of the record.
+const FREE_RECORD: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. FREEREC.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  REC BASED.\n",
+    "           05 R-A PIC X(3).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           ALLOCATE REC\n",
+    "           MOVE 'ABC' TO R-A\n",
+    "           DISPLAY 'REC ' REC\n",
+    "           FREE REC\n",
+    "           IF ADDRESS OF REC = NULL DISPLAY 'FREED' END-IF\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn free_of_a_based_record_releases_its_storage_alike_on_both_executors() {
+    // cobc 3.2's output.
+    let expected = "REC ABC\nFREED\n";
+    let walked = Harness::source(FREE_RECORD).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{}", walked.err);
+    let vm = Harness::source(FREE_RECORD).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    let warned: Vec<_> = diagnostics_under(FREE_RECORD, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0047")).map(|d| (d.0, d.1)).collect();
+    assert_eq!(warned, [(11, 17)]);
+    let linkage = FREE_RECORD.replace("       WORKING-STORAGE SECTION.\n       01  REC BASED.", "       LINKAGE SECTION.\n       01  REC.");
+    let refused = syntax::parse(&linkage).unwrap_err();
+    assert_eq!((refused.pos.line, refused.id), (11, Some("IWC0317")), "{refused}");
+}

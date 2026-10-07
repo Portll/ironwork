@@ -11,8 +11,6 @@ use crate::vocab::Pos;
 use std::io::Write;
 use zarch::ebcdic::CodePage;
 
-/// The largest CEEGTST request the run grants, as GETMAIN's limit is for CICS.
-const HEAP_LIMIT: usize = 1 << 28;
 /// MSGFILE's default ddname, where CEEMOUT writes.
 const MSGFILE: &str = "SYSOUT";
 /// The transient data queue that takes a CICS task's LE messages and dumps in place of any DD.
@@ -262,7 +260,7 @@ impl<H: Clone, L: Loader<H>> Services<'_, '_, H, L> {
         let size = self.le_fullword(call, 1)?;
         let address = self.le_at(call, 2)?;
         let failed = match (heap, size) {
-            (0, s) if s > 0 && s as usize <= HEAP_LIMIT => None,
+            (0, s) if s > 0 && s as usize <= super::HEAP_LIMIT => None,
             (0, s) if s > 0 => Some(super::HEAP_SHORT),
             (0, _) => Some(super::HEAP_SIZE),
             _ => Some(super::HEAP_ID),

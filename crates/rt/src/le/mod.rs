@@ -17,6 +17,9 @@ use zarch::ebcdic::{self, CodePage};
 use zarch::hfp::{Hfp, Precision, Rounding};
 use zarch::wide::U256;
 
+/// The largest CEEGTST or ALLOCATE request the run grants, as GETMAIN's limit is for CICS.
+pub const HEAP_LIMIT: usize = 1 << 28;
+
 /// What a run keeps for the services: heap storage, and which output DDs it has started.
 #[derive(Debug, Default)]
 pub struct State {

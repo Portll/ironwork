@@ -59,6 +59,14 @@ impl<'p> Evaluator for Call<'_, 'p, '_, '_, '_> {
         unit.caller_of(self.machine.me).map(|p| unit.programs[p].name.clone())
     }
 
+    fn heap_allocate(&mut self, size: usize) -> u32 {
+        self.machine.unit.heap_allocate(size)
+    }
+
+    fn heap_free(&mut self, address: u32) -> u32 {
+        self.machine.unit.heap_free(address)
+    }
+
     fn argument_length(&mut self, position: usize) -> usize {
         self.machine.unit.argument_length_of(self.machine.me, position)
     }

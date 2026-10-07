@@ -47,6 +47,10 @@ pub trait Evaluator {
     /// The length of the argument in USING position `position`, from 1, of the running
     /// activation: 0 for one omitted or not passed, and in the main program.
     fn argument_length(&mut self, position: usize) -> usize;
+    /// ALLOCATE's storage of `size` bytes and its address, NULL when none is granted.
+    fn heap_allocate(&mut self, size: usize) -> u32;
+    /// FREE of `address`: NULL once the block it starts is released, else `address` unchanged.
+    fn heap_free(&mut self, address: u32) -> u32;
 }
 
 fn integer(n: i128, digits: u32) -> Val {
@@ -881,6 +885,26 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
                 _ => return Err(crate::refusal::IWR0065.abend("FUNCTION STORED-CHAR-LENGTH of this argument is not supported yet", pos)),
             };
             Ok(Val::Num(Fixed::new(n as i128, Places::new(9, 0))))
+        }
+        "HEAP ALLOCATE" => {
+            arity(1..=1, args)?;
+            let size = match &args[0] {
+                Val::Num(n) => {
+                    let (whole, rest) = n.magnitude.div_rem(U256::pow10(n.places.dec));
+                    let up = if rest.is_zero() { whole } else { whole + U256::from_u128(1) };
+                    if n.negative { 0 } else { up.to_u128().map_or(usize::MAX, |u| usize::try_from(u).unwrap_or(usize::MAX)) }
+                }
+                _ => usize::try_from(whole(&args[0], name, pos)?).unwrap_or(0),
+            };
+            Ok(Val::Address(x.heap_allocate(size)))
+        }
+        "HEAP FREE" => {
+            arity(1..=1, args)?;
+            let address = match &args[0] {
+                Val::Address(a) => *a,
+                _ => 0,
+            };
+            Ok(Val::Address(x.heap_free(address)))
         }
         "ARGUMENT LENGTH" => {
             arity(1..=1, args)?;

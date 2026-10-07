@@ -815,8 +815,15 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Operand::Literal(lit) => self.literal_value(lit, pos),
             Operand::LengthOf(r) => {
                 let layout = self.layout;
-                let loc = self.locate(&layout.length_of_ref(r))?;
-                Ok(Val::Num(Fixed::new(loc.len as i128, Places::new(9, 0))))
+                let fixed = match layout.resolve(&r.name, &r.qualifiers, r.pos) {
+                    Ok(Resolved::Item(i)) if r.refmod.is_none() && layout.items[i].odo.is_empty() && layout.items[i].linkage.is_some() => Some(layout.items[i].size as usize),
+                    _ => None,
+                };
+                let len = match fixed {
+                    Some(len) => len,
+                    None => self.locate(&layout.length_of_ref(r))?.len,
+                };
+                Ok(Val::Num(Fixed::new(len as i128, Places::new(9, 0))))
             }
             Operand::Function(f) => self.function(f, Within::Own),
             Operand::AddressOf(r) => Ok(Val::Address(self.address_of(r)?)),
