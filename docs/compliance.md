@@ -658,6 +658,19 @@ and leaves the others where they are. An alphanumeric PICTURE of more than eight
 (IWC0303); Micro Focus takes up to sixteen. Strict refuses COMP-X (IWC0301) and an alphanumeric
 PICTURE with COMP-5 (IWC0302).
 
+### IWX0027-W FLOAT-SHORT and FLOAT-LONG
+
+`IWX0027-W FLOAT-SHORT (GnuCOBOL and Micro Focus; Enterprise COBOL writes COMP-1 and COMP-2): it is
+read as COMP-1, IBM's hexadecimal floating point`, at the usage word.
+
+`[USAGE [IS]] FLOAT-SHORT` is read as COMP-1 and `FLOAT-LONG` as COMP-2, by the operator's ruling of
+2026-10-07 that they behave as IBM's do. cobc and Micro Focus hold them in IEEE binary floating
+point, so a value with no exact form, such as 0.001, can differ in its last digits: as COMP-1 it
+holds 0.00099999993. DISPLAY shows them as it shows any COMP-1 or COMP-2 item, `-.99999993E-03`
+where cobc shows `-0.001`. The other floating-point usages, FLOAT-DECIMAL-16 and -34,
+FLOAT-BINARY-32, -64 and -128, FLOAT-EXTENDED and z390's FLOAT-HEX-7, -15 and -30, stay refused.
+Assumption C469. Strict refuses FLOAT-SHORT and FLOAT-LONG (IWS0101).
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

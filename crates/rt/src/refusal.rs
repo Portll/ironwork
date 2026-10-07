@@ -46,7 +46,7 @@ catalogue! {
     IWR0063 "CALL {name} was reached: {service} is a JNI service, and ironwork for COBOL has no JVM to run it";
     IWR0064 "FUNCTION {name} is not supported yet";
     IWR0065 "FUNCTION LENGTH of this argument is not supported yet";
-    IWR0066 "DISPLAY of a floating-point {item or value} is not supported yet";
+    IWR0066 "DISPLAY of a floating-point value is not supported yet";
     IWR0067 "DISPLAY of a pointer, index or object reference is not supported";
     IWR0068 "ADVANCING {name} on {file}, whose FD has LINAGE, is not supported yet";
     IWR0069 "exponentiation other than by an integer from 0 to 31 is not supported yet";

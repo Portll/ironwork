@@ -286,6 +286,16 @@ const SCREEN_ATTRIBUTES: &[&str] = &[
     "BACKGROUND-COLOUR", "TIMEOUT", "TIME-OUT", "SIZE", "CONTROL", "SCROLL",
 ];
 
+/// FLOAT-SHORT or FLOAT-LONG under strict, which `--compliance extended` reads as COMP-1 or COMP-2.
+fn gnucobol_float(word: &str, pos: Pos) -> Option<Error> {
+    let ibm = match word {
+        "FLOAT-SHORT" => "COMP-1",
+        "FLOAT-LONG" => "COMP-2",
+        _ => return None,
+    };
+    Some(crate::messages::IWS0101.at(pos, format!("{word}: GnuCOBOL's and Micro Focus's floating point, not Enterprise COBOL's; --compliance extended reads it as {ibm}")))
+}
+
 fn usage_word(word: &str) -> Option<Usage> {
     Some(match word {
         "DISPLAY" => Usage::Display,
@@ -1489,7 +1499,7 @@ impl Parser<'_> {
                     if w == "OBJECT" {
                         self.object_reference(&mut e)?;
                     } else {
-                        let usage = usage_word(&w).ok_or_else(|| crate::messages::IWR0004.at(pos, format!("USAGE {w} is not supported yet")))?;
+                        let usage = usage_word(&w).ok_or_else(|| gnucobol_float(&w, pos).unwrap_or_else(|| crate::messages::IWR0004.at(pos, format!("USAGE {w} is not supported yet"))))?;
                         e.usage = Some(self.signedness(usage));
                     }
                 }
@@ -1590,7 +1600,10 @@ impl Parser<'_> {
                 "IS" if matches!(self.word(), Some("EXTERNAL" | "GLOBAL")) => {}
                 other => match usage_word(other) {
                     Some(u) => e.usage = Some(self.signedness(u)),
-                    None => return Err(crate::messages::IWR0003.at(self.tokens[self.at - 1].pos, format!("{other} is not a data description clause ironwork for COBOL supports yet"))),
+                    None => {
+                        let pos = self.tokens[self.at - 1].pos;
+                        return Err(gnucobol_float(other, pos).unwrap_or_else(|| crate::messages::IWR0003.at(pos, format!("{other} is not a data description clause ironwork for COBOL supports yet"))));
+                    }
                 },
             }
         }

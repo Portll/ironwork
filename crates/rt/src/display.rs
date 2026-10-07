@@ -10,6 +10,7 @@ use numeric::{Dialect, DispSign, Native, Switched};
 use std::io::Write;
 use zarch::decimal;
 use zarch::ebcdic::CodePage;
+use zarch::hfp::{Hfp, Precision};
 
 type R<T> = Result<T, Abend>;
 
@@ -59,7 +60,7 @@ pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos, upon_cons
             shown[at] |= 0xF0;
             facts.page().decode(&sign_first(negative, shown))
         }
-        Kind::Float(_) => return Err(crate::refusal::IWR0066.abend("DISPLAY of a floating-point item is not supported yet", pos)),
+        Kind::Float(precision) => float(Hfp::from_bytes(precision, store::bytes(mem, loc))),
         Kind::Pointer | Kind::Index | Kind::ObjectReference | Kind::ProgramPointer => {
             return Err(crate::refusal::IWR0067.abend("DISPLAY of a pointer, index or object reference is not supported", pos));
         }
@@ -72,6 +73,18 @@ pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos, upon_cons
 /// item in them, whatever its PICTURE.
 pub const fn whole_binary_digits(len: usize) -> usize {
     [3, 5, 8, 10, 13, 15, 17, 20][len - 1]
+}
+
+/// A COMP-1 item as though moved to PICTURE -.9(8)E-99 and a COMP-2 one to -.9(17)E-99: the
+/// leftmost digit after the point not zero, rounded, a blank before a positive mantissa or exponent
+/// (Language Reference SC27-8713-03, pp. 214-215 and the DISPLAY statement; Programming Guide
+/// SC27-8714-03, p. 52).
+pub fn float(value: Hfp) -> String {
+    let count = if value.precision == Precision::Short { 8 } else { 17 };
+    let (negative, digits, first) = crate::json::significant_digits(value, count);
+    let exponent = if digits.bytes().all(|d| d == b'0') { 0 } else { first + 1 };
+    let sign = |minus: bool| if minus { '-' } else { ' ' };
+    format!("{}.{digits}E{}{:02}", sign(negative), sign(exponent < 0), exponent.unsigned_abs())
 }
 
 /// Zoned digits after a separate sign, as DISPSIGN(SEP) shows a signed item.
@@ -150,4 +163,23 @@ const SUBSTITUTE: u8 = 0x3F;
 pub fn utf16_text(bytes: &[u8]) -> String {
     let units: Vec<u16> = bytes.chunks(2).map(|c| u16::from_be_bytes([c[0], *c.get(1).unwrap_or(&0)])).collect();
     String::from_utf16_lossy(&units)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn floating_point_items_show_as_the_external_float_picture_ibm_gives_them() {
+        let short = |n: i128| Hfp::from_integer(n, Precision::Short);
+        let long = |n: i128| Hfp::from_integer(n, Precision::Long);
+        let tenth = |h: Hfp, d: i128| h.div(Hfp::from_integer(d, h.precision), Default::default()).unwrap();
+        assert_eq!(float(tenth(short(15), 10)), " .15000000E 01");
+        assert_eq!(float(long(-1234)), "-.12340000000000000E 04");
+        assert_eq!(float(tenth(short(1), 1000)), " .99999993E-03");
+        assert_eq!(float(tenth(long(1), 3)), " .33333333333333333E 00");
+        assert_eq!(float(Hfp::zero(Precision::Short)), " .00000000E 00");
+        assert_eq!(float(long(12_345)), " .12345000000000000E 05");
+        assert_eq!(float(short(0x000F_FFFF_F000)), " .68719473E 11");
+    }
 }

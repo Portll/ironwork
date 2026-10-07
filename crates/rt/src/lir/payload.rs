@@ -161,14 +161,15 @@ pub enum ScreenPosition {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DisplayItem<P = PlaceId, O = Operand> {
     /// Groups, alphanumeric, zoned and edited items, and national items written elsewhere than the
-    /// console: the storage in the program's code page.
+    /// console: the storage in the program's code page. A COMP-1 or COMP-2 item: its value in
+    /// external floating point (`display::float`).
     Bytes(P),
     /// A national item UPON CONSOLE: converted to the program's code page.
     National(P),
     /// Packed and binary items: the value's last `digits` digits, which for COMP-5 or TRUNC(BIN)
     /// are as many as the item's halfword, fullword or doubleword holds.
     Digits { place: P, digits: u32, signed: bool },
-    /// Floating-point, pointer, index and object-reference items: the place, then the abend.
+    /// Pointer, index and object-reference items: the place, then the abend.
     Refused { place: P, abend: AbendId },
     /// A literal or figurative constant as DISPLAY shows it; a numeric literal as written, its decimal
     /// point the program's.

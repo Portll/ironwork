@@ -860,3 +860,37 @@ fn comp_x_and_pic_x_comp_5_are_warnings_naming_their_bytes_under_extended_and_re
     let nine = program("", "       01  P PIC X(9) COMP-X.\n", &line("GOBACK."));
     assert!(diagnostics_under(&nine, numeric::Compliance::Extended).iter().any(|d| d.2 == Some("IWC0303")));
 }
+
+/// FLOAT-SHORT and FLOAT-LONG items beside COMP-1 and COMP-2 ones, shown by DISPLAY.
+const GNUCOBOL_FLOATS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. FLOATS.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  C1 COMP-1 VALUE 1.5.\n",
+    "       01  FS FLOAT-SHORT VALUE -0.001.\n",
+    "       01  FL USAGE IS FLOAT-LONG.\n",
+    "       01  Z  COMP-2 VALUE 0.\n",
+    "       01  N  PIC S9(5)V99.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           COMPUTE FL = 1 / 3\n",
+    "           DISPLAY C1 ' ' FS\n",
+    "           DISPLAY FL ' ' Z\n",
+    "           COMPUTE FL = 12345.678\n",
+    "           MOVE FL TO N\n",
+    "           DISPLAY N\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn float_short_and_float_long_are_comp_1_and_comp_2_shown_as_ibm_shows_them_on_both_executors() {
+    let walked = Harness::source(GNUCOBOL_FLOATS).flags(EXTENDED).run(Executor::Interpreter);
+    assert!(walked.ending.is_ok(), "{:?}\n{}", walked.ending, walked.err);
+    assert_eq!(walked.out, " .15000000E 01 -.99999993E-03\n .33333333333333333E 00  .00000000000000000E 00\n123456H\n");
+    let vm = Harness::source(GNUCOBOL_FLOATS).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    let warned = diagnostics_under(GNUCOBOL_FLOATS, numeric::Compliance::Extended);
+    assert_eq!(warned, [(6, 15, Some("IWX0027"), Severity::Warning), (7, 24, Some("IWX0027"), Severity::Warning)]);
+    let refused = syntax::parse(GNUCOBOL_FLOATS).unwrap_err();
+    assert_eq!((refused.pos.line, refused.id), (6, Some("IWS0101")), "{refused}");
+}

@@ -789,6 +789,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWS0098 | S | `VALUES in a level-{level} entry: Enterprise COBOL writes VALUES only in a level-88 entry, and VALUE in any other; --compliance extended reads it as VALUE` |
 | IWS0099 | E | `{word}: a user-defined word has at most 30 characters, and this one has {count}; it is read as its first 30, {the first 30}` |
 | IWS0100 | E | `{word} begins in Area A, where Enterprise COBOL puts no statement: it is read as though it began in Area B` |
+| IWS0101 | S | `{FLOAT-SHORT or FLOAT-LONG}: GnuCOBOL's and Micro Focus's floating point, not Enterprise COBOL's; --compliance extended reads it as {COMP-1 or COMP-2}` |
 | IWX0001 | W | `free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}` |
 | IWX0002 | W | `constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry` |
 | IWX0003 | W | `<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =` |
@@ -815,6 +816,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0024 | W | `CALL ... RETURNING {OMITTED, NOTHING or NULL} (GnuCOBOL; Enterprise COBOL's RETURNING names a data item): the CALL leaves the caller's RETURN-CODE as it was` |
 | IWX0025 | W | `COMP-X (Micro Focus; Enterprise COBOL's binary items are two, four or eight bytes): {name} is {n} bytes of binary, {range}, shown in {digits} digits` |
 | IWX0026 | W | `PIC X(n) COMP-5 (Micro Focus and GnuCOBOL; Enterprise COBOL's COMP-5 takes a numeric PICTURE): {name} is {n} bytes of binary, {range}` |
+| IWX0027 | W | `{FLOAT-SHORT or FLOAT-LONG} (GnuCOBOL and Micro Focus; Enterprise COBOL writes COMP-1 and COMP-2): it is read as {COMP-1 or COMP-2}, IBM's hexadecimal floating point` |
 
 ## Run-time refusals
 
@@ -831,7 +833,7 @@ severity S before the text, under the abend code IRONWORK, EXEC or JAVA.
 | IWR0063 | S | `CALL {name} was reached: {service} is a JNI service, and ironwork for COBOL has no JVM to run it` |
 | IWR0064 | S | `FUNCTION {name} is not supported yet` |
 | IWR0065 | S | `FUNCTION LENGTH of this argument is not supported yet` |
-| IWR0066 | S | `DISPLAY of a floating-point {item or value} is not supported yet` |
+| IWR0066 | S | `DISPLAY of a floating-point value is not supported yet` |
 | IWR0067 | S | `DISPLAY of a pointer, index or object reference is not supported` |
 | IWR0068 | S | `ADVANCING {name} on {file}, whose FD has LINAGE, is not supported yet` |
 | IWR0069 | S | `exponentiation other than by an integer from 0 to 31 is not supported yet` |

@@ -814,6 +814,7 @@ catalogue! {
     IWS0098 Severe "VALUES in a level-{level} entry: Enterprise COBOL writes VALUES only in a level-88 entry, and VALUE in any other; --compliance extended reads it as VALUE";
     IWS0099 Error "{word}: a user-defined word has at most 30 characters, and this one has {count}; it is read as its first 30, {the first 30}";
     IWS0100 Error "{word} begins in Area A, where Enterprise COBOL puts no statement: it is read as though it began in Area B";
+    IWS0101 Severe "{FLOAT-SHORT or FLOAT-LONG}: GnuCOBOL's and Micro Focus's floating point, not Enterprise COBOL's; --compliance extended reads it as {COMP-1 or COMP-2}";
     IWX0001 Warning "free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}";
     IWX0002 Warning "constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry";
     IWX0003 Warning "<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =";
@@ -840,6 +841,7 @@ catalogue! {
     IWX0024 Warning "CALL ... RETURNING {OMITTED, NOTHING or NULL} (GnuCOBOL; Enterprise COBOL's RETURNING names a data item): the CALL leaves the caller's RETURN-CODE as it was";
     IWX0025 Warning "COMP-X (Micro Focus; Enterprise COBOL's binary items are two, four or eight bytes): {name} is {n} bytes of binary, {range}, shown in {digits} digits";
     IWX0026 Warning "PIC X(n) COMP-5 (Micro Focus and GnuCOBOL; Enterprise COBOL's COMP-5 takes a numeric PICTURE): {name} is {n} bytes of binary, {range}";
+    IWX0027 Warning "{FLOAT-SHORT or FLOAT-LONG} (GnuCOBOL and Micro Focus; Enterprise COBOL writes COMP-1 and COMP-2): it is read as {COMP-1 or COMP-2}, IBM's hexadecimal floating point";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

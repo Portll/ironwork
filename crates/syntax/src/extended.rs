@@ -1,10 +1,11 @@
 //! What `--compliance extended` does to the tokens before the parser reads them: each constant
 //! entry comes out and every later use of its name stands for its value, literals joined by `&`
-//! become one literal, BINARY-SHORT, BINARY-LONG and BINARY-DOUBLE become COMP-5 PICTUREs, and
-//! RETURNING OMITTED leaves a program's PROCEDURE DIVISION header (docs/compliance.md).
+//! become one literal, BINARY-SHORT, BINARY-LONG and BINARY-DOUBLE become COMP-5 PICTUREs,
+//! FLOAT-SHORT and FLOAT-LONG become COMP-1 and COMP-2, and RETURNING OMITTED leaves a program's
+//! PROCEDURE DIVISION header (docs/compliance.md).
 
 use crate::lexer::{Tok, Token};
-use crate::messages::{IWX0002, IWX0004, IWX0005, IWX0006, IWX0009};
+use crate::messages::{IWX0002, IWX0004, IWX0005, IWX0006, IWX0009, IWX0027};
 use crate::{Error, Pos};
 use std::collections::HashMap;
 
@@ -76,6 +77,10 @@ pub fn rewrite(tokens: Vec<Token>, cards: &[String]) -> Result<Vec<Token>, Error
             }
             Tok::Word(w) if data && BINARY_USAGES.iter().any(|u| u.word == w) => {
                 r.binary_usage()?;
+                continue;
+            }
+            Tok::Word(w) if data && (w == "FLOAT-SHORT" || w == "FLOAT-LONG") => {
+                r.float_usage();
                 continue;
             }
             Tok::Word(w) if w == "PROGRAM-ID" && !ends_with_header(&r.out) => r.identification_header(),
@@ -225,6 +230,19 @@ impl Rewrite {
     /// `[USAGE [IS]] BINARY-SHORT [SIGNED|UNSIGNED]` and the other binary usages in a data entry, as
     /// `PIC S9(n) COMP-5`, or `PIC 9(n) COMP-5` when unsigned: SIGNED is the default where the word
     /// does not fix the sign.
+    /// FLOAT-SHORT or FLOAT-LONG read as COMP-1 or COMP-2, IBM's hexadecimal floating point.
+    fn float_usage(&mut self) {
+        let mut token = self.tokens[self.at].clone();
+        let Tok::Word(usage) = &token.tok else { unreachable!("the caller saw a word") };
+        let ibm = if usage == "FLOAT-SHORT" { "COMP-1" } else { "COMP-2" };
+        let shown = format!("{usage} (GnuCOBOL and Micro Focus; Enterprise COBOL writes COMP-1 and COMP-2): it is read as {ibm}, IBM's hexadecimal floating point");
+        token.messages.insert(0, IWX0027.at(token.pos, shown));
+        token.tok = Tok::Word(ibm.into());
+        token.spelled = None;
+        self.at += 1;
+        self.push(token);
+    }
+
     fn binary_usage(&mut self) -> Result<(), Error> {
         let token = self.tokens[self.at].clone();
         let Tok::Word(usage) = &token.tok else { unreachable!("the caller saw a word") };

@@ -89,11 +89,21 @@ fn decimal(mut m: U256) -> String {
 /// COMP-1 as if moved to PICTURE -9.9(8)E+99 and COMP-2 to -9.9(17)E+99, rounded, with the
 /// sign's space trimmed.
 pub fn float_number(value: Hfp, decimals: u32) -> String {
+    let (negative, text, exponent) = significant_digits(value, decimals + 1);
+    let sign = if negative { "-" } else { "" };
+    let exponent_sign = if exponent < 0 { '-' } else { '+' };
+    format!("{sign}{}.{}E{exponent_sign}{:02}", &text[..1], &text[1..], exponent.unsigned_abs())
+}
+
+/// `value` rounded to `count` significant digits: its sign, the digits, and the power of ten of
+/// the first; zero is `count` zeros at power 0.
+pub fn significant_digits(value: Hfp, count: u32) -> (bool, String, i32) {
     let v = Real::from_hfp(value);
     if v.is_zero() {
-        return format!("0.{}E+00", "0".repeat(decimals as usize));
+        return (false, "0".repeat(count as usize), 0);
     }
     let magnitude = v.abs();
+    let decimals = count - 1;
     let mut exponent = magnitude.to_f64().log10().floor() as i32;
     let significant = |e: i32| -> u128 {
         let shift = decimals as i32 - e;
@@ -109,10 +119,7 @@ pub fn float_number(value: Hfp, decimals: u32) -> String {
         exponent -= 1;
         digits = significant(exponent);
     }
-    let text = digits.to_string();
-    let sign = if v.is_negative() { "-" } else { "" };
-    let exponent_sign = if exponent < 0 { '-' } else { '+' };
-    format!("{sign}{}.{}E{exponent_sign}{:02}", &text[..1], &text[1..], exponent.unsigned_abs())
+    (v.is_negative(), digits.to_string(), exponent)
 }
 
 fn power_of_ten(mut n: u32) -> Real {
