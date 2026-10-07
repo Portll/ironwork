@@ -323,6 +323,13 @@ numeric-edited item's VALUE (IWX0012-W), END-DISPLAY and END-ACCEPT (IWX0013-W),
 level-88 entry (IWX0014-W), and user-defined words of more than 30 characters (IWX0015-W). Strict
 gives IBM's message for each at IBM's severity: S for the first three, and E for a long word, which
 it reads as its first 30 characters, as Enterprise COBOL does.
+A statement in Area A is read as though it began in Area B, with IWS0100-E under strict, as IBM's
+compiler gives IGYPS0009-E, and IWX0017-W under extended. Extended also reads BINARY-CHAR as one byte
+of binary (IWX0016-W), an unsigned integer as the argument of TRIM, UPPER-CASE, LOWER-CASE or REVERSE
+(IWX0018-W), OCCURS at level 01 or 77 (IWX0019-W), DISPLAY and ACCEPT on the screen (IWX0020-W),
+ACCEPT FROM ENVIRONMENT, SET ENVIRONMENT and DISPLAY UPON ENVIRONMENT-NAME (IWX0021-W), the
+record-locking phrases (IWX0022-W), INSPECT ... TRAILING (IWX0023-W) and CALL ... RETURNING OMITTED,
+NOTHING or NULL (IWX0024-W).
 [docs/compliance.md](docs/compliance.md) gives each one's meaning, the census that chose them, and
 what stays refused and why.
 
