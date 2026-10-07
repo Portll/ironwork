@@ -1,0 +1,72 @@
+name: Bench
+
+# Times bench/ on a hosted runner per platform, for the VM target (docs/benchmarks.md, decision D-4):
+# each ratio is judged on the runner it was measured on, from one interleaved tools/bench.sh run.
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: repeats per program (tools/bench.sh RUNS)
+        default: '5'
+      ref:
+        description: commit to time, its own tools/bench.sh and bench/ included (default the dispatched ref)
+        default: ''
+  push:
+    branches: ['bench/**']
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    name: bench on ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Linux x86-64, os: ubuntu-24.04 }
+          - { name: macOS arm64, os: macos-latest }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref }}
+      # GnuCOBOL 3.2 on both: Ubuntu's package is 3.1.2, which cannot compile bench/callheavy.cbl.
+      - name: GnuCOBOL
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update -q && sudo apt-get install -y -q libgmp-dev libncurses-dev
+            curl -sSfLO https://ftpmirror.gnu.org/gnucobol/gnucobol-3.2.tar.xz
+            echo "3bb48af46ced4779facf41fdc2ee60e4ccb86eaa99d010b36685315df39c2ee2  gnucobol-3.2.tar.xz" | sha256sum -c -
+            tar xf gnucobol-3.2.tar.xz
+            (cd gnucobol-3.2 && ./configure -q --without-db --without-json --without-xml2 && make -s -j"$(nproc)" && sudo make -s install && sudo ldconfig)
+          else
+            brew install gnucobol
+          fi
+      - name: Toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Bench
+        shell: bash
+        env:
+          RUNS: ${{ inputs.runs || '5' }}
+        run: |
+          {
+            echo "## ${{ matrix.name }} at $(git rev-parse --short=8 HEAD)"
+            echo
+            echo '```'
+            uname -srm
+            if [ "$RUNNER_OS" = Linux ]; then nproc; grep -m1 'model name' /proc/cpuinfo; else sysctl -n hw.ncpu machdep.cpu.brand_string; fi
+            cobc --version | head -1
+            rustc --version
+            tools/bench.sh
+            echo '```'
+          } | tee bench.md
+          cat bench.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bench-${{ matrix.os }}
+          path: bench.md
