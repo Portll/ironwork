@@ -111,18 +111,26 @@ pub fn read_integer(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc) -> Option<i6
 /// its last decimal place: the value `read` gives times ten to the scale, where it reads without an
 /// abend, has no PICTURE P and fits an `i64`.
 pub fn read_digits(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc) -> Option<i64> {
-    let bytes = bytes(mem, loc);
+    if !matches!(loc.kind, Kind::Index) && facts.scaling(loc.item) != 0 {
+        return None;
+    }
+    digits(bytes(mem, loc), loc.kind, || facts.options())
+}
+
+/// `read_digits` of an item with no PICTURE P whose bytes are `bytes`, the compile options read
+/// only for a packed or zoned item.
+#[inline]
+pub fn digits(bytes: &[u8], kind: Kind, options: impl FnOnce() -> Options) -> Option<i64> {
     let decimal = |d: Decimal| i64::try_from(d.magnitude).ok().map(|m| if d.negative { -m } else { m });
-    match loc.kind {
+    match kind {
         Kind::Index => Some(i64::from(i32::from_be_bytes(bytes.try_into().ok()?))),
-        _ if facts.scaling(loc.item) != 0 => None,
         Kind::Binary { digits, signed, native, .. } => i64::try_from(Binary { digits: digits as u8, signed, native }.load(bytes)).ok(),
         Kind::Packed { signed, .. } | Kind::Zoned { signed, .. } => {
-            let options = facts.options();
+            let options = options();
             if options.invdata.is_some_and(|i| i.cleansign) {
                 return None;
             }
-            let read = match loc.kind {
+            let read = match kind {
                 Kind::Zoned { sign, .. } => codec::zoned(bytes, signed, sign, options.numproc),
                 _ => codec::packed(bytes, signed, options.numproc),
             };
@@ -294,11 +302,18 @@ pub fn store_count<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit
 
 /// What `image_of` writes for `store_count`'s value and receiver, written over the start of `out`:
 /// its length, and whether it is a size error.
-fn count_image(facts: &dyn ProgramFacts, loc: Loc, (n, places): (i64, Places), rounded: bool, out: &mut [u8; MAX_DIGITS + 1], pos: Pos) -> Option<R<(usize, bool)>> {
-    let (Kind::Binary { digits, scale, .. } | Kind::Packed { digits, scale, .. } | Kind::Zoned { digits, scale, .. }) = loc.kind else { return None };
+fn count_image(facts: &dyn ProgramFacts, loc: Loc, count: (i64, Places), rounded: bool, out: &mut [u8; MAX_DIGITS + 1], pos: Pos) -> Option<R<(usize, bool)>> {
     if facts.scaling(loc.item) != 0 {
         return None;
     }
+    Some(count_bytes(loc.kind, loc.len, count, rounded, || facts.options(), out)?.map_err(|c| Abend::check(c, pos)))
+}
+
+/// `count_image` of a binary, packed or zoned item of `len` bytes with no PICTURE P, the compile
+/// options read only for a binary item; None where it must be stored as a `Fixed`.
+#[inline]
+pub fn count_bytes(kind: Kind, len: usize, (n, places): (i64, Places), rounded: bool, options: impl FnOnce() -> Options, out: &mut [u8; MAX_DIGITS + 1]) -> Option<Result<(usize, bool), ProgramCheck>> {
+    let (Kind::Binary { digits, scale, .. } | Kind::Packed { digits, scale, .. } | Kind::Zoned { digits, scale, .. }) = kind else { return None };
     let magnitude = u128::from(n.unsigned_abs());
     let m = if scale >= places.dec {
         magnitude.checked_mul(10u128.checked_pow(scale - places.dec)?)?
@@ -308,18 +323,18 @@ fn count_image(facts: &dyn ProgramFacts, loc: Loc, (n, places): (i64, Places), r
         q + u128::from(rounded && r >= d / 2)
     };
     let negative = n < 0;
-    Some(Ok(match loc.kind {
+    Some(Ok(match kind {
         Kind::Packed { signed, .. } => {
             let cap = 10u128.checked_pow(digits)?;
             let kept = if m < cap { m } else { m % cap };
-            let image = out.get_mut(..loc.len).filter(|image| image.len() <= 16)?;
+            let image = out.get_mut(..len).filter(|image| image.len() <= 16)?;
             if let Err(c) = decimal::encode(image, Decimal { negative: signed && negative && kept != 0, magnitude: kept }) {
-                return Some(Err(Abend::check(c, pos)));
+                return Some(Err(c));
             }
             if !signed {
                 *image.last_mut().unwrap() |= 0x0F;
             }
-            (loc.len, m >= cap)
+            (len, m >= cap)
         }
         Kind::Zoned { signed, sign, .. } => {
             let cap = 10u128.checked_pow(digits)?;
@@ -332,7 +347,7 @@ fn count_image(facts: &dyn ProgramFacts, loc: Loc, (n, places): (i64, Places), r
             let magnitude = i128::try_from(m).ok()?;
             let v = if negative { -magnitude } else { magnitude };
             let item = Binary { digits: digits as u8, signed, native };
-            let options = facts.options();
+            let options = options();
             let (kept, divergence) = binary::kept(item, v, &options);
             if divergence.is_some() {
                 return None;

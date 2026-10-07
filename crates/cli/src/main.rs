@@ -507,6 +507,7 @@ exit status: for check and compile, the compile's return code, the highest of it
 const FLAGS: &[&str] = &["-silent", "-strict-sort-keys", "-warnings-block", "-debug"];
 const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid", "--sysid", "--commarea", "--commarea-out", "--task-out", "--file", "--td", "--screens", "--serve", "--transaction", "--csd"];
 
+mod codegen;
 mod compare;
 mod compile;
 mod coverage;

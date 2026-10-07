@@ -7,7 +7,7 @@ use crate::bms::Mapset;
 use crate::lir::{Class, ClassPart, Program, SymId};
 use crate::oo::{ClassCode, JAVA_LANG_OBJECT, MethodCode, Part};
 use crate::unit::{FoundClass, LoadError, LoadedProgram};
-use crate::vm::Code;
+use crate::vm::{Code, Native};
 use numeric::governs::Facts;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -37,6 +37,8 @@ struct Read {
     files: Vec<Vec<Option<SourceFile>>>,
     facts: Vec<Option<Facts>>,
     first: bool,
+    /// The generated code of each program, by ordinal, of a module an executable holds.
+    natives: Vec<Option<Native>>,
 }
 
 type Found = LoadedProgram<Rc<Code>>;
@@ -60,9 +62,16 @@ impl Modules {
         self.register(path, module, true)
     }
 
+    /// As [`Modules::add_first`], each program run by its generated code in `natives`, by ordinal.
+    pub fn add_first_native(&mut self, path: PathBuf, module: LoadedModule, natives: Vec<Option<Native>>) -> usize {
+        let k = self.register(path, module, true);
+        self.read[k].natives = natives;
+        k
+    }
+
     fn register(&mut self, path: PathBuf, module: LoadedModule, first: bool) -> usize {
         let LoadedModule { directory, programs, mapsets, files, facts } = module;
-        self.read.push(Read { path, directory, programs: programs.into_iter().map(Some).collect(), mapsets, files, facts, first });
+        self.read.push(Read { path, directory, programs: programs.into_iter().map(Some).collect(), mapsets, files, facts, first, natives: Vec::new() });
         self.read.len() - 1
     }
 
@@ -81,8 +90,9 @@ impl Modules {
             program.debug.sources.iter().map(|&s| symbol(&program, s)).zip(own.iter().cloned()).collect()
         };
         let facts = held.facts(ordinal, &program);
+        let native = held.natives.get(ordinal).copied().flatten();
         Some(checked.map(|()| {
-            let code = code(program, nested, None, facts);
+            let code = code(program, nested, None, facts).with_native(native);
             let (files, size) = code.shape();
             LoadedProgram { compiled: Rc::new(code), name, files, size, source: None, recorded }
         }))

@@ -12,7 +12,7 @@ use crate::module::{LoadedModule, Modules, read};
 use crate::oo::ClassCode;
 use crate::refusal::IWR0073;
 use crate::unit::{Clock, FoundClass, LoadError, LoadedProgram, Loader, RunUnit};
-use crate::vm::{Code, Halt};
+use crate::vm::{Code, Halt, Native};
 use crate::vocab::Pos;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -29,9 +29,10 @@ pub struct ModuleLoader {
 }
 
 impl ModuleLoader {
-    pub fn new(dirs: Vec<PathBuf>, path: &Path, module: LoadedModule) -> Self {
+    /// The module a run begins with, each of its programs run by its generated code in `natives`.
+    pub fn new(dirs: Vec<PathBuf>, path: &Path, module: LoadedModule, natives: Vec<Option<Native>>) -> Self {
         let mut modules = Modules::new(dirs, verify);
-        modules.add_first(path.to_owned(), module);
+        modules.add_first_native(path.to_owned(), module, natives);
         Self { modules }
     }
 }
@@ -86,6 +87,8 @@ pub struct Request<'a> {
     pub dds: Dds,
     pub clock: Clock,
     pub parm: Option<&'a str>,
+    /// The generated code of the module's programs, by ordinal.
+    pub natives: Vec<Option<Native>>,
 }
 
 fn refused(message: String) -> Halt {
@@ -97,7 +100,7 @@ fn refused(message: String) -> Halt {
 /// unless an abend the PARM's TRAP(OFF) keeps from Language Environment ended it.
 pub fn run<'w>(module: LoadedModule, r: Request<'_>, sysin: Box<dyn BufRead + 'w>, out: &'w mut dyn Write, err: &'w mut dyn Write) -> Result<(Ending, i16), Halt> {
     let path = Path::new(r.path);
-    let mut loader = ModuleLoader::new(r.dirs, path, module);
+    let mut loader = ModuleLoader::new(r.dirs, path, module, r.natives);
     let main = loader.modules.take(0, 0).unwrap_or_else(|| Err(format!("{}: the module holds no program", path.display()))).map_err(refused)?;
     if let Some(p) = main.compiled.program()
         && p.services.class.is_some()
@@ -133,8 +136,8 @@ fn usage(message: &str) -> ExitCode {
 
 /// The executable's whole run, as `ironwork run module.iwm` gives it: on a thread with the driver's
 /// stack, a panic exiting as ironwork's internal error.
-pub fn main(path: &'static str, module: &'static [u8]) -> ExitCode {
-    match std::thread::Builder::new().stack_size(64 << 20).spawn(move || batch(path, module)).map(|t| t.join()) {
+pub fn main(path: &'static str, module: &'static [u8], natives: &'static [Option<Native>]) -> ExitCode {
+    match std::thread::Builder::new().stack_size(64 << 20).spawn(move || batch(path, module, natives)).map(|t| t.join()) {
         Ok(Ok(code)) => code,
         _ => exit::status(Outcome::Internal),
     }
@@ -142,7 +145,7 @@ pub fn main(path: &'static str, module: &'static [u8]) -> ExitCode {
 
 /// Its arguments read, the module read and its first program checked, the run, an abend or a
 /// construct the VM does not run said on standard error, and the exit status.
-fn batch(path: &str, module: &[u8]) -> ExitCode {
+fn batch(path: &str, module: &[u8], natives: &[Option<Native>]) -> ExitCode {
     exit::follow(Convention::Band);
     let (mut dirs, mut dds, mut clock, mut parm) = (Vec::new(), Vec::new(), Clock::System, None);
     let mut args = std::env::args().skip(1);
@@ -199,7 +202,7 @@ fn batch(path: &str, module: &[u8]) -> ExitCode {
         None => Box::new(io::stdin().lock()),
     };
     let (mut out, mut err) = (io::stdout().lock(), io::stderr());
-    let ended = run(module, Request { path, dirs, dds, clock, parm: parm.as_deref() }, sysin, &mut out, &mut err);
+    let ended = run(module, Request { path, dirs, dds, clock, parm: parm.as_deref(), natives: natives.to_vec() }, sysin, &mut out, &mut err);
     drop(out);
     let abend = match &ended {
         Err(Halt::Abend(a)) if !matches!(a.code, AbendCode::Signal(Signal::ClosedOutput)) => Some(a),

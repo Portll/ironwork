@@ -14,6 +14,7 @@ mod files;
 mod flow;
 mod function;
 mod markup;
+mod native;
 mod oo;
 mod ops;
 mod place;
@@ -39,6 +40,8 @@ use std::rc::Rc;
 use zarch::ebcdic::{self, CodePage, Collation};
 
 pub use cics::run_task;
+pub use flow::{Exit, Next};
+pub use native::{Machine, Native};
 pub(crate) use flow::Arrival;
 
 type R<T> = Result<T, Stop>;
@@ -59,7 +62,7 @@ impl From<Abend> for Halt {
 
 /// A `Halt` in a box, as the VM's own results carry it: an `R` of a small value is then small.
 #[derive(Debug)]
-struct Stop(Box<Halt>);
+pub struct Stop(Box<Halt>);
 
 impl Stop {
     fn halt(self) -> Halt {
@@ -124,6 +127,8 @@ struct Lowered {
     numbers: Vec<bool>,
     /// Each constant's value as `operand_number` takes it where it is a number that fits an `i64`.
     literals: Vec<Option<(i64, numeric::precision::Places)>>,
+    /// The program's generated code, in an executable `ironwork compile --native` built.
+    native: Option<Native>,
 }
 
 impl Code {
@@ -133,6 +138,14 @@ impl Code {
 
     pub fn facts(&self) -> numeric::governs::Facts {
         self.facts
+    }
+
+    /// The program run by its generated code where nothing watches the run.
+    pub fn with_native(mut self, native: Option<Native>) -> Self {
+        if let Ok(lowered) = &mut self.lowered {
+            lowered.native = native;
+        }
+        self
     }
 
     pub fn program(&self) -> Option<&Program> {
@@ -175,7 +188,7 @@ impl Lowered {
         let literals = program.consts.iter().map(value::const_number).collect();
         let numbers = program.places.iter().map(place::number_item).collect();
         let direct = program.places.iter().map(place::direct).collect();
-        Self { program, collation, ordinals, high_value, low_value, entry_of, receivers, variables, pure, quick, direct, numbers, literals }
+        Self { program, collation, ordinals, high_value, low_value, entry_of, receivers, variables, pure, quick, direct, numbers, literals, native: None }
     }
 }
 

@@ -2,6 +2,7 @@
 //! runtime alone (`rt::native`), then built with cargo into an executable beside the module.
 //! The crate forbids `unsafe` and depends on the runtime only, at this compiler's own version.
 
+use rt::lir::Program;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -21,8 +22,8 @@ pub fn package(module: &str) -> String {
     format!("cobol-{name}")
 }
 
-/// The generated crate's manifest and main.
-pub fn crate_text(module: &str, runtime: &Runtime) -> (String, String) {
+/// The generated crate's manifest and main, the main holding each of `programs`' generated code.
+pub fn crate_text(module: &str, runtime: &Runtime, programs: &[Program]) -> (String, String) {
     let dependency = match runtime {
         Runtime::Published => format!("version = \"={}\"", env!("CARGO_PKG_VERSION")),
         Runtime::Checkout(dir) => format!("path = \"{}\"", dir.join("rt").display().to_string().replace('\\', "/")),
@@ -31,10 +32,7 @@ pub fn crate_text(module: &str, runtime: &Runtime) -> (String, String) {
         "[package]\nname = \"{}\"\nversion = \"0.0.0\"\nedition = \"2024\"\npublish = false\n\n[dependencies]\nironwork-rt = {{ {dependency} }}\n\n[profile.release]\ncodegen-units = 1\nlto = \"thin\"\n\n[workspace]\n",
         package(module)
     );
-    let main = format!(
-        "#![forbid(unsafe_code)]\n\nfn main() -> std::process::ExitCode {{\n    ironwork_rt::native::main({module:?}, include_bytes!({module:?}))\n}}\n"
-    );
-    (manifest, main)
+    (manifest, crate::codegen::main_text(module, programs))
 }
 
 /// Writes `module`'s crate under `out` and builds it, the runtime's build shared by every module
@@ -42,12 +40,13 @@ pub fn crate_text(module: &str, runtime: &Runtime) -> (String, String) {
 pub fn build(out: &Path, module: &str, runtime: &Runtime) -> Result<PathBuf, String> {
     let stem = module.strip_suffix(".iwm").unwrap_or(module);
     let dir = out.join(".ironwork-native").join(stem);
-    let (manifest, main) = crate_text(module, runtime);
+    let bytes = fs::read(out.join(module)).map_err(|e| format!("{}: {e}", out.join(module).display()))?;
+    let programs = rt::module::read(&bytes).map_err(|e| format!("{module}: {e}"))?.programs;
+    let (manifest, main) = crate_text(module, runtime, &programs);
     let write = |path: &Path, bytes: &[u8]| fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()));
     fs::create_dir_all(dir.join("src")).map_err(|e| format!("{}: {e}", dir.display()))?;
     write(&dir.join("Cargo.toml"), manifest.as_bytes())?;
     write(&dir.join("src").join("main.rs"), main.as_bytes())?;
-    let bytes = fs::read(out.join(module)).map_err(|e| format!("{}: {e}", out.join(module).display()))?;
     write(&dir.join("src").join(module), &bytes)?;
     let target = out.join(".ironwork-native").join("target");
     let built = Command::new("cargo")
@@ -73,14 +72,14 @@ mod tests {
     #[test]
     fn a_native_crate_forbids_unsafe_and_depends_on_the_runtime_alone() {
         for runtime in [Runtime::Published, Runtime::Checkout(PathBuf::from("/src/ironwork/crates"))] {
-            let (manifest, main) = crate_text("PAYROLL.iwm", &runtime);
+            let (manifest, main) = crate_text("PAYROLL.iwm", &runtime, &[]);
             assert!(main.starts_with("#![forbid(unsafe_code)]\n"));
-            assert!(main.contains("ironwork_rt::native::main(\"PAYROLL.iwm\", include_bytes!(\"PAYROLL.iwm\"))"));
+            assert!(main.contains("ironwork_rt::native::main(\"PAYROLL.iwm\", include_bytes!(\"PAYROLL.iwm\"), &NATIVES)"));
             let dependencies: Vec<&str> = manifest.split("[dependencies]\n").nth(1).unwrap().split("\n\n").next().unwrap().lines().collect();
             assert_eq!(dependencies.len(), 1);
             assert!(dependencies[0].starts_with("ironwork-rt = "));
         }
-        assert!(crate_text("A.iwm", &Runtime::Published).0.contains(&format!("version = \"={}\"", env!("CARGO_PKG_VERSION"))));
+        assert!(crate_text("A.iwm", &Runtime::Published, &[]).0.contains(&format!("version = \"={}\"", env!("CARGO_PKG_VERSION"))));
     }
 
     #[test]

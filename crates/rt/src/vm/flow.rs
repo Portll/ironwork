@@ -36,20 +36,20 @@ impl Arrival {
 
 /// How a dispatch loop ends: the frame it runs under completed, or was left by a transfer, or the
 /// run ended.
-pub(super) enum Exit {
+pub enum Exit {
     Completed,
     Left(Step),
     End(Ending),
 }
 
-enum Next {
+pub enum Next {
     Block(BlockId),
     Exit(Exit),
 }
 
 /// STOP RUN in a user-defined function an op or a condition ran: the run ends there, as the
 /// walker's `exec` ends it at the statement holding the invocation.
-fn stops_run(stop: &Stop) -> bool {
+pub(super) fn stops_run(stop: &Stop) -> bool {
     matches!(&*stop.0, Halt::Abend(Abend { code: AbendCode::Signal(Signal::StopRun), .. }))
 }
 
@@ -102,6 +102,11 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
     /// Runs blocks from `block` until the frame at `floor`, which this loop runs under, completes
     /// or is left, or the run ends. Control reaching a paragraph's entry tells the observer.
     fn dispatch(&mut self, mut block: BlockId, floor: usize) -> R<Exit> {
+        if let Some(native) = self.code.native
+            && let Some(ran) = native(self, block, floor)
+        {
+            return ran;
+        }
         let p = self.p;
         loop {
             if let Some(i) = self.code.entry_of[block as usize] {
@@ -170,7 +175,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
         Ok(told)
     }
 
-    fn terminator(&mut self, end: &Terminator, at: DebugId, arm: Option<u8>, floor: usize) -> R<Next> {
+    pub(super) fn terminator(&mut self, end: &Terminator, at: DebugId, arm: Option<u8>, floor: usize) -> R<Next> {
         let pos = self.pos(at);
         Ok(match end {
             Terminator::Jump(b) => Next::Block(*b),
@@ -271,7 +276,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
 
     /// Takes a transfer from the top frame (lir.md §8.4), leaving each frame that does not hold its
     /// target; a loop whose own frame is left ends with the transfer.
-    fn transfer(&mut self, step: Step, floor: usize) -> R<Next> {
+    pub(super) fn transfer(&mut self, step: Step, floor: usize) -> R<Next> {
         match step {
             Step::GoTo(t) | Step::Resume(crate::lir::Resume { para: t, .. }) => {
                 while !self.holds(self.top(), t) {
