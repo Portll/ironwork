@@ -38,7 +38,8 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
             sudo apt-get update -q && sudo apt-get install -y -q libgmp-dev libncurses-dev
-            curl -sSfLO https://ftpmirror.gnu.org/gnucobol/gnucobol-3.2.tar.xz
+            curl -sSfL --retry 3 --connect-timeout 20 -O https://ftpmirror.gnu.org/gnucobol/gnucobol-3.2.tar.xz \
+              || curl -sSfL --retry 3 --connect-timeout 20 -O https://ftp.gnu.org/gnu/gnucobol/gnucobol-3.2.tar.xz
             echo "3bb48af46ced4779facf41fdc2ee60e4ccb86eaa99d010b36685315df39c2ee2  gnucobol-3.2.tar.xz" | sha256sum -c -
             tar xf gnucobol-3.2.tar.xz
             (cd gnucobol-3.2 && ./configure -q --without-db --without-json --without-xml2 && make -s -j"$(nproc)" && sudo make -s install && sudo ldconfig)
