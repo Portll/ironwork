@@ -1325,7 +1325,7 @@ pub enum FileVerb {
 pub struct FromMove { pub from: Operand, pub to: PlaceId, pub plan: MovePlan, pub check: SenderCheck }
 pub enum Advance { Lines { before: bool, count: IntExpr }, Page { before: bool }, Mnemonic { before: bool, space: Spacing } }
 pub enum Spacing { Lines(u64), Channel(u8), PageMode }
-pub enum StartRel { Equal, Greater, NotLess }
+pub enum StartRel { Equal, Greater, NotLess, Less, NotGreater }
 pub enum StartKey { Prime, Named { key: u8, span: RecordSpan }, Relative(IntExpr), RelativeKey }
 ```
 

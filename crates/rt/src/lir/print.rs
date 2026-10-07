@@ -955,6 +955,8 @@ impl<'a> Printer<'a> {
                     StartRel::Equal => "=",
                     StartRel::Greater => ">",
                     StartRel::NotLess => ">=",
+                    StartRel::Less => "<",
+                    StartRel::NotGreater => "<=",
                 };
                 let key = match key {
                     StartKey::Prime => "prime".to_owned(),

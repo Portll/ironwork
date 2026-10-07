@@ -248,6 +248,8 @@ impl<'p> Machine<'p, '_, '_> {
             None | Some(RelOp::Eq) => StartRel::Equal,
             Some(RelOp::Gt) => StartRel::Greater,
             Some(RelOp::Ge) => StartRel::NotLess,
+            Some(RelOp::Lt) => StartRel::Less,
+            Some(RelOp::Le) => StartRel::NotGreater,
             Some(_) => return Err(Abend::ironwork("START KEY takes =, >, NOT < or >=", pos)),
         };
         let desc = self.file_desc(k);

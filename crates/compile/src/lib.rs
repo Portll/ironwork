@@ -239,6 +239,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     let own_linkage = scope::own_linkage(&program);
     omitted::rewrite(&mut program, &inherited.entries, options.compliance == numeric::Compliance::Extended, &mut errors);
     any_length::rewrite(&mut program, &mut errors);
+    declare_assign_items(&mut program, &inherited.entries);
     let linkage: Vec<DataEntry> = program.linkage.iter().chain(&inherited.entries).cloned().collect();
     let files: Vec<(&[DataEntry], Option<u32>)> = program.files.iter().map(|f| (f.records.as_slice(), f.record_max)).collect();
     let shared = layout::record_area_owners(&program.files, &program.environment).unwrap_or_else(|e| {
@@ -353,6 +354,23 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
 /// USING must name one; under strict a name stays the DD name it is in Enterprise COBOL and
 /// DYNAMIC and USING are refused (C361). A file SORT or MERGE reads or writes is refused one, as
 /// the sort opens its files by their DD names.
+/// Micro Focus's ASSIGN TO DISK name where neither the program nor a program containing it declares
+/// the name: a 4,095-byte alphanumeric item of WORKING-STORAGE, as cobc 3.2 declares it under
+/// `-std=mf` (assumption C482).
+fn declare_assign_items(program: &mut Program, inherited: &[DataEntry]) {
+    let mut missing: Vec<(String, Pos)> = Vec::new();
+    for a in program.files.iter().filter_map(|f| f.assign_item.as_ref()).filter(|a| a.declared_if_missing) {
+        let name = &a.reference.name;
+        let declared = program.working_storage.iter().chain(&program.local_storage).chain(&program.linkage).chain(inherited).chain(program.files.iter().flat_map(|f| &f.records)).any(|e| e.name.as_ref() == Some(name));
+        if !declared && !missing.iter().any(|(m, _)| m == name) {
+            missing.push((name.clone(), a.reference.pos));
+        }
+    }
+    for (name, pos) in missing {
+        program.working_storage.push(report::entry(1, Some(name), Some("X(4095)".into()), None, pos));
+    }
+}
+
 fn assign_items(program: &mut Program, layout: &layout::Layout, options: &Options, errors: &mut Vec<Error>) {
     let extended = options.compliance == numeric::Compliance::Extended;
     let mut all = Vec::new();
@@ -1246,7 +1264,10 @@ impl Check<'_> {
                 self.keyed_file(file, "START", *pos);
                 self.not_random(file, "START", *pos);
                 if let Some((op, r)) = key {
-                    if !matches!(op, RelOp::Eq | RelOp::Gt | RelOp::Ge) {
+                    if self.extended && matches!(op, RelOp::Lt | RelOp::Le) {
+                        let written = if *op == RelOp::Lt { "<" } else { "NOT > or <=" };
+                        self.errors.push(syntax::messages::IWX0036.at(*pos, format!("START KEY {written} (Micro Focus and GnuCOBOL; Enterprise COBOL's START takes =, >, NOT < or >=): the file is positioned at the last record whose key is {written} the value, which READ NEXT or READ PREVIOUS reads first")));
+                    } else if !matches!(op, RelOp::Eq | RelOp::Gt | RelOp::Ge) {
                         self.errors.push(syntax::messages::IWC0076.at(*pos, "START KEY takes =, >, NOT < or >="));
                     }
                     self.reference(r);

@@ -381,6 +381,8 @@ pub const PIC_X_COMP_5: &str = "C468";
 pub const GNUCOBOL_FLOATS: &str = "C469";
 pub const RETURNING_ON_STOP: &str = "C480";
 pub const ANY_LENGTH: &str = "C481";
+pub const ASSIGN_TO_DISK: &str = "C482";
+pub const START_BACKWARD: &str = "C483";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2693,6 +2695,20 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[O(Extended), S(Call)], &[O(Extended), S(UserFunction)]],
+    },
+    Assumption {
+        id: ASSIGN_TO_DISK,
+        claim: "Under --compliance extended, Micro Focus's ASSIGN TO DISK followed by a name or a literal reads DISK as the device and what follows as the file's name: a literal names the DD, and a name is a data item each OPEN takes the DD name from (C361). Where neither the program nor a program containing it declares the item, it is declared for the program as an alphanumeric item of 4,095 bytes in WORKING-STORAGE, the length cobc 3.2 gives the item it declares under -std=mf. Enterprise COBOL reads DISK as the assignment-name and ignores the names after it",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), S(FileIo)]],
+    },
+    Assumption {
+        id: START_BACKWARD,
+        claim: "Under --compliance extended, START ... KEY < and KEY NOT > or <=, Micro Focus's and GnuCOBOL's, position the file at the last record whose key, compared over the value's length, is less than the value, or not greater; the READ NEXT or READ PREVIOUS that follows reads that record first and goes on in its direction, as cobc 3.2 does with its BDB handler. With duplicates of an alternate key the last of them written is the one positioned at. No such record gives INVALID KEY, status 23, and no position. Enterprise COBOL's START takes =, >, NOT < and >= only",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), S(FileIo), U(IndexedFile)]],
     },
     Assumption {
         id: COMMAND_LINE_FROM_PARM,

@@ -1153,7 +1153,7 @@ fn file_declarations_and_statements_round_trip_with_every_tag() {
     ];
     every_variant(&advances, 3);
     every_variant(&[Spacing::Lines(0), Spacing::Channel(1), Spacing::PageMode], 3);
-    every_variant(&[StartRel::Equal, StartRel::Greater, StartRel::NotLess], 3);
+    every_variant(&[StartRel::Equal, StartRel::Greater, StartRel::NotLess, StartRel::Less, StartRel::NotGreater], 5);
     let keys = [StartKey::Prime, StartKey::Named { key: 0, span: RecordSpan { offset: 0, len: 6 } }, StartKey::Relative(IntExpr::Item(7)), StartKey::RelativeKey];
     every_variant(&keys, 4);
     let phrase = Phrase { on: true, not_on: true };

@@ -846,6 +846,8 @@ pub fn start<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, 
         StartRel::Equal => (Ordering::Equal, false),
         StartRel::Greater => (Ordering::Greater, false),
         StartRel::NotLess => (Ordering::Greater, true),
+        StartRel::Less => (Ordering::Less, false),
+        StartRel::NotGreater => (Ordering::Less, true),
     };
     let k = file.index;
     Ok(held(x, k, |x, mode, _, keyed| {

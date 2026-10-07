@@ -329,6 +329,8 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0306 | S | `{STOP RUN or GOBACK} {RETURNING or GIVING}: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's, where a MOVE to RETURN-CODE comes first; --compliance extended reads it` |
 | IWC0307 | S | `{name} [NOT] OMITTED: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's, which writes ADDRESS OF {name} = NULL; --compliance extended reads it` |
 | IWC0308 | S | `ANY LENGTH: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0309 | S | `PERFORM UNTIL EXIT: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0310 | S | `a file description with no FILE SECTION header: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
 | IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |
@@ -832,6 +834,10 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0033 | W | `{STOP RUN or GOBACK} {RETURNING or GIVING} (GnuCOBOL and Micro Focus; Enterprise COBOL moves the value to RETURN-CODE first): the value is moved to RETURN-CODE, then {STOP RUN or GOBACK} ends the program` |
 | IWX0034 | W | `{name} [NOT] OMITTED (GnuCOBOL and Micro Focus; Enterprise COBOL writes ADDRESS OF {name} = NULL): it is read as ADDRESS OF {name} = NULL, true when the caller passed OMITTED or no argument there` |
 | IWX0035 | W | `ANY LENGTH (GnuCOBOL and Micro Focus; Enterprise COBOL's parameters have the length their entries give): {name} is as long as the argument each CALL passes for it` |
+| IWX0036 | W | `START KEY {< or NOT > or <=} (Micro Focus and GnuCOBOL; Enterprise COBOL's START takes =, >, NOT < or >=): the file is positioned at the last record whose key is {that} the value, which READ NEXT or READ PREVIOUS reads first` |
+| IWX0037 | W | `a file description with no FILE SECTION header (Micro Focus and GnuCOBOL; Enterprise COBOL writes FILE SECTION first): it is read as though FILE SECTION came first` |
+| IWX0038 | W | `PERFORM UNTIL EXIT (GnuCOBOL and Micro Focus; Enterprise COBOL has no such condition): it repeats until EXIT PERFORM, GO TO, GOBACK or STOP RUN leaves it` |
+| IWX0039 | W | `ASSIGN TO DISK (Micro Focus and GnuCOBOL; Enterprise COBOL's ASSIGN names a DD): DISK is the device, and what follows names the file` |
 
 ## Run-time refusals
 

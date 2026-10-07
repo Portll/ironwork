@@ -1293,3 +1293,88 @@ fn any_length_is_refused_under_strict_and_where_ironwork_does_not_read_it() {
     let Err(refused) = compile(main, &flags) else { panic!("the literal argument compiled") };
     assert_eq!(refused.iter().map(|e| (e.pos.line, e.id)).collect::<Vec<_>>(), [(23, Some("IWR0076"))]);
 }
+
+/// Micro Focus's file forms: SELECT with no FILE-CONTROL header, ASSIGN TO DISK an undeclared
+/// name, an FD with no FILE SECTION header, START KEY NOT GREATER, LESS and <=, READ PREVIOUS
+/// after them, and PERFORM UNTIL EXIT.
+const MICRO_FOCUS_FILES: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. MFFORMS.\n",
+    "       ENVIRONMENT DIVISION.\n",
+    "       CONFIGURATION SECTION.\n",
+    "           SELECT KF ASSIGN TO DISK KF-NAME\n",
+    "               ORGANIZATION IS INDEXED\n",
+    "               ACCESS MODE IS DYNAMIC\n",
+    "               RECORD KEY IS KF-KEY\n",
+    "               FILE STATUS IS FS.\n",
+    "       DATA DIVISION.\n",
+    "       FD  KF.\n",
+    "       01  KF-REC.\n",
+    "           05 KF-KEY  PIC X(3).\n",
+    "           05 KF-DATA PIC X(5).\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  FS PIC XX.\n",
+    "       01  N  PIC 9 VALUE 0.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE 'KFDD' TO KF-NAME\n",
+    "           OPEN OUTPUT KF\n",
+    "           MOVE 'AAA' TO KF-KEY  MOVE 'one' TO KF-DATA  WRITE KF-REC\n",
+    "           MOVE 'CCC' TO KF-KEY  MOVE 'three' TO KF-DATA  WRITE KF-REC\n",
+    "           MOVE 'EEE' TO KF-KEY  MOVE 'five' TO KF-DATA  WRITE KF-REC\n",
+    "           CLOSE KF\n",
+    "           OPEN INPUT KF\n",
+    "           MOVE 'DDD' TO KF-KEY\n",
+    "           START KF KEY IS NOT GREATER KF-KEY\n",
+    "           DISPLAY 'START NOT GREATER DDD ' FS\n",
+    "           READ KF PREVIOUS\n",
+    "           DISPLAY 'PREVIOUS ' FS ' ' KF-REC\n",
+    "           READ KF PREVIOUS\n",
+    "           DISPLAY 'PREVIOUS ' FS ' ' KF-REC\n",
+    "           READ KF PREVIOUS\n",
+    "           DISPLAY 'PREVIOUS ' FS ' ' KF-REC\n",
+    "           MOVE 'CCC' TO KF-KEY\n",
+    "           START KF KEY IS LESS THAN KF-KEY\n",
+    "           DISPLAY 'START LESS CCC ' FS\n",
+    "           READ KF NEXT\n",
+    "           DISPLAY 'NEXT ' FS ' ' KF-REC\n",
+    "           MOVE 'CCC' TO KF-KEY\n",
+    "           START KF KEY IS <= KF-KEY\n",
+    "           DISPLAY 'START <= CCC ' FS\n",
+    "           READ KF PREVIOUS\n",
+    "           DISPLAY 'PREVIOUS ' FS ' ' KF-REC\n",
+    "           MOVE 'AAA' TO KF-KEY\n",
+    "           START KF KEY IS LESS KF-KEY\n",
+    "           DISPLAY 'START LESS AAA ' FS\n",
+    "           PERFORM UNTIL EXIT\n",
+    "               ADD 1 TO N\n",
+    "               IF N > 2 EXIT PERFORM END-IF\n",
+    "           END-PERFORM\n",
+    "           DISPLAY 'N ' N\n",
+    "           CLOSE KF\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn micro_focus_file_forms_run_alike_on_both_executors() {
+    // cobc 3.2's output, its BDB handler giving the indexed file.
+    let expected = "START NOT GREATER DDD 00\nPREVIOUS 00 CCCthree\nPREVIOUS 00 AAAone  \nPREVIOUS 10 AAAone  \nSTART LESS CCC 00\nNEXT 00 AAAone  \nSTART <= CCC 00\nPREVIOUS 00 CCCthree\nSTART LESS AAA 23\nN 3\n";
+    let dir = temp("micro-focus-files");
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, executor) in [("interpreter", Executor::Interpreter), ("vm", Executor::Vm)] {
+        let file = dir.join(format!("{name}.dat"));
+        let _ = std::fs::remove_file(&file);
+        let ran = Harness::source(MICRO_FOCUS_FILES).flags(EXTENDED).dds(&[format!("KFDD={}", file.display())]).run(executor);
+        assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{name}: {}", ran.err);
+    }
+}
+
+#[test]
+fn micro_focus_file_forms_are_warned_under_extended_and_refused_under_strict() {
+    let warned: Vec<_> = diagnostics_under(MICRO_FOCUS_FILES, numeric::Compliance::Extended).into_iter().filter(|d| d.2.is_some_and(|id| id >= "IWX0036")).map(|d| (d.0, d.2)).collect();
+    assert_eq!(warned, [(5, Some("IWX0039")), (11, Some("IWX0037")), (27, Some("IWX0036")), (36, Some("IWX0036")), (41, Some("IWX0036")), (46, Some("IWX0036")), (48, Some("IWX0038"))]);
+    let refused = syntax::parse(MICRO_FOCUS_FILES).unwrap_err();
+    assert_eq!((refused.pos.line, refused.id), (11, Some("IWC0310")), "{refused}");
+    let until_exit = MICRO_FOCUS_FILES.replace("       DATA DIVISION.\n       FD", "       DATA DIVISION.\n       FILE SECTION.\n       FD");
+    let refused = syntax::parse(&until_exit).unwrap_err();
+    assert_eq!((refused.pos.line, refused.id), (49, Some("IWC0309")), "{refused}");
+}

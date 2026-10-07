@@ -187,6 +187,9 @@ pub struct AssignItem {
     pub reference: Ref,
     /// DYNAMIC or USING was written.
     pub explicit: bool,
+    /// Micro Focus's ASSIGN TO DISK name under `--compliance extended`: the item is declared for
+    /// the program where it declares none.
+    pub declared_if_missing: bool,
 }
 
 /// A program containing another, as the contained program sees it: its PROGRAM-ID, and the 01

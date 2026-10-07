@@ -355,6 +355,8 @@ catalogue! {
     IWC0306 Severe "{STOP RUN or GOBACK} {RETURNING or GIVING}: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's, where a MOVE to RETURN-CODE comes first; --compliance extended reads it";
     IWC0307 Severe "{name} [NOT] OMITTED: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's, which writes ADDRESS OF {name} = NULL; --compliance extended reads it";
     IWC0308 Severe "ANY LENGTH: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it";
+    IWC0309 Severe "PERFORM UNTIL EXIT: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it";
+    IWC0310 Severe "a file description with no FILE SECTION header: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
     IWJ0002 Severe "an unbalanced ) in {text}";
     IWJ0003 Severe "unbalanced parentheses or quotes in {text}";
@@ -858,6 +860,10 @@ catalogue! {
     IWX0033 Warning "{STOP RUN or GOBACK} {RETURNING or GIVING} (GnuCOBOL and Micro Focus; Enterprise COBOL moves the value to RETURN-CODE first): the value is moved to RETURN-CODE, then {STOP RUN or GOBACK} ends the program";
     IWX0034 Warning "{name} [NOT] OMITTED (GnuCOBOL and Micro Focus; Enterprise COBOL writes ADDRESS OF {name} = NULL): it is read as ADDRESS OF {name} = NULL, true when the caller passed OMITTED or no argument there";
     IWX0035 Warning "ANY LENGTH (GnuCOBOL and Micro Focus; Enterprise COBOL's parameters have the length their entries give): {name} is as long as the argument each CALL passes for it";
+    IWX0036 Warning "START KEY {< or NOT > or <=} (Micro Focus and GnuCOBOL; Enterprise COBOL's START takes =, >, NOT < or >=): the file is positioned at the last record whose key is {that} the value, which READ NEXT or READ PREVIOUS reads first";
+    IWX0037 Warning "a file description with no FILE SECTION header (Micro Focus and GnuCOBOL; Enterprise COBOL writes FILE SECTION first): it is read as though FILE SECTION came first";
+    IWX0038 Warning "PERFORM UNTIL EXIT (GnuCOBOL and Micro Focus; Enterprise COBOL has no such condition): it repeats until EXIT PERFORM, GO TO, GOBACK or STOP RUN leaves it";
+    IWX0039 Warning "ASSIGN TO DISK (Micro Focus and GnuCOBOL; Enterprise COBOL's ASSIGN names a DD): DISK is the device, and what follows names the file";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

@@ -371,7 +371,9 @@ NOTHING or NULL (IWX0024-W), COMP-X (IWX0025-W), PIC X(n) COMP-5 (IWX0026-W), FL
 FLOAT-LONG as COMP-1 and COMP-2 (IWX0027-W), PERFORM ... FOREVER (IWX0028-W), ACCEPT ... FROM LINES
 and COLUMNS (IWX0029-W), WRITE ... BEFORE ADVANCING on a line-sequential file (IWX0030-W),
 FUNCTION MODULE-CALLER-ID (IWX0031-W), STOP RUN or GOBACK RETURNING (IWX0033-W), the OMITTED
-condition (IWX0034-W) and ANY LENGTH parameters (IWX0035-W).
+condition (IWX0034-W), ANY LENGTH parameters (IWX0035-W), START KEY < and NOT > (IWX0036-W), an
+FD with no FILE SECTION header (IWX0037-W), PERFORM UNTIL EXIT (IWX0038-W) and ASSIGN TO DISK
+(IWX0039-W).
 [docs/compliance.md](docs/compliance.md) gives each one's meaning, the census that chose them, and
 what stays refused and why.
 

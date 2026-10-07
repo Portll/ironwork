@@ -298,7 +298,8 @@ impl Keyed {
 
     /// START: positions at the first record whose key `which`, compared over the length of `value`
     /// (a longer `value` is cut to the key's length), is `wanted` to `value`, or equal when
-    /// `or_equal`. False, and no position, when there is none.
+    /// `or_equal`; at the last such record when `wanted` is Less. False, and no position, when there
+    /// is none.
     pub fn start(&mut self, which: usize, wanted: Ordering, or_equal: bool, value: &[u8]) -> bool {
         let value = &value[..value.len().min(self.key_len(which))];
         let fits = |k: &[u8]| {
@@ -306,9 +307,11 @@ impl Keyed {
             o == wanted || (or_equal && o == Ordering::Equal)
         };
         let from = (value.to_vec(), 0, Vec::new());
-        let found = match which {
-            0 => self.records.range(from.0..).map(|(k, _)| k).find(|k| fits(k)).map(|k| (k.clone(), 0, Vec::new())),
-            n => self.alternates[n - 1].index.range(from..).find(|(k, ..)| fits(k)).cloned(),
+        let found = match (which, wanted) {
+            (0, Ordering::Less) => self.records.keys().rev().find(|k| fits(k)).map(|k| (k.clone(), 0, Vec::new())),
+            (0, _) => self.records.range(from.0..).map(|(k, _)| k).find(|k| fits(k)).map(|k| (k.clone(), 0, Vec::new())),
+            (n, Ordering::Less) => self.alternates[n - 1].index.iter().rev().find(|(k, ..)| fits(k)).cloned(),
+            (n, _) => self.alternates[n - 1].index.range(from..).find(|(k, ..)| fits(k)).cloned(),
         };
         self.last_read = None;
         match found {

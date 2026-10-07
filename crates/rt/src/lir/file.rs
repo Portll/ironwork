@@ -194,12 +194,15 @@ pub enum Spacing {
     PageMode,
 }
 
-/// START's relation: KEY =, KEY >, and KEY NOT < or >=.
+/// START's relation: KEY =, KEY >, and KEY NOT < or >=; and under `--compliance extended` KEY <,
+/// and KEY NOT > or <=, which position at the last record they find.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StartRel {
     Equal,
     Greater,
     NotLess,
+    Less,
+    NotGreater,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -290,7 +293,7 @@ codec_enum!(FileVerb {
 codec_struct!(FromMove { from, to, plan, check });
 codec_enum!(Advance { Lines { before, count } = 0, Page { before } = 1, Mnemonic { before, space } = 2 });
 codec_enum!(Spacing { Lines(n) = 0, Channel(c) = 1, PageMode = 2 });
-codec_enum!(StartRel { Equal = 0, Greater = 1, NotLess = 2 });
+codec_enum!(StartRel { Equal = 0, Greater = 1, NotLess = 2, Less = 3, NotGreater = 4 });
 codec_enum!(StartKey { Prime = 0, Named { key, span } = 1, Relative(value) = 2, RelativeKey = 3 });
 
 /// Only an indexed file has keys.

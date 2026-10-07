@@ -786,6 +786,49 @@ anywhere else, one that is not alphanumeric, one with OCCURS or REDEFINES, a RET
 ANY LENGTH, one an ENTRY statement names, and a function argument that is not a data item, which
 would have no length of its own. Assumption C481. Strict refuses the clause (IWC0308).
 
+### IWX0036-W START KEY <, NOT > and <=
+
+`IWX0036-W START KEY NOT > or <= (Micro Focus and GnuCOBOL; Enterprise COBOL's START takes =, >, NOT <
+or >=): the file is positioned at the last record whose key is NOT > or <= the value, which READ NEXT
+or READ PREVIOUS reads first`, at the START.
+
+START ... KEY IS LESS THAN, <, NOT GREATER THAN, NOT > and <= position an indexed or relative file
+at the last record whose key, compared over the value's length, is less than the value, or not
+greater. The READ NEXT or READ PREVIOUS that follows reads that record first and goes on in its
+direction, as cobc 3.2 does with its BDB handler: COBSOFT reads its tables backwards this way, START
+NOT GREATER and then READ PREVIOUS. No such record gives INVALID KEY, status 23. Assumption C483.
+Strict keeps IWC0076.
+
+### IWX0037-W A file description with no FILE SECTION header
+
+`IWX0037-W a file description with no FILE SECTION header (Micro Focus and GnuCOBOL; Enterprise COBOL
+writes FILE SECTION first): it is read as though FILE SECTION came first`, at the FD or SD.
+
+An FD or SD that opens the DATA DIVISION, or follows another section, is read as the start of the
+FILE SECTION, as cobc 3.2 reads it with a warning. Strict refuses it (IWC0310).
+
+### IWX0038-W PERFORM UNTIL EXIT
+
+`IWX0038-W PERFORM UNTIL EXIT (GnuCOBOL and Micro Focus; Enterprise COBOL has no such condition): it
+repeats until EXIT PERFORM, GO TO, GOBACK or STOP RUN leaves it`, at UNTIL.
+
+UNTIL EXIT is PERFORM ... FOREVER (IWX0028) under another name, and runs the same way. Strict
+refuses it (IWC0309).
+
+### IWX0039-W ASSIGN TO DISK
+
+`IWX0039-W ASSIGN TO DISK (Micro Focus and GnuCOBOL; Enterprise COBOL's ASSIGN names a DD): DISK is
+the device, and what follows names the file`, at DISK.
+
+    SELECT file ASSIGN TO DISK {data-name | literal}
+
+DISK is read as the device, and what follows as the file's name: a literal names the DD, and a name
+is a data item each OPEN takes the DD name from, as ASSIGN TO an item does (IWX0007). Where neither
+the program nor a program containing it declares the item, it is declared for the program as an
+alphanumeric item of 4,095 bytes in WORKING-STORAGE, as cobc 3.2 declares it under `-std=mf`;
+COBSOFT builds a path in it before each OPEN. Assumption C482. Strict reads DISK as the
+assignment-name, as Enterprise COBOL does, and the name after it has no effect.
+
 ## How the six were chosen
 
 From the IBM-valid-share census of 2026-10-02 (the local measurement `2026-10-02-ibm-share-030`:

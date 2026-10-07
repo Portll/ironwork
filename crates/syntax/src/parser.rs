@@ -586,6 +586,14 @@ impl Parser<'_> {
                     continue;
                 }
                 let header = self.pos();
+                if matches!(self.word(), Some("FD" | "SD")) {
+                    if !self.extended {
+                        return Err(crate::messages::IWC0310.at(header, "a file description with no FILE SECTION header: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it"));
+                    }
+                    self.messages.push(crate::messages::IWX0037.at(header, "a file description with no FILE SECTION header (Micro Focus and GnuCOBOL; Enterprise COBOL writes FILE SECTION first): it is read as though FILE SECTION came first"));
+                    self.file_section(&mut files)?;
+                    continue;
+                }
                 let section = self.name("a DATA DIVISION section")?;
                 self.expect_word("SECTION")?;
                 self.expect(&Tok::Period, "a period")?;
@@ -982,8 +990,19 @@ impl Parser<'_> {
                     if using || self.accept_word("DYNAMIC") {
                         let reference = self.reference()?;
                         f.assign = reference.name.clone();
-                        f.assign_item = Some(AssignItem { reference, explicit: true });
+                        f.assign_item = Some(AssignItem { reference, explicit: true, declared_if_missing: false });
                         continue;
+                    }
+                    let disk = self.extended
+                        && self.is_word("DISK")
+                        && match self.tokens.get(self.at + 1).map(|t| &t.tok) {
+                            Some(Tok::Alnum(_)) => true,
+                            Some(Tok::Word(w)) => !SELECT_CLAUSES.contains(&w.as_str()),
+                            _ => false,
+                        };
+                    if disk {
+                        self.messages.push(crate::messages::IWX0039.at(self.pos(), "ASSIGN TO DISK (Micro Focus and GnuCOBOL; Enterprise COBOL's ASSIGN names a DD): DISK is the device, and what follows names the file"));
+                        self.at += 1;
                     }
                     let external = self.is_word("EXTERNAL") && matches!(self.tokens.get(self.at + 1).map(|t| &t.tok), Some(Tok::Word(_) | Tok::Alnum(_)));
                     if external {
@@ -997,7 +1016,7 @@ impl Parser<'_> {
                     };
                     self.at += 1;
                     if word {
-                        f.assign_item = Some(AssignItem { reference: Ref { name: target.clone(), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos: at }, explicit: false });
+                        f.assign_item = Some(AssignItem { reference: Ref { name: target.clone(), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos: at }, explicit: false, declared_if_missing: disk });
                     }
                     let target = target.to_ascii_uppercase();
                     f.assign = target.rsplit('-').next().filter(|_| target.contains("-S-") || target.starts_with("S-") || target.starts_with("AS-")).unwrap_or(&target).to_owned();
@@ -2332,7 +2351,8 @@ impl Parser<'_> {
                     let op = if self.accept_word("NOT") {
                         match self.relop()? {
                             Some(RelOp::Lt) => RelOp::Ge,
-                            _ => return Err(self.error("NOT < in START KEY")),
+                            Some(RelOp::Gt) => RelOp::Le,
+                            _ => return Err(self.error("NOT < or NOT > in START KEY")),
                         }
                     } else {
                         self.relop()?.ok_or_else(|| self.error("a relation after START KEY"))?
@@ -3559,6 +3579,15 @@ impl Parser<'_> {
         if self.accept_word("WITH") || self.is_word("TEST") {
             self.expect_word("TEST")?;
             test_after = self.accept_any(&["BEFORE", "AFTER"]).as_deref() == Some("AFTER");
+        }
+        if self.is_word("UNTIL") && self.word_at(1) == Some("EXIT") {
+            let at = self.pos();
+            self.at += 2;
+            if !self.extended {
+                return Err(crate::messages::IWC0309.at(at, "PERFORM UNTIL EXIT: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it"));
+            }
+            self.messages.push(crate::messages::IWX0038.at(at, "PERFORM UNTIL EXIT (GnuCOBOL and Micro Focus; Enterprise COBOL has no such condition): it repeats until EXIT PERFORM, GO TO, GOBACK or STOP RUN leaves it"));
+            return Ok(Loop::Forever);
         }
         if self.accept_word("UNTIL") {
             return Ok(Loop::Until { cond: self.cond()?, test_after });
