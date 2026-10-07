@@ -276,6 +276,47 @@ fn integer_image(facts: &dyn ProgramFacts, loc: Loc, value: &Fixed) -> Option<(I
     }
 }
 
+/// `store_fixed_checked` of a value held as `n` counts of the last of `places`' decimal places into a
+/// packed item of at most 16 bytes with no PICTURE P; None for any other store, or one past 128
+/// bits, which takes the value as a `Fixed`.
+pub fn store_packed_count<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, loc: Loc, count: (i64, Places), rounded: bool, keep_on_size_error: bool, pos: Pos) -> Option<R<bool>> {
+    let (image, size_error) = match packed_count_image(facts, loc, count, rounded, pos)? {
+        Ok(stored) => stored,
+        Err(abend) => return Some(Err(abend)),
+    };
+    if size_error && keep_on_size_error {
+        return Some(Ok(true));
+    }
+    unit.write(loc.offset, image.bytes());
+    Some(Ok(size_error))
+}
+
+/// What `image_of` gives `store_packed_count`'s value and receiver.
+fn packed_count_image(facts: &dyn ProgramFacts, loc: Loc, (n, places): (i64, Places), rounded: bool, pos: Pos) -> Option<R<(Image, bool)>> {
+    let Kind::Packed { digits, scale, signed } = loc.kind else { return None };
+    if loc.len > 16 || facts.scaling(loc.item) != 0 {
+        return None;
+    }
+    let magnitude = u128::from(n.unsigned_abs());
+    let m = if scale >= places.dec {
+        magnitude.checked_mul(10u128.checked_pow(scale - places.dec)?)?
+    } else {
+        let d = 10u128.checked_pow(places.dec - scale)?;
+        let (q, r) = (magnitude / d, magnitude % d);
+        q + u128::from(rounded && r >= d / 2)
+    };
+    let cap = 10u128.checked_pow(digits)?;
+    let kept = if m < cap { m } else { m % cap };
+    let mut out = Image::zeroed(loc.len);
+    if let Err(c) = decimal::encode(out.bytes_mut(), Decimal { negative: signed && n < 0 && kept != 0, magnitude: kept }) {
+        return Some(Err(Abend::check(c, pos)));
+    }
+    if !signed {
+        *out.bytes_mut().last_mut().unwrap() |= 0x0F;
+    }
+    Some(Ok((out, m >= cap)))
+}
+
 /// The bytes a store of `value` into `loc` writes, and whether it is a size error, with a TRUNC(OPT)
 /// report written to `err`.
 fn image_of(facts: &dyn ProgramFacts, err: &mut dyn std::io::Write, loc: Loc, value: &Fixed, rounded: bool, pos: Pos) -> R<(Image, bool)> {
@@ -1202,6 +1243,89 @@ mod tests {
             }
         }
         assert!(fast > 20_000, "only {fast} reads took the integer path");
+    }
+
+    #[test]
+    fn digits_read_as_the_value_is_read() {
+        let mut state = 0x2545_F491_4F6C_DD1Du64;
+        let mut next = move || {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            (state.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 32) as u8
+        };
+        let invdata = [None, Some(Invdata { forcenumcmp: false, cleansign: true }), Some(Invdata { forcenumcmp: false, cleansign: false })];
+        let mut fast = 0;
+        for (kind, len) in kinds() {
+            for _ in 0..200 {
+                let mem: Vec<u8> = (0..len)
+                    .map(|_| match next() % 8 {
+                        0 => next(),
+                        1 => 0xC0 | (next() % 10),
+                        2 => 0xD0 | (next() % 10),
+                        3 => 0x4E,
+                        4 => 0x60,
+                        5 => ((next() % 10) << 4) | 0x0C,
+                        _ => 0xF0 | (next() % 10),
+                    })
+                    .collect();
+                let loc = Loc { offset: 0, len, kind, item: 0 };
+                for numproc in [Numproc::Nopfd, Numproc::Pfd] {
+                    for invdata in invdata {
+                        for scaling in [0, 2] {
+                            let facts = Facts { options: Options { numproc, invdata, ..Options::default() }, scaling, collation: Collation::Native };
+                            let Some(n) = read_digits(&facts, &mem, loc) else { continue };
+                            fast += 1;
+                            let Ok(Val::Num(v)) = read(&facts, &mem, loc, Pos::default()) else { panic!("{kind:?} {mem:02X?} reads as no number") };
+                            assert_eq!(Fixed::new(i128::from(n), places_of(kind)), v, "{kind:?} {mem:02X?}");
+                        }
+                    }
+                }
+            }
+        }
+        assert!(fast > 40_000, "only {fast} reads took the digits path");
+    }
+
+    #[test]
+    fn a_count_stores_into_packed_as_any_fixed_value_stores() {
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move || {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            state.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        };
+        let mut fast = 0;
+        for signed in [false, true] {
+            for digits in [1, 2, 5, 7, 9, 15, 18, 19, 31] {
+                for scale in [0, 2, 5] {
+                    let loc = Loc { offset: 0, len: digits as usize / 2 + 1, kind: Kind::Packed { digits, scale, signed }, item: 0 };
+                    for _ in 0..400 {
+                        let bits = next() % 64;
+                        let n = (next() >> (63 - bits)) as i64;
+                        let n = if next() % 2 == 0 { n.wrapping_neg() } else { n };
+                        let dec = (next() % 10) as u32;
+                        let places = Places::new(1 + (next() % 20) as u32, dec);
+                        let rounded = next() % 2 == 0;
+                        for scaling in [0, 1] {
+                            let facts = Facts { options: Options::default(), scaling, collation: Collation::Native };
+                            let Some(image) = packed_count_image(&facts, loc, (n, places), rounded, Pos::default()) else { continue };
+                            fast += 1;
+                            let value = Fixed::new(i128::from(n), places);
+                            let general = image_of(&facts, &mut Vec::new(), loc, &value, rounded, Pos::default());
+                            match (image, general) {
+                                (Ok((image, size_error)), Ok((general, general_size_error))) => {
+                                    assert_eq!((image.bytes(), size_error), (general.bytes(), general_size_error), "{value:?} into {:?}, rounded {rounded}", loc.kind);
+                                }
+                                (Err(a), Err(b)) => assert_eq!(a, b),
+                                (a, b) => panic!("{value:?} into {:?}: {:?} where image_of gives {:?}", loc.kind, a.map(|(i, e)| (i.bytes().to_vec(), e)), b.map(|(i, e)| (i.bytes().to_vec(), e))),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(fast > 20_000, "only {fast} stores took the count path");
     }
 
     #[test]

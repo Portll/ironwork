@@ -8,7 +8,7 @@ use crate::abend::Abend;
 use crate::arith;
 use crate::fixed::places_of;
 use crate::lir::{ArithPlan, ArithStep, Expr, ExprId, Mode, Operand, Step};
-use crate::storage::{Loc, Val};
+use crate::storage::{Kind, Loc, Val};
 use crate::store;
 use crate::unit::Loader;
 use crate::vocab::{BinOp, Pos};
@@ -99,7 +99,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
                 size_error = true;
                 continue;
             };
-            size_error |= store::store_value(&self.facts(), self.unit, loc, value, step.rounded, plan.handled, pos)?;
+            size_error |= self.store_result(loc, value, step.rounded, plan.handled, pos)?;
         }
         if let (Some(r), Some((x, y)), Some(q)) = (&plan.remainder, operands, quotient)
             && let Some(rest) = arith::remainder(x, y, places_of(q.kind).dec, plan.dmax, plan.arith, pos)?
@@ -108,6 +108,17 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             size_error |= store::store_value(&self.facts(), self.unit, loc, Val::Num(rest), false, plan.handled, pos)?;
         }
         Ok(if plan.handled { Step::Arm(u8::from(size_error)) } else { Step::Next })
+    }
+
+    /// `store::store_value`, a number held as a count stored into a packed item without a `Fixed`.
+    fn store_result(&mut self, loc: Loc, value: Val, rounded: bool, handled: bool, pos: Pos) -> R<bool> {
+        if let (Kind::Packed { .. }, Val::Num(f)) = (loc.kind, &value)
+            && let Number::Int(n, places) = Number::of(*f)
+            && let Some(stored) = store::store_packed_count(&self.facts(), self.unit, loc, (n, places), rounded, handled, pos)
+        {
+            return Ok(stored?);
+        }
+        Ok(store::store_value(&self.facts(), self.unit, loc, value, rounded, handled, pos)?)
     }
 
     /// What a step evaluates before any is stored: under `per_receiver`, the operand beside its
