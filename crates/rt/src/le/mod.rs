@@ -97,7 +97,7 @@ fn documented(name: &str) -> bool {
 pub fn not_found(what: &str, name: &str, dynamic: bool, pos: crate::vocab::Pos) -> crate::abend::Abend {
     use crate::abend::{Abend, AbendCode};
     if documented(name) {
-        Abend::ironwork(format!("{what}: {name} is a Language Environment callable service that ironwork for COBOL does not provide yet"), pos)
+        crate::refusal::IWR0072.abend(format_args!("{what}: {name} is a Language Environment callable service that ironwork for COBOL does not provide yet"), pos)
     } else if dynamic {
         Abend { code: AbendCode::user(4038), message: format!("{MODULE_NOT_FOUND} The module {name} was not found."), pos, file: None }
     } else {

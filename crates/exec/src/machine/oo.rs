@@ -63,7 +63,7 @@ impl<'p> Machine<'p, '_, '_> {
             Operand::Literal(Literal::Figurative(f)) => vec![self.collating.figurative(*f)],
             Operand::Literal(Literal::Alnum(s)) => self.page.encode(s).map_err(|e| Abend::ironwork(e.to_string(), pos))?,
             Operand::Literal(Literal::National(s)) => s.encode_utf16().flat_map(u16::to_be_bytes).collect(),
-            _ => return Err(Abend::ironwork("this INVOKE argument is not supported", pos)),
+            _ => return Err(rt::refusal::IWR0071.abend("this INVOKE argument is not supported", pos)),
         })
     }
 

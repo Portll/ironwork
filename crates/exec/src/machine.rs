@@ -442,12 +442,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     ExecKind::Dli => "DLI",
                     ExecKind::Other => "",
                 };
-                return Err(Abend {
-                    code: AbendCode::Exec,
-                    message: format!("EXEC {kind} {} was reached: ironwork for COBOL checks EXEC statements but does not run them yet", block.command),
-                    pos: block.pos,
-                    file: None,
-                });
+                return Err(rt::refusal::IWR0060.ending(AbendCode::Exec, format_args!("EXEC {kind} {} was reached: ironwork for COBOL checks EXEC statements but does not run them yet", block.command), block.pos));
             }
             Stmt::Invoke(i) => return self.invoke(i),
             Stmt::JsonGenerate(g) => return self.json_generate(g),

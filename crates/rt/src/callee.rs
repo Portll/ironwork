@@ -104,7 +104,7 @@ pub fn value_argument(val: Val, pos: Pos) -> R<Vec<u8>> {
         Val::Address(a) => a.to_be_bytes().to_vec(),
         Val::Fig(Figurative::Null) => vec![0; 4],
         Val::Bytes(b) => b,
-        _ => return Err(Abend::ironwork("this BY VALUE argument is not supported", pos)),
+        _ => return Err(crate::refusal::IWR0070.abend("this BY VALUE argument is not supported", pos)),
     })
 }
 

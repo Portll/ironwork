@@ -18,6 +18,7 @@ pub mod loader;
 pub mod lower;
 pub mod machine;
 pub use rt::module;
+pub use rt::refusal;
 pub mod oo;
 pub use compile::picture;
 pub mod printer;

@@ -233,7 +233,7 @@ pub fn run<'w, P: Copy, O, S>(x: &mut impl CicsHost<'w, P, O, S>, command: &Cics
 
 /// The abend message for a command ironwork does not carry out.
 pub fn unsupported(name: &str) -> String {
-    format!("EXEC CICS {name} is not supported yet")
+    crate::refusal::IWR0058.message(format_args!("EXEC CICS {name} is not supported yet"))
 }
 
 /// The task; `run` has already refused to run a command outside one.

@@ -602,7 +602,7 @@ fn the_vm_tells_an_observer_each_cics_option_the_interpreter_does() {
         ending.map_err(|a| a.message)
     };
     assert_eq!(ending("EXEC CICS WRITE JOURNALNAME('J1') FROM(WS-REC) END-EXEC"), Err("EXEC CICS WRITE needs FILE".into()));
-    assert_eq!(ending("EXEC CICS START TRANSID(WS-REC) SYSID(WS-SYS) END-EXEC"), Err("EXEC CICS START is not supported yet".into()));
+    assert_eq!(ending("EXEC CICS START TRANSID(WS-REC) SYSID(WS-SYS) END-EXEC"), Err("IWR0058-S EXEC CICS START is not supported yet".into()));
     assert_eq!(ending("CONTINUE"), Ok(Ending::Goback));
 }
 

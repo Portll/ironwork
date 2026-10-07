@@ -34,6 +34,7 @@ pub mod oo;
 pub mod parmcheck;
 pub mod picture;
 pub mod printer;
+pub mod refusal;
 pub mod report;
 pub mod reserved_words;
 pub mod set;

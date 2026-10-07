@@ -815,3 +815,28 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0024 | W | `CALL ... RETURNING {OMITTED, NOTHING or NULL} (GnuCOBOL; Enterprise COBOL's RETURNING names a data item): the CALL leaves the caller's RETURN-CODE as it was` |
 | IWX0025 | W | `COMP-X (Micro Focus; Enterprise COBOL's binary items are two, four or eight bytes): {name} is {n} bytes of binary, {range}, shown in {digits} digits` |
 | IWX0026 | W | `PIC X(n) COMP-5 (Micro Focus and GnuCOBOL; Enterprise COBOL's COMP-5 takes a numeric PICTURE): {name} is {n} bytes of binary, {range}` |
+
+## Run-time refusals
+
+A run that reaches a construct ironwork does not run ends with one of these, its id and
+severity S before the text, under the abend code IRONWORK, EXEC or JAVA.
+
+| Id | Severity | Text |
+|---|---|---|
+| IWR0058 | S | `EXEC CICS {command} is not supported yet` |
+| IWR0059 | S | `EXEC CICS FORMATTIME {option} is not supported` |
+| IWR0060 | S | `EXEC {kind} {command} was reached: ironwork for COBOL checks EXEC statements but does not run them yet` |
+| IWR0061 | S | `EXEC SQL {verb} was reached: ironwork for COBOL does not run {statement}` |
+| IWR0062 | S | `{what} was reached: {class} is a Java class, and ironwork for COBOL checks Java classes but has no JVM to run them` |
+| IWR0063 | S | `CALL {name} was reached: {service} is a JNI service, and ironwork for COBOL has no JVM to run it` |
+| IWR0064 | S | `FUNCTION {name} is not supported yet` |
+| IWR0065 | S | `FUNCTION LENGTH of this argument is not supported yet` |
+| IWR0066 | S | `DISPLAY of a floating-point {item or value} is not supported yet` |
+| IWR0067 | S | `DISPLAY of a pointer, index or object reference is not supported` |
+| IWR0068 | S | `ADVANCING {name} on {file}, whose FD has LINAGE, is not supported yet` |
+| IWR0069 | S | `exponentiation other than by an integer from 0 to 31 is not supported yet` |
+| IWR0070 | S | `this BY VALUE argument is not supported` |
+| IWR0071 | S | `this INVOKE argument is not supported` |
+| IWR0072 | S | `{statement}: {name} is a Language Environment callable service that ironwork for COBOL does not provide yet` |
+| IWR0073 | S | `the VM does not run {construct} yet; run it with --interpret` |
+| IWR0074 | S | `{file}, a GLOBAL file of {declarer}, is written as a print file in one of {declarer} and {program} and not the other, which is not supported yet` |

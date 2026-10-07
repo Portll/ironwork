@@ -1257,7 +1257,7 @@ fn exec_dli_is_checked_when_compiled_and_ends_the_run_when_reached() {
     assert_eq!(out, "GB 000000040\n");
     let abend = ending.unwrap_err();
     assert_eq!(abend.code, AbendCode::Exec);
-    assert!(abend.message.starts_with("EXEC DLI GN was reached"), "{}", abend.message);
+    assert!(abend.message.starts_with("IWR0060-S EXEC DLI GN was reached"), "{}", abend.message);
 }
 
 #[test]

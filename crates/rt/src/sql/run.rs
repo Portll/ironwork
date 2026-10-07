@@ -6,7 +6,7 @@ use super::dynamic::{self, Kind};
 use super::host::{self, COLUMN_COUNT, RESULT_SETS, TRUNCATED, Target, Warnings};
 use super::sqlda::{self, Invalid, Var};
 use super::{Answer, Call, Database, Outcome, Prepared, Session, SqlError, Value};
-use crate::abend::Abend;
+use crate::abend::{Abend, AbendCode};
 use crate::host::Host;
 use crate::store::ProgramFacts;
 use crate::lir::{AbendId, HostArray, HostPlace, RowCount, SqlEntry, SqlNames, SqlStatement, Sqlca};
@@ -81,6 +81,7 @@ fn session<'a, 'w: 'a, P: Copy + 'a, S: 'a>(x: &'a mut impl SqlHost<'w, P, S>) -
 pub fn run<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, entry: &SqlEntry<P, S>, sqlca: &Sqlca<P>, pos: Pos) -> R<Option<Ran>> {
     let verb = x.text(&entry.verb);
     let refused = |why: String| Abend { code: "EXEC".into(), message: format!("EXEC SQL {verb} was reached: {why}"), pos, file: None };
+    let not_run = |what: &str| crate::refusal::IWR0061.ending(AbendCode::Exec, format_args!("EXEC SQL {verb} was reached: ironwork for COBOL does not run {what}"), pos);
     if let SqlStatement::Connect { what, location } = &entry.statement {
         // A location the trace cannot read is left to the refusal, so tracing never changes how the run ends.
         if !location.is_empty()
@@ -88,7 +89,7 @@ pub fn run<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, entry: &SqlEntry<P, S
         {
             x.sink("connection-target", pos, &values.iter().map(Value::text).collect::<String>());
         }
-        return Err(refused(format!("ironwork for COBOL does not run {}", x.text(what))));
+        return Err(not_run(&x.text(what)));
     }
     // A statement string goes to the input trace before the run is refused for want of a database,
     // as CONNECT's location does.
@@ -227,7 +228,7 @@ pub fn run<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, entry: &SqlEntry<P, S
         SqlStatement::OpenPrepared { cursor, statement, inputs } => open_prepared(x, at, (&x.text(cursor), &x.text(statement)), entry.with_hold, Sources::Hosts(inputs))?,
         SqlStatement::OpenDescriptor { cursor, statement, descriptor } => open_prepared(x, at, (&x.text(cursor), &x.text(statement)), entry.with_hold, Sources::Descriptor(*descriptor))?,
         SqlStatement::Declaration => return Ok(None),
-        SqlStatement::Unsupported(what) => return Err(refused(format!("ironwork for COBOL does not run {}", x.text(what)))),
+        SqlStatement::Unsupported(what) => return Err(not_run(&x.text(what))),
         SqlStatement::Connect { .. } => unreachable!("CONNECT is refused before the session is asked"),
     };
     if outcome.sqlcode == DEADLOCK {
@@ -389,7 +390,10 @@ fn dynamic_statement<'w, P: Copy, S>(x: &mut impl SqlHost<'w, P, S>, at: At, tex
         Kind::Query => Outcome::error(-518, "07003"),
         Kind::Unacceptable => Outcome::error(-84, "42612"),
         Kind::Unknown => Outcome::error(-104, "42601"),
-        Kind::Refused(what) => return Err(refused(format!("ironwork for COBOL does not run {what}"))),
+        Kind::Refused(what) => {
+            let abend = refused(format!("ironwork for COBOL does not run {what}"));
+            return Err(Abend { message: crate::refusal::IWR0061.message(&abend.message), ..abend });
+        }
         Kind::Commit => end_unit(x, at, text, true)?,
         Kind::Rollback => end_unit(x, at, text, false)?,
         Kind::Change { delete, current_of } => change(x, at, (&verb, text), values, delete, current_of.as_deref())?,

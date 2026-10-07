@@ -1,6 +1,7 @@
 //! ironwork's message catalogue: each compile-time message's id, the severity it is given and its
-//! text, the parts a site fills in between braces. docs/messages.md is written from it. Once
-//! released, an id keeps its meaning and is never given to another message; its wording may change.
+//! text, the parts a site fills in between braces. rt::refusal holds the run-time half, and
+//! docs/messages.md is written from both. Once released, an id keeps its meaning and is never given
+//! to another message; its wording may change.
 
 use crate::{Error, Pos, Severity};
 
@@ -857,6 +858,15 @@ pub fn document() -> String {
     for m in CATALOGUE {
         out.push_str(&format!("| {} | {} | `{}` |\n", m.id, m.severity.letter(), m.text.replace('|', "\\|")));
     }
+    out.push_str(
+        "\n## Run-time refusals\n\n\
+         A run that reaches a construct ironwork does not run ends with one of these, its id and\n\
+         severity S before the text, under the abend code IRONWORK, EXEC or JAVA.\n\n\
+         | Id | Severity | Text |\n|---|---|---|\n",
+    );
+    for r in rt::refusal::RUNTIME {
+        out.push_str(&format!("| {} | S | `{}` |\n", r.id, r.text.replace('|', "\\|")));
+    }
     out
 }
 
@@ -894,6 +904,22 @@ mod tests {
     }
 
     #[test]
+    fn a_run_refuses_a_construct_by_a_catalogued_id() {
+        let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut files = Vec::new();
+        for krate in ["rt", "exec"] {
+            sources(&crates.join(krate).join("src"), &mut files);
+        }
+        let uncatalogued: Vec<String> = files
+            .iter()
+            .flat_map(|(path, code)| {
+                code.lines().enumerate().filter(|(_, l)| l.contains("Abend::ironwork(") && (l.contains("not supported") || l.contains("does not run") || l.contains("does not provide"))).map(move |(n, l)| format!("{}:{}: {}", path.display(), n + 1, l.trim()))
+            })
+            .collect();
+        assert!(uncatalogued.is_empty(), "give these an entry in rt::refusal and build them with it:\n{}", uncatalogued.join("\n"));
+    }
+
+    #[test]
     fn docs_messages_is_the_catalogue() {
         let committed = include_str!("../../../docs/messages.md").replace('\r', "");
         let written = document();
@@ -904,7 +930,11 @@ mod tests {
     fn ids_are_unique_in_order_and_name_an_area() {
         let ids: Vec<&str> = CATALOGUE.iter().map(|m| m.id).collect();
         assert!(ids.windows(2).all(|w| w[0] < w[1]), "{ids:?}");
-        for id in ids {
+        let runtime: Vec<&str> = rt::refusal::RUNTIME.iter().map(|r| r.id).collect();
+        assert!(runtime.windows(2).all(|w| w[0] < w[1]), "{runtime:?}");
+        let shared: Vec<&&str> = runtime.iter().filter(|id| ids.contains(id)).collect();
+        assert!(shared.is_empty(), "both halves of the catalogue give {shared:?}");
+        for id in ids.into_iter().chain(runtime) {
             assert!(id.len() == 7 && id.starts_with("IW") && id[3..].bytes().all(|b| b.is_ascii_digit()), "{id}");
             assert!(AREAS.iter().any(|(letter, _)| id.as_bytes()[2] == *letter as u8), "{id}");
         }

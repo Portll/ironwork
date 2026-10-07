@@ -147,7 +147,7 @@ fn batch(
             Outcome::of_abend(&a.code)
         }
         Err(Halt::Unimplemented(what)) => {
-            eprintln!("ironwork: {path}: the VM does not run {what} yet; run the source with --interpret");
+            eprintln!("ironwork: {path}: {}", exec::refusal::IWR0073.message(format_args!("the VM does not run {what} yet; run the source with --interpret")));
             Outcome::Stopped
         }
     };
@@ -219,7 +219,7 @@ impl crate::Tasks for ModuleTasks<'_> {
         match ended {
             Ok(ending) => Ok(Ok((ending, task))),
             Err(Halt::Abend(abend)) => Ok(Err(abend)),
-            Err(Halt::Unimplemented(what)) => Err((Outcome::Stopped, format!("ironwork: {}: the VM does not run {what} yet; run the source with --interpret", self.shown))),
+            Err(Halt::Unimplemented(what)) => Err((Outcome::Stopped, format!("ironwork: {}: {}", self.shown, exec::refusal::IWR0073.message(format_args!("the VM does not run {what} yet; run the source with --interpret"))))),
         }
     }
 

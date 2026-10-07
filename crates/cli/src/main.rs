@@ -1263,7 +1263,7 @@ fn driver() -> ExitCode {
         Err(exec::vm::Halt::Abend(exec::Abend { code: AbendCode::Signal(Signal::ClosedOutput), .. })) => (Outcome::Ended(0), None),
         Err(exec::vm::Halt::Abend(abend)) => (Outcome::of_abend(&abend.code), Some(abend)),
         Err(exec::vm::Halt::Unimplemented(what)) => {
-            eprintln!("ironwork: {path}: the VM does not run {what} yet; run it with --interpret");
+            eprintln!("ironwork: {path}: {}", exec::refusal::IWR0073.message(format_args!("the VM does not run {what} yet; run it with --interpret")));
             (Outcome::Stopped, None)
         }
     };
@@ -1948,7 +1948,7 @@ fn cics_run<'w>(
     match exec::vm::execute_cics(program, &code, library, dds, task, clock, database, out, err, observer, &mut None) {
         (Ok(ending), task) => Ok(Ok((ending, task))),
         (Err(exec::vm::Halt::Abend(abend)), _) => Ok(Err(abend)),
-        (Err(exec::vm::Halt::Unimplemented(what)), _) => Err((Outcome::Stopped, format!("ironwork: {path}: the VM does not run {what} yet; run it with --interpret"))),
+        (Err(exec::vm::Halt::Unimplemented(what)), _) => Err((Outcome::Stopped, format!("ironwork: {path}: {}", exec::refusal::IWR0073.message(format_args!("the VM does not run {what} yet; run it with --interpret"))))),
     }
 }
 

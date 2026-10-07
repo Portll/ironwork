@@ -280,9 +280,9 @@ impl Lower<'_> {
                             };
                             DisplayItem::Digits { place, digits, signed }
                         }
-                        Kind::Float(_) => DisplayItem::Refused { place, abend: self.ironwork("DISPLAY of a floating-point item is not supported yet")? },
+                        Kind::Float(_) => DisplayItem::Refused { place, abend: self.ironwork(&rt::refusal::IWR0066.message("DISPLAY of a floating-point item is not supported yet"))? },
                         Kind::Pointer | Kind::Index | Kind::ObjectReference | Kind::ProgramPointer => {
-                            DisplayItem::Refused { place, abend: self.ironwork("DISPLAY of a pointer, index or object reference is not supported")? }
+                            DisplayItem::Refused { place, abend: self.ironwork(&rt::refusal::IWR0067.message("DISPLAY of a pointer, index or object reference is not supported"))? }
                         }
                         _ => DisplayItem::Bytes(place),
                     }

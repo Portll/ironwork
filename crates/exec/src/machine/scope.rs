@@ -65,7 +65,7 @@ impl<'p> Machine<'p, '_, '_> {
                     return Err(Abend::ironwork(format!("{declarer} has no file {}", f.name), Pos::default()));
                 };
                 if self.carriage[k] != frame.compiled.carriage[j] {
-                    let message = format!("{}, a GLOBAL file of {declarer}, is written as a print file in one of {declarer} and {} and not the other, which is not supported yet", f.name, program.id);
+                    let message = rt::refusal::IWR0074.message(format_args!("{}, a GLOBAL file of {declarer}, is written as a print file in one of {declarer} and {} and not the other, which is not supported yet", f.name, program.id));
                     return Err(Abend::ironwork(message, Pos::default()));
                 }
                 let to = Connector::Program(frame.me, j);

@@ -130,7 +130,7 @@ fn exec_dli_ends_its_block_in_the_walker_s_exec_abend() {
     let p = lowered(&program("", "       01  AREA1 PIC X(80).\n", &[line("EXEC DLI GN SEGMENT(ROOT) INTO(AREA1) END-EXEC"), line("GOBACK.")].concat()));
     let Terminator::Abend(a) = p.blocks[0].end else { panic!("{:?}", p.blocks[0].end) };
     let text = &p.abends[a as usize];
-    assert_eq!((&text.code, symbol(&p, text.message), text.at), (&AbendCode::Exec, "EXEC DLI GN was reached: ironwork for COBOL checks EXEC statements but does not run them yet", None));
+    assert_eq!((&text.code, symbol(&p, text.message), text.at), (&AbendCode::Exec, "IWR0060-S EXEC DLI GN was reached: ironwork for COBOL checks EXEC statements but does not run them yet", None));
 }
 
 #[test]

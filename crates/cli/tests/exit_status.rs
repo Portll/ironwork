@@ -165,7 +165,7 @@ fn a_construct_ironwork_does_not_run_exits_244_and_with_exit_code_4() {
     let dli = dir.program("DLI", &["01 AREA1 PIC X(80)."], &["EXEC DLI GN SEGMENT(ROOT) INTO(AREA1) END-EXEC.", "GOBACK."]);
     let ((band, said), (verdict, _)) = both(&["run", &dli]);
     assert_eq!((band, verdict), (Some(244), Some(4)), "{said}");
-    assert!(said.contains(": ABEND EXEC: EXEC DLI GN was reached"), "{said}");
+    assert!(said.contains(": ABEND EXEC: IWR0060-S EXEC DLI GN was reached"), "{said}");
     let client = dir.program("CLIENT", &["01 A1 USAGE OBJECT REFERENCE Account."], &["INVOKE A1 \"open\".", "GOBACK."]);
     let repository = "       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       REPOSITORY.\n           CLASS Account IS \"Account\".\n       DATA DIVISION.\n";
     let text = fs::read_to_string(&client).unwrap().replace("       DATA DIVISION.\n", repository);

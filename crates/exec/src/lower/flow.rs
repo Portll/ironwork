@@ -522,7 +522,7 @@ impl Lower<'_> {
                     ExecKind::Sql => self.sql(block, pos, &inner)?,
                     ExecKind::Dli | ExecKind::Other => {
                         let kind = if *kind == ExecKind::Dli { "DLI" } else { "" };
-                        let message = format!("EXEC {kind} {command} was reached: ironwork for COBOL checks EXEC statements but does not run them yet");
+                        let message = rt::refusal::IWR0060.message(format_args!("EXEC {kind} {command} was reached: ironwork for COBOL checks EXEC statements but does not run them yet"));
                         let abend = self.abend(AbendCode::Exec, &message, None)?;
                         self.end(Terminator::Abend(abend), pos)?;
                     }

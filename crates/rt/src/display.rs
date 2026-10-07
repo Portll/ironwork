@@ -59,9 +59,9 @@ pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos, upon_cons
             shown[at] |= 0xF0;
             facts.page().decode(&sign_first(negative, shown))
         }
-        Kind::Float(_) => return Err(Abend::ironwork("DISPLAY of a floating-point item is not supported yet", pos)),
+        Kind::Float(_) => return Err(crate::refusal::IWR0066.abend("DISPLAY of a floating-point item is not supported yet", pos)),
         Kind::Pointer | Kind::Index | Kind::ObjectReference | Kind::ProgramPointer => {
-            return Err(Abend::ironwork("DISPLAY of a pointer, index or object reference is not supported", pos));
+            return Err(crate::refusal::IWR0067.abend("DISPLAY of a pointer, index or object reference is not supported", pos));
         }
         _ => facts.page().decode(store::bytes(mem, loc)),
     })
@@ -105,8 +105,8 @@ pub fn value(facts: &dyn ProgramFacts, val: Val, pos: Pos, upon_console: bool) -
         Val::Dbcs(b) => facts.page().decode_dbcs(&b),
         Val::Fig(f) => facts.page().decode_byte(facts.figurative(f)).to_string(),
         Val::Num(f) => facts.page().decode(&zoned_digits(f.magnitude.to_u128().unwrap_or(0), f.places.total() as usize, decimal::UNSIGNED)),
-        Val::Float(_) => return Err(Abend::ironwork("DISPLAY of a floating-point value is not supported yet", pos)),
-        Val::Address(_) => return Err(Abend::ironwork("DISPLAY of a pointer is not supported", pos)),
+        Val::Float(_) => return Err(crate::refusal::IWR0066.abend("DISPLAY of a floating-point value is not supported yet", pos)),
+        Val::Address(_) => return Err(crate::refusal::IWR0067.abend("DISPLAY of a pointer is not supported", pos)),
     })
 }
 

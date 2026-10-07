@@ -52,7 +52,7 @@ pub(super) fn formattime<'w, P: Copy, O, S>(
                 store_bytes(x, at, Some(output), &name, &bytes)?;
             }
             Some(FormatValue::Number(n)) => store_int(x, Some(output), n, at.pos)?,
-            None => return Err(Abend::ironwork(format!("EXEC CICS FORMATTIME {name} is not supported"), at.pos)),
+            None => return Err(crate::refusal::IWR0059.abend(format_args!("EXEC CICS FORMATTIME {name} is not supported"), at.pos)),
         }
     }
     ok(x, at)

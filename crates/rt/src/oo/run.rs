@@ -99,12 +99,7 @@ const OBJECT_METHODS: &[(&str, &[&str], Option<&str>)] = &[
 ];
 
 fn java(what: String, class: &str, pos: Pos) -> Abend {
-    Abend {
-        code: AbendCode::Java,
-        message: format!("{what} was reached: {class} is a Java class, and ironwork for COBOL checks Java classes but has no JVM to run them"),
-        pos,
-        file: None,
-    }
+    crate::refusal::IWR0062.ending(AbendCode::Java, format_args!("{what} was reached: {class} is a Java class, and ironwork for COBOL checks Java classes but has no JVM to run them"), pos)
 }
 
 /// An object reference's Java type, as a JNI signature spells it.
@@ -655,12 +650,7 @@ pub fn call_through_pointer<'w, P: Copy, O, S, X: OoHost<'w, P, O, S>>(x: &mut X
         "ExceptionCheck" => Some(Val::Bytes(vec![0])),
         "ExceptionClear" => None,
         _ => {
-            return Err(Abend {
-                code: AbendCode::Java,
-                message: format!("CALL {name} was reached: {service} is a JNI service, and ironwork for COBOL has no JVM to run it"),
-                pos,
-                file: None,
-            });
+            return Err(crate::refusal::IWR0063.ending(AbendCode::Java, format_args!("CALL {name} was reached: {service} is a JNI service, and ironwork for COBOL has no JVM to run it"), pos));
         }
     };
     if let (Some(target), Some(val)) = (returning, result) {

@@ -539,5 +539,5 @@ fn a_global_file_written_as_a_print_file_by_one_program_only_ends_the_run() {
     let reset = || std::fs::write(&path, "").unwrap();
     let source = global_file(&[], &[], &["    OPEN OUTPUT GF", "    WRITE G-REC"]).replace("    CALL 'READER'", "    WRITE G-REC AFTER ADVANCING 1\n           CALL 'READER'");
     let (_, ending) = on_both(&source, &[format!("GDD={}", path.display())], reset);
-    assert_eq!(ending.unwrap_err().message, "GF, a GLOBAL file of OUTER, is written as a print file in one of OUTER and READER and not the other, which is not supported yet");
+    assert_eq!(ending.unwrap_err().message, "IWR0074-S GF, a GLOBAL file of OUTER, is written as a print file in one of OUTER and READER and not the other, which is not supported yet");
 }

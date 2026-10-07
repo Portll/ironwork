@@ -342,7 +342,7 @@ fn a_service_ironwork_does_not_provide_is_ironwork_s_refusal_naming_it() {
     assert_eq!(out, "EXCEPTION\n");
     let abend = ending.unwrap_err();
     assert_eq!(abend.code, "IRONWORK");
-    assert_eq!(abend.message, "CALL CEEHDLR: CEEHDLR is a Language Environment callable service that ironwork for COBOL does not provide yet");
+    assert_eq!(abend.message, "IWR0072-S CALL CEEHDLR: CEEHDLR is a Language Environment callable service that ironwork for COBOL does not provide yet");
 }
 
 #[test]

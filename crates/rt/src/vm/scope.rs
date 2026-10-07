@@ -93,7 +93,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                         return Err(Abend::ironwork(format!("{declarer} has no file {name}"), Pos::default()));
                     };
                     if file.carriage != theirs.services.files[j].carriage {
-                        let message = format!("{name}, a GLOBAL file of {declarer}, is written as a print file in one of {declarer} and {} and not the other, which is not supported yet", self.sym(p.id));
+                        let message = crate::refusal::IWR0074.message(format_args!("{name}, a GLOBAL file of {declarer}, is written as a print file in one of {declarer} and {} and not the other, which is not supported yet", self.sym(p.id)));
                         return Err(Abend::ironwork(message, Pos::default()));
                     }
                     Connector::Program(frame.me, j)

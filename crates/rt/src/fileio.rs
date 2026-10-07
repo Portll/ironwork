@@ -679,7 +679,7 @@ fn write_page<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>,
         Some(Advance::Lines { before, count }) => (before, Motion::Lines(x.int(count, pos)?.max(0) as u64)),
         Some(Advance::Page { before }) => (before, Motion::Page),
         Some(Advance::Mnemonic { name, .. }) => {
-            return Err(Abend::ironwork(format!("ADVANCING {name} on {}, whose FD has LINAGE, is not supported yet", file.name), pos));
+            return Err(crate::refusal::IWR0068.abend(format_args!("ADVANCING {name} on {}, whose FD has LINAGE, is not supported yet", file.name), pos));
         }
     };
     let Some(mut page) = x.slot(k).as_ref().and_then(|f| f.page) else { return Ok(Outcome::Done) };

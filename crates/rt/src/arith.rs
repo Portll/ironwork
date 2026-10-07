@@ -64,7 +64,7 @@ pub fn fixed_binop(x: Fixed, op: BinOp, y: Fixed, dmax: u32, arith: Arith, pos: 
 /// `x` to the power `n`, an integer from 0 to 31, by repeated multiplication at `dmax` places.
 pub fn pow(x: Fixed, n: i64, dmax: u32, arith: Arith, pos: Pos) -> R<Fixed> {
     if !(0..=31).contains(&n) {
-        return Err(Abend::ironwork("exponentiation other than by an integer from 0 to 31 is not supported yet", pos));
+        return Err(crate::refusal::IWR0069.abend("exponentiation other than by an integer from 0 to 31 is not supported yet", pos));
     }
     let mut acc = Fixed::new(1, Places::new(1, 0));
     for _ in 0..n {

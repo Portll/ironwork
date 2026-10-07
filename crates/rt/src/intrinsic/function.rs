@@ -152,7 +152,7 @@ pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args
                 Val::Bytes(b) | Val::All(b) => b.len(),
                 Val::National(b) | Val::Dbcs(b) => b.len() / 2,
                 Val::Num(v) => v.places.total() as usize,
-                _ => return Err(Abend::ironwork("FUNCTION LENGTH of this argument is not supported yet", pos)),
+                _ => return Err(crate::refusal::IWR0065.abend("FUNCTION LENGTH of this argument is not supported yet", pos)),
             };
             Val::Num(Fixed::new(n as i128, Places::new(9, 0)))
         }
@@ -839,7 +839,7 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             let random = u128::from(state.hash_one((seconds, hundredths, 1u8))) << 64 | u128::from(state.hash_one((seconds, hundredths, 2u8)));
             text_value(facts, &text::uuid4(random), pos)
         }
-        other => Err(Abend::ironwork(format!("FUNCTION {other} is not supported yet"), pos)),
+        other => Err(crate::refusal::IWR0064.abend(format_args!("FUNCTION {other} is not supported yet"), pos)),
     }
 }
 
