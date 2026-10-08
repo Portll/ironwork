@@ -389,7 +389,8 @@ paragraph headers in Area B (IWX0061-W) and FUNCTION SUBSTITUTE and SUBSTITUTE-C
 where a file shows it is. Under extended and relaxed DISPLAY shows a number as cobc's default
 dialect does, `-012.50`, and under `--dialect gnucobol` as cobc -std=ibm-strict does, `01250-`;
 `--numeric-display ibm|cobc-ibm-strict|cobc` chooses one outright. A zero-length literal reads as a
-space (IWX0063-W; IWS0106-E under strict), or as no characters with `--empty-literal empty`. `--compliance relaxed` compiles what extended still refuses in a
+space (IWX0063-W; IWS0106-E under strict), or as no characters with `--empty-literal empty`. `--autofix DIR`, for check and run, repairs what has exactly one fix and writes the repaired
+sources, a diff and a report to DIR ([docs/autofix.md](docs/autofix.md)). `--compliance relaxed` compiles what extended still refuses in a
 PROCEDURE DIVISION sentence or statement as a hole (IWX0059-W), which ends a run that reaches it
 with IWR0078.
 [docs/compliance.md](docs/compliance.md) gives each one's meaning, the census that chose them, and

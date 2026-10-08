@@ -12,7 +12,7 @@ usage:
                [--exit-code] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                [--compliance strict|extended|relaxed] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
                [--source-format auto|fixed|free] [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind] [--screens path]
-               [--env NAME=VALUE]...
+               [--env NAME=VALUE]... [--autofix <dir>]
                                                        compile and run; CBL and PROCESS cards set the options
   ironwork run <module.iwm> [-L <dir>]... [-I <dir>]... [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT]
                [--statement-limit N] [--time-limit SECONDS] [--storage-limit BYTES]
@@ -20,7 +20,7 @@ usage:
                [--exit-code] [--coverage FILE] [--evidence DIR [--trace-marker TEXT] [--trace-input] [--trace-statements FILE]]
                                                        run a load module's first program on the VM, with the options
                                                        it was compiled with
-  ironwork check <program.cbl> [-warnings-block] [--cics-return-warning=once|always|never] [-I <dir>]...
+  ironwork check <program.cbl> [-warnings-block] [--cics-return-warning=once|always|never] [-I <dir>]... [--autofix <dir>]
                [--compliance strict|extended|relaxed] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
                [--source-format auto|fixed|free] [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
                                                        compile only
@@ -97,6 +97,13 @@ flags:
              fixed reads fixed form unless a directive says otherwise; free reads every source in
              free form from its first line, as cobc -free does. IWX0001 names each file read in free
              form and why. --source-format=free works too
+  --autofix DIR
+             check and run: repair what has exactly one fix (an assumed period, a scope terminator no
+             verb takes, a paragraph header in Area B, a zero-length literal, tab stops, free form
+             the file was detected in), compiling again until none is left, then check or run the
+             repaired source. DIR receives each repaired file and COPY member under its own name,
+             autofix.diff and autofix.json, which lists each fix and what is left. Each fix is
+             written to standard error. docs/autofix.md lists the fixes
   --numeric-display ibm|cobc-ibm-strict|cobc
              how DISPLAY shows a zoned, packed or binary item: ibm as Enterprise COBOL stores it, the
              sign overpunched; cobc-ibm-strict as cobc -std=ibm-strict, the sign after the digits;
@@ -525,6 +532,7 @@ exit status: for check and compile, the compile's return code, the highest of it
 const FLAGS: &[&str] = &["-silent", "-strict-sort-keys", "-warnings-block", "-debug"];
 const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid", "--sysid", "--commarea", "--commarea-out", "--task-out", "--file", "--td", "--screens", "--serve", "--transaction", "--csd"];
 
+mod autofix;
 mod codegen;
 mod compare;
 mod compile;
@@ -650,6 +658,7 @@ fn driver() -> ExitCode {
     let mut trace_statements: Option<std::path::PathBuf> = None;
     let mut trace_input = false;
     let mut provenance_file: Option<std::path::PathBuf> = None;
+    let mut autofix_dir: Option<std::path::PathBuf> = None;
     let (mut compare_base, mut compare_head, mut declare, mut statement) = (None, None, None, None);
     let mut expected: Vec<(String, std::path::PathBuf)> = Vec::new();
     let mut datasets: Option<String> = None;
@@ -759,6 +768,10 @@ fn driver() -> ExitCode {
             "--coverage" => match args.next() {
                 Some(file) => coverage_file = Some(std::path::PathBuf::from(file)),
                 None => refuse!("--coverage needs a file"),
+            },
+            "--autofix" => match args.next() {
+                Some(dir) => autofix_dir = Some(std::path::PathBuf::from(dir)),
+                None => refuse!("--autofix needs a directory"),
             },
             "--provenance" => match args.next() {
                 Some(file) => provenance_file = Some(std::path::PathBuf::from(file)),
@@ -985,6 +998,9 @@ fn driver() -> ExitCode {
     }
     if exit_code && !banded {
         return usage_error("--exit-code is for run, cics and job, and not with --expected");
+    }
+    if autofix_dir.is_some() && !matches!(rest.first().map(String::as_str), Some("check" | "run")) {
+        return usage_error("--autofix is for check and run");
     }
     if numeric::SourceFormat::of(&flags) != numeric::SourceFormat::Auto && numeric::Compliance::of(&flags) == numeric::Compliance::Strict {
         return usage_error("--source-format is for --compliance extended: Enterprise COBOL reads fixed form alone");
@@ -1231,7 +1247,19 @@ fn driver() -> ExitCode {
         let evidence = evidence_dir.map(|dir| module::Evidence { dir, marker: trace_marker, statements: listed.unwrap_or_default(), input: trace_input });
         return module::run(module::Request { command, path, bytes: &bytes, library, reads, dds, clock, database, parm: parm.as_deref(), options: &cics_options, evidence, coverage: coverage_file });
     }
-    let text = syntax::copy::decode(&bytes);
+    let mut text = syntax::copy::decode(&bytes);
+    if let Some(dir) = &autofix_dir {
+        let dirs: Vec<std::path::PathBuf> = std::iter::once(own_directory.clone()).chain(libraries.iter().cloned()).collect();
+        match autofix::repair(path, &text, &dirs, &flags, dir) {
+            Ok(repaired) => {
+                for f in &repaired.fixes {
+                    eprintln!("{}:{}:{}: fixed {}: {}", f.file, f.line, f.col, f.id, f.what);
+                }
+                text = repaired.text;
+            }
+            Err(e) => return usage_error(&e),
+        }
+    }
     if coverage_file.is_some() && command == "check" {
         return usage_error("--coverage is for run, cics and job");
     }
@@ -1249,7 +1277,7 @@ fn driver() -> ExitCode {
         },
         None => None,
     };
-    let libraries = syntax::copy::Libraries::new(std::iter::once(own_directory.clone()).chain(libraries).collect()).with_program(std::path::Path::new(path)).with_flags(&flags);
+    let libraries = syntax::copy::Libraries::new(autofix_dir.iter().cloned().chain(std::iter::once(own_directory.clone())).chain(libraries).collect()).with_program(std::path::Path::new(path)).with_flags(&flags);
     let mut programs = match syntax::parse_all_with(&text, &libraries) {
         Ok(p) => p,
         Err(e) => return no_program(journal, command, path, report(std::slice::from_ref(&e), path)),
