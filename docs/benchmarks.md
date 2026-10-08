@@ -151,11 +151,17 @@ are the reference on the machine above, from the 2026-09-30 interpreter and cobc
 
 ## B6 against these numbers
 
-**Native at most 1.5 times `cobc -O2`.** The limits are 6.3 s for `seqio`, 0.31 s for `packed`,
-0.05 s for `tblsrch` and 0.66 s for `callheavy`.
+**Native at most 1.5 times `cobc -O2`.** Native code is faster than `cobc -O2` on all four programs on
+both hosted runners and on the M5 Pro. The Bench workflow at 7f37337c (`RUNS=5`, median wall time of
+native code over cobc's, interleaved on the runner being judged):
 
-- `seqio` is I/O-bound in both, so within reach.
-- `packed` and `callheavy` are within reach if the emitted Rust calls the semantics library without
-  per-operation allocation. Not shown by these numbers.
-- `tblsrch` runs in 31 ms under cobc, close to the process start-up cost, so the ratio cannot be
-  measured at this N. Raise N for cobc, or time the search loop alone, before judging it.
+| Runner | `seqio` | `packed` | `tblsrch` | `callheavy` |
+|---|---|---|---|---|
+| macOS arm64 (Apple M1, virtual) | 0.39 | 0.37 | 0.49 | 0.46 |
+| Linux x86-64 (AMD EPYC 9V74) | 0.45 | 0.38 | 0.71 | 0.52 |
+| Target | 1.5 | 1.5 | 1.5 | 1.5 |
+
+Native code's output matched the VM's on every run. `tblsrch` runs in 10 to 43 ms under cobc, so its
+ratio moves most between runs. On the M5 Pro, in cycles, native code is 0.39 of cobc's on `packed`,
+0.45 on `callheavy`, 0.30 on `seqio` and 0.65 to 0.85 on `tblsrch` ([codegen-runtime.md](codegen-runtime.md)
+§14.1 names the fast paths).
