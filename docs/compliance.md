@@ -1345,6 +1345,22 @@ A period written right before the program's name, as in `PROGRAM-ID.SALESREPORT.
 PROGRAM-ID, FUNCTION-ID, CLASS-ID or METHOD-ID as a separator period would. Elsewhere a period needs
 the space after it, as under strict.
 
+### IWX0101-W FUNCTION CONCAT
+
+`IWX0101-W FUNCTION CONCAT (GnuCOBOL's name for CONCATENATE; Enterprise COBOL has neither): it is
+read as FUNCTION CONCATENATE`, at the name.
+
+cobc 3.2 knows the function by both names; FUNCTION ALL INTRINSIC lets it be invoked as CONCAT
+without the word FUNCTION too. It is CONCATENATE (IWX0053) in every other respect.
+
+### IWX0102-W DISPLAY and ACCEPT (line, column)
+
+`IWX0102-W {verb} (line, column) (Micro Focus's and RM/COBOL's; Enterprise COBOL has no screen): it
+is read as {verb} ... AT LINE line COLUMN column`, at the parenthesis.
+
+`DISPLAY (23, 40) 'TEXT'` and `ACCEPT (23, 57) ITEM` position the screen I/O as AT LINE 23
+COLUMN 40 does (IWX0020), with any further screen phrases after it.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

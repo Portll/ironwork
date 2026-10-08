@@ -2495,6 +2495,7 @@ impl Parser<'_> {
             }
             "PERFORM" => self.perform(pos)?,
             "DISPLAY" => {
+                let positioned = self.screen_position("DISPLAY")?;
                 let mut items = Vec::new();
                 let no_advancing_ahead = |p: &Self| p.is_word("NO") && p.word_at(1) == Some("ADVANCING");
                 // LINE and POSITION are reserved words, never items: a screen phrase starts there.
@@ -2502,7 +2503,7 @@ impl Parser<'_> {
                 while self.starts_operand() && !no_advancing_ahead(self) && !erase_ahead(self) && !matches!(self.word(), Some("LINE" | "POSITION")) {
                     items.push(self.operand()?);
                 }
-                let mut screen = self.screen_phrases(None)?;
+                let mut screen = self.screen_phrases(positioned)?;
                 let mut upon = if self.accept_word("UPON") {
                     let name = self.name("a mnemonic name")?;
                     let device = self.mnemonics.iter().find(|(m, _)| *m == name).map_or_else(|| name.clone(), |(_, e)| e.clone());
@@ -2570,6 +2571,7 @@ impl Parser<'_> {
                 Stmt::NextSentence
             }
             "ACCEPT" => {
+                let positioned = self.screen_position("ACCEPT")?;
                 let target = self.reference()?;
                 if let Some(refused) = self.accept_message_count(pos) {
                     return Ok(refused);
@@ -2586,7 +2588,7 @@ impl Parser<'_> {
                     self.unreserved_terminator("END-ACCEPT", "ACCEPT");
                     return Ok(Stmt::Move { from: Operand::Literal(Literal::Number(size.into())), to: vec![target], pos });
                 }
-                let mut screen = None;
+                let mut screen = positioned;
                 if self.is_word("FROM") && self.word_at(1).is_some_and(|w| CRT_DEVICES.contains(&w)) {
                     self.at += 2;
                     screen = Some(Box::new(ScreenPhrases { pos, ..ScreenPhrases::default() }));
@@ -3917,6 +3919,24 @@ impl Parser<'_> {
         Ok(Search { table, all, varying, at_end, whens, pos })
     }
 
+    /// Micro Focus's and RM/COBOL's `DISPLAY (line, column)` and `ACCEPT (line, column)` under
+    /// `--compliance extended`, taken with the parentheses: the position, as AT LINE and COLUMN give
+    /// it (IWX0102). None where no parenthesis follows the verb.
+    fn screen_position(&mut self, verb: &str) -> R<Option<Box<ScreenPhrases>>> {
+        if !(self.extended && self.peek() == Some(&Tok::LParen)) {
+            return Ok(None);
+        }
+        let pos = self.pos();
+        self.at += 1;
+        let line = self.operand()?;
+        let column = self.operand()?;
+        if !self.accept(&Tok::RParen) {
+            return Err(self.error("')' after the line and column"));
+        }
+        self.messages.push(crate::messages::IWX0102.at(pos, format!("{verb} (line, column) (Micro Focus's and RM/COBOL's; Enterprise COBOL has no screen): it is read as {verb} ... AT LINE line COLUMN column")));
+        Ok(Some(Box::new(ScreenPhrases { pos, at: Some(ScreenAt::LineColumn { line: Some(line), column: Some(column) }), ..ScreenPhrases::default() })))
+    }
+
     /// GnuCOBOL's ACCEPT ... FROM LINES, or COLUMNS or COLS, under `--compliance extended`, taken with its
     /// words: the screen's 24 lines or 80 columns (assumption C462), with IWX0029-W.
     fn screen_size(&mut self) -> Option<&'static str> {
@@ -4159,7 +4179,11 @@ impl Parser<'_> {
 
     /// A function's name, arguments and reference modification, the word FUNCTION already read.
     fn function_call(&mut self, pos: Pos) -> R<Operand> {
-        let name = self.name("a function name")?;
+        let mut name = self.name("a function name")?;
+        if self.extended && name == "CONCAT" {
+            self.messages.push(crate::messages::IWX0101.at(pos, "FUNCTION CONCAT (GnuCOBOL's name for CONCATENATE; Enterprise COBOL has neither): it is read as FUNCTION CONCATENATE"));
+            name = "CONCATENATE".into();
+        }
         let (mut args, mut modifier, mut all_subscripts) = (Vec::new(), None, Vec::new());
         if self.qualifying_paren_at(self.at) && !self.refmod_ahead() {
             self.at += 1;

@@ -2376,3 +2376,38 @@ fn under_extended_gnucobol_forms_of_real_programs_compile_and_run() {
     let error = syntax::parse_all_with(&replacing, &syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended)).unwrap_err();
     assert_eq!(error.id, Some("IWS0121"), "{error}");
 }
+
+/// FUNCTION ALL INTRINSIC with GnuCOBOL's CONCAT, and DISPLAY and ACCEPT (line, column).
+const CONCAT_AND_POSITIONS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. CONCATP.\n",
+    "       ENVIRONMENT DIVISION.\n",
+    "       CONFIGURATION SECTION.\n",
+    "       REPOSITORY.\n",
+    "           FUNCTION ALL INTRINSIC.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 W PIC X(8).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE CONCAT('AB' 'CD') TO W\n",
+    "           DISPLAY W\n",
+    "           MOVE FUNCTION CONCAT('EF' 'G') TO W\n",
+    "           DISPLAY W\n",
+    "           GOBACK.\n",
+    "       SCREENS.\n",
+    "           DISPLAY (23, 40) 'TEXT'\n",
+    "           ACCEPT (23, 57) W WITH UPDATE.\n",
+);
+
+#[test]
+fn under_extended_concat_is_concatenate_and_a_parenthesised_position_is_at() {
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let o = Harness::source(CONCAT_AND_POSITIONS).flags(EXTENDED).run(executor);
+        assert_eq!((o.out.as_str(), o.ending), ("ABCD    \nEFG     \n", Ok(Ending::Goback)), "{}", o.err);
+    }
+    let extended = diagnostics_under(CONCAT_AND_POSITIONS, numeric::Compliance::Extended);
+    let at = |line: u32| extended.iter().filter(|d| d.0 == line).filter_map(|d| d.2).collect::<Vec<_>>();
+    assert!(at(11).contains(&"IWX0101") && at(13).contains(&"IWX0101"), "{extended:?}");
+    assert!(at(17).contains(&"IWX0102") && at(18).contains(&"IWX0102"), "{extended:?}");
+    assert!(extended.iter().all(|d| d.3 == Severity::Warning), "{extended:?}");
+}

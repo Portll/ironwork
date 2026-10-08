@@ -912,6 +912,8 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0098 | W | `ACCEPT ... FROM ESCAPE KEY (GnuCOBOL; Enterprise COBOL has no screen ACCEPT): the code of the key that ended the last screen ACCEPT, as COB-CRT-STATUS holds it` |
 | IWX0099 | W | `INSPECT {literal} (GnuCOBOL; Enterprise COBOL inspects a data item): its characters are tallied` |
 | IWX0100 | W | `a period with no space after it ends {paragraph} (GnuCOBOL; Enterprise COBOL follows a separator period with a space): it is read as a separator period` |
+| IWX0101 | W | `FUNCTION CONCAT (GnuCOBOL's name for CONCATENATE; Enterprise COBOL has neither): it is read as FUNCTION CONCATENATE` |
+| IWX0102 | W | `{verb} (line, column) (Micro Focus's and RM/COBOL's; Enterprise COBOL has no screen): it is read as {verb} ... AT LINE line COLUMN column` |
 
 ## Run-time refusals
 

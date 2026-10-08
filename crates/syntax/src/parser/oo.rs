@@ -210,6 +210,9 @@ impl Parser<'_> {
             }
             let every = rt::intrinsic::FIRST.iter().chain(rt::intrinsic::FUNCTIONS).filter(|n| **n != "WHEN-COMPILED");
             self.intrinsics.extend(every.map(|n| (*n).to_owned()));
+            if self.extended {
+                self.intrinsics.push("CONCAT".into());
+            }
             return Ok(());
         }
         for (name, pos) in names {
@@ -219,7 +222,7 @@ impl Parser<'_> {
             if name == "WHEN-COMPILED" {
                 return Err(crate::messages::IWS0076.at(*pos, "WHEN-COMPILED is a special register too, so the REPOSITORY paragraph cannot name it"));
             }
-            if !known(name) {
+            if !known(name) && !(self.extended && name == "CONCAT") {
                 return Err(crate::messages::IWS0077.at(*pos, format!("FUNCTION {name} INTRINSIC: {name} is not an intrinsic function ironwork for COBOL knows")));
             }
             self.intrinsics.push(name.clone());
