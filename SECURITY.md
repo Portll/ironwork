@@ -83,7 +83,10 @@ on z/OS. `run` and `job` take three, each checked as a statement starts:
 | `--time-limit SECONDS` | none | S322 at a statement that starts once SECONDS have passed |
 | `--storage-limit BYTES[K\|M\|G]` | none | the run ends at the next statement once the run unit's storage passes BYTES |
 
-Each job step gets the whole of each limit. Without a storage limit, a single CICS GETMAIN or
+Each job step gets the whole of each limit. The hardened build ([docs/hardened.md](docs/hardened.md))
+sets a time limit of an hour and a storage limit of 1 GiB where none is given, opens no network
+connection and listens on no port without `--allow-network`, and reads no DD from the
+environment without `--allow-environment`. Without a storage limit, a single CICS GETMAIN or
 Language Environment CEEGTST grants at most 256 MiB, and objects at most 1 GiB in all. A program
 waiting on ACCEPT from standard input starts no statement, so none of these ends it. `fuzz`
 always runs each input under a statement limit and a time limit of its own.

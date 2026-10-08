@@ -126,6 +126,35 @@ jobs:
       - name: Check the TLS build
         run: cargo +1.95.0 check --all-targets --locked --manifest-path tls/Cargo.toml
 
+  # The hardened build (docs/hardened.md): its profile builds, its defaults hold, and cargo deny
+  # checks advisories, licences, bans and sources for both workspaces.
+  hardened:
+    name: hardened build and supply chain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Build
+        run: |
+          cargo build --profile hardened --features hardened --locked -p ironwork
+          cargo build --profile hardened --features hardened --locked --manifest-path tls/Cargo.toml
+      - name: Test its defaults
+        run: cargo test --features hardened --locked -p ironwork --test hardened
+      - name: cargo deny
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check
+      - name: cargo deny, the TLS build
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: tls/Cargo.toml
+          command: check
+
   # A release binary rebuilt from the same commit with the same Rust is the same bytes: two builds
   # from separate checkouts, at different paths with their own target directories, are compared.
   reproducible:

@@ -206,6 +206,11 @@ flags:
              with run, job or cics, end the run at the next statement once the run unit's storage, its
              programs' data, arguments, EXTERNAL data and heap, passes BYTES; there is no limit
              without it, and each CICS GETMAIN or CEEGTST grants at most 256 MiB
+  --allow-network, --allow-environment
+             for a build with the hardened feature, which sets an hour's time limit and 1 GiB of
+             storage where none is given: let --sql-db connect and cics --serve listen, and let
+             DD_NAME in the environment name a DD. Other builds take both and change nothing.
+             docs/hardened.md lists what the hardened build changes
   --parm TEXT
              with run, the PARM an EXEC PGM= would give: the program's first USING item addresses
              a halfword length and the arguments before the last slash, as Language Environment
@@ -542,6 +547,13 @@ exit status: for check and compile, the compile's return code, the highest of it
   2 for usage";
 
 const FLAGS: &[&str] = &["-silent", "-strict-sort-keys", "-warnings-block", "-debug"];
+
+/// Built with the `hardened` feature: run limits on by default, no network and no DD names from
+/// the environment unless allowed (docs/hardened.md).
+const HARDENED: bool = cfg!(feature = "hardened");
+/// The hardened build's limits where none is given: an hour, and 1 GiB of run-unit storage.
+const HARDENED_TIME_LIMIT: u64 = 3600;
+const HARDENED_STORAGE_LIMIT: u64 = 1 << 30;
 const CICS_OPTIONS: &[&str] = &["--transid", "--termid", "--userid", "--applid", "--sysid", "--commarea", "--commarea-out", "--task-out", "--file", "--td", "--screens", "--serve", "--transaction", "--csd"];
 
 mod autofix;
@@ -689,6 +701,7 @@ fn driver() -> ExitCode {
     let mut statement_limit: Option<u64> = None;
     let mut time_limit: Option<u64> = None;
     let mut storage_limit: Option<u64> = None;
+    let (mut allow_network, mut allow_environment) = (false, false);
     let mut hang_limit: Option<u64> = None;
     let (mut fuzz_job, mut fuzz_cics, mut fuzz_interface, mut fuzz_differential) = (false, false, false, false);
     let mut arguments: Vec<Option<std::path::PathBuf>> = Vec::new();
@@ -715,6 +728,8 @@ fn driver() -> ExitCode {
                 Some(pair) => instream.push(pair),
                 None => refuse!("--instream needs STEP.DD=path"),
             },
+            "--allow-network" => allow_network = true,
+            "--allow-environment" => allow_environment = true,
             "--statement-limit" => match args.next().and_then(|n| n.parse().ok()).filter(|&n: &u64| n > 0) {
                 Some(n) => statement_limit = Some(n),
                 None => refuse!("--statement-limit needs a number of statements"),
@@ -759,7 +774,7 @@ fn driver() -> ExitCode {
                 return ExitCode::SUCCESS;
             }
             "-V" | "--version" if usage.is_none() => {
-                println!("ironwork for COBOL {}", env!("CARGO_PKG_VERSION"));
+                println!("ironwork for COBOL {}{}", env!("CARGO_PKG_VERSION"), if HARDENED { " (hardened)" } else { "" });
                 return ExitCode::SUCCESS;
             }
             "--base" | "--head" | "--declare" | "--statement" => match args.next() {
@@ -1079,6 +1094,15 @@ fn driver() -> ExitCode {
     if (time_limit.is_some() || storage_limit.is_some()) && !matches!(rest.first().map(String::as_str), Some("run" | "job" | "cics")) {
         return usage_error("--time-limit and --storage-limit are for run, job and cics");
     }
+    if HARDENED {
+        if !allow_network && (sql_db.is_some() || cics_options.iter().any(|(n, _)| n == "--serve")) {
+            return usage_error("this hardened build opens no network connection and listens on no port: give --allow-network for --sql-db or --serve");
+        }
+        if matches!(rest.first().map(String::as_str), Some("run" | "job" | "cics")) {
+            time_limit = time_limit.or(Some(HARDENED_TIME_LIMIT));
+            storage_limit = storage_limit.or(Some(HARDENED_STORAGE_LIMIT));
+        }
+    }
     if parm.is_some() && rest.first().map(String::as_str) != Some("run") {
         return usage_error("--parm is for run; a job's PARM comes from its EXEC, and fuzz makes its own");
     }
@@ -1262,7 +1286,7 @@ fn driver() -> ExitCode {
         if command == "run" && !cics_options.is_empty() {
             return usage_error(&format!("{path} is a load module, which run runs as a batch program; the cics flags are for cics"));
         }
-        let dds = match exec::files::Dds::new(&dds, true) {
+        let dds = match exec::files::Dds::new(&dds, !HARDENED || allow_environment) {
             Ok(d) => d,
             Err(e) => return usage_error(&e),
         };
@@ -1417,7 +1441,7 @@ fn driver() -> ExitCode {
             None
         }
     };
-    let dds = match exec::files::Dds::new(&dds, true) {
+    let dds = match exec::files::Dds::new(&dds, !HARDENED || allow_environment) {
         Ok(d) => d,
         Err(e) => return usage_error(&e),
     };

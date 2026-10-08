@@ -22,12 +22,57 @@ zarch = { package = "ironwork-zarch", path = "../crates/zarch" }
 rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "1.0.9"
 
+[features]
+# Secure run defaults, as the ironwork crate's feature of the same name (docs/hardened.md).
+hardened = []
+
 [dev-dependencies]
 rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem", "crypto"] }
 
 [lints.rust]
 unsafe_code = "forbid"
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(ironwork_tls)"] }
+non_ascii_idents = "deny"
+meta_variable_misuse = "deny"
+unit_bindings = "deny"
+unused_import_braces = "deny"
+unused_lifetimes = "deny"
+
+# Kept at zero across every target (docs/hardened.md).
+[lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+exit = "deny"
+mem_forget = "deny"
+float_cmp = "deny"
+lossy_float_literal = "deny"
+fn_to_numeric_cast_any = "deny"
+host_endian_bytes = "deny"
+infinite_loop = "deny"
+large_include_file = "deny"
+large_stack_arrays = "deny"
+suspicious_xor_used_as_pow = "deny"
+cfg_not_test = "deny"
+undocumented_unsafe_blocks = "deny"
+multiple_unsafe_ops_per_block = "deny"
+rc_mutex = "deny"
+rc_buffer = "deny"
+mutex_atomic = "deny"
+empty_drop = "deny"
+try_err = "deny"
+pathbuf_init_then_push = "deny"
 
 [workspace]
 members = ["."]
+
+# As the main workspace's hardened profile (docs/hardened.md).
+[profile.hardened]
+inherits = "release"
+overflow-checks = true
+debug-assertions = false
+panic = "abort"
+lto = "fat"
+codegen-units = 1
+incremental = false
+strip = "symbols"
