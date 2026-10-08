@@ -210,9 +210,11 @@ pub struct AssignItem {
     pub reference: Ref,
     /// DYNAMIC or USING was written.
     pub explicit: bool,
-    /// Micro Focus's ASSIGN TO DISK name under `--compliance extended`: the item is declared for
-    /// the program where it declares none.
+    /// Under `--compliance extended`, an ASSIGN TO DISK name, or an ASSIGN TO name the PROCEDURE
+    /// DIVISION uses: the item is declared for the program where it declares none.
     pub declared_if_missing: bool,
+    /// The name as the source spells it, the value of an item declared for it.
+    pub spelled: String,
 }
 
 /// A program containing another, as the contained program sees it: its PROGRAM-ID, and the 01

@@ -871,8 +871,7 @@ the device, and what follows names the file`, at DISK.
 
 DISK is read as the device, and what follows as the file's name: a literal names the DD, and a name
 is a data item each OPEN takes the DD name from, as ASSIGN TO an item does (IWX0007). Where neither
-the program nor a program containing it declares the item, it is declared for the program as an
-alphanumeric item of 4,095 bytes in WORKING-STORAGE, as cobc 3.2 declares it under `-std=mf`;
+the program nor a program containing it declares the item, it is declared for the program (IWX0103);
 COBSOFT builds a path in it before each OPEN. Assumption C482. Strict reads DISK as the
 assignment-name, as Enterprise COBOL does, and the name after it has no effect.
 
@@ -1360,6 +1359,30 @@ is read as {verb} ... AT LINE line COLUMN column`, at the parenthesis.
 
 `DISPLAY (23, 40) 'TEXT'` and `ACCEPT (23, 57) ITEM` position the screen I/O as AT LINE 23
 COLUMN 40 does (IWX0020), with any further screen phrases after it.
+
+### IWX0103-W An undeclared ASSIGN name
+
+`IWX0103-W {name} is not declared (GnuCOBOL and Micro Focus declare the name ASSIGN gives a file;
+Enterprise COBOL's assignment-name is never a data item): it is read as 01 {name} PIC X(4095) VALUE
+'{spelled}'`, at the name.
+
+The name after ASSIGN TO DISK (IWX0039), or after a plain ASSIGN TO where the PROCEDURE DIVISION
+uses it and no file has it, is declared for the program in WORKING-STORAGE where neither the program
+nor a program containing it declares it: 4,095 bytes holding the name as the source spells it, as
+cobc 3.2 declares it. Each OPEN takes the DD name from the item (IWX0007), so a program that sets
+the item first, as `ACCEPT name FROM ARGUMENT-VALUE` does, opens the DD it names, and one that does
+not opens the DD the name itself gives. Assumption C482. Strict refuses a name no entry declares
+with IWC0001-S, and a plain ASSIGN name nothing uses stays the DD name under extended too.
+
+### IWX0104-W ASSIGN names a later constant
+
+`IWX0104-W ASSIGN {name}: a constant defined after the ASSIGN (GnuCOBOL; Enterprise COBOL has no
+constant entry): the file's name is its value`, at the name.
+
+A level-78 or CONSTANT entry (IWX0002) stands for its value only after the entry, but the name
+ASSIGN gives a file, after TO, USING or DYNAMIC, may be a constant the DATA DIVISION defines later,
+as cobc 3.2 reads it: `SELECT F ASSIGN DYNAMIC LIST-NAME` with `78 LIST-NAME VALUE
+"./feeds/list.dat"` is read as `ASSIGN "./feeds/list.dat"`, a literal naming the DD.
 
 ## Relaxed
 

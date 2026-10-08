@@ -6,7 +6,7 @@
 //! PROCEDURE DIVISION header (docs/compliance.md).
 
 use crate::lexer::{Tok, Token};
-use crate::messages::{IWX0002, IWX0004, IWX0005, IWX0006, IWX0009, IWX0027, IWX0044, IWX0066, IWX0073, IWX0074};
+use crate::messages::{IWX0002, IWX0004, IWX0005, IWX0006, IWX0009, IWX0027, IWX0044, IWX0066, IWX0073, IWX0074, IWX0104};
 use crate::{Error, Pos};
 use std::collections::HashMap;
 
@@ -42,6 +42,9 @@ const BINARY_USAGES: &[BinaryUsage] = &[
     BinaryUsage { word: "UNSIGNED-LONG", digits: "9(18)", signed: Some(false), origin: GNUCOBOL_BINARY_USAGE },
 ];
 
+/// The words between ASSIGN and the name it gives the file.
+const ASSIGN_PHRASE: &[&str] = &["TO", "USING", "DYNAMIC", "EXTERNAL", "DISK"];
+
 const FIGURATIVES: &[&str] = &["ZERO", "ZEROS", "ZEROES", "SPACE", "SPACES", "HIGH-VALUE", "HIGH-VALUES", "LOW-VALUE", "LOW-VALUES", "QUOTE", "QUOTES", "NULL", "NULLS"];
 
 /// The tokens with constant entries taken out, their names replaced by their values, `&`
@@ -53,7 +56,7 @@ pub fn rewrite(tokens: Vec<Token>, cards: &[String], directed: &[crate::directiv
     for card in cards {
         options.apply(card).ok();
     }
-    let mut r = Rewrite { tokens, at: 0, out: Vec::new(), constants: HashMap::new(), pending: Vec::new(), options };
+    let mut r = Rewrite { tokens, at: 0, out: Vec::new(), constants: HashMap::new(), pending: Vec::new(), options, assigned: Vec::new() };
     let mut directed: Vec<&crate::directives::Constant> = directed.iter().collect();
     // `program`: the last ID paragraph was a PROGRAM-ID, not a function's, class's or method's.
     let (mut data, mut program, mut header) = (false, false, false);
@@ -74,6 +77,7 @@ pub fn rewrite(tokens: Vec<Token>, cards: &[String], directed: &[crate::directiv
             && matches!(w.as_str(), "PROGRAM-ID" | "FUNCTION-ID" | "METHOD-ID" | "CLASS-ID" | "INTERFACE-ID")
         {
             program = w == "PROGRAM-ID";
+            r.assigned.clear();
         }
         let data_section = r.tokens.get(r.at + 1).is_some_and(|t| matches!(&t.tok, Tok::Word(w) if w == "SECTION"));
         match &r.tokens[r.at].tok {
@@ -109,6 +113,9 @@ pub fn rewrite(tokens: Vec<Token>, cards: &[String], directed: &[crate::directiv
         }
         let value = r.value()?;
         r.push(value);
+        if r.assign_name_last() {
+            r.assigned.push(r.out.len() - 1);
+        }
     }
     if let Some(last) = r.out.last_mut() {
         last.messages.append(&mut r.pending);
@@ -125,12 +132,35 @@ struct Rewrite {
     pending: Vec<Error>,
     /// The cards' options, whose code page reads a hexadecimal literal joined to an alphanumeric one.
     options: numeric::Options,
+    /// Where in `out` the program's ASSIGN clauses give a file's name.
+    assigned: Vec<usize>,
 }
 
 impl Rewrite {
     fn push(&mut self, mut token: Token) {
         token.messages.splice(0..0, self.pending.drain(..));
         self.out.push(token);
+    }
+
+    /// Whether the token last kept is the name after ASSIGN [TO] [DYNAMIC | USING | EXTERNAL | DISK].
+    fn assign_name_last(&self) -> bool {
+        let Some((last, before)) = self.out.split_last() else { return false };
+        let phrase = |t: &Token| matches!(&t.tok, Tok::Word(w) if ASSIGN_PHRASE.contains(&w.as_str()));
+        matches!(last.tok, Tok::Word(_)) && !phrase(last) && before.iter().rev().find(|t| !phrase(t)).is_some_and(|t| matches!(&t.tok, Tok::Word(w) if w == "ASSIGN"))
+    }
+
+    /// The constant `name` stands for `value` from here on, and where an ASSIGN before it names it,
+    /// as cobc reads the names ASSIGN gives once the DATA DIVISION is read.
+    fn define(&mut self, name: String, value: Tok) {
+        for &k in &self.assigned {
+            let token = &mut self.out[k];
+            if matches!(&token.tok, Tok::Word(w) if *w == name) {
+                token.messages.push(IWX0104.at(token.pos, format!("ASSIGN {name}: a constant defined after the ASSIGN (GnuCOBOL; Enterprise COBOL has no constant entry): the file's name is its value")));
+                token.tok = value.clone();
+                token.spelled = None;
+            }
+        }
+        self.constants.insert(name, value);
     }
 
     /// Token `k`, a constant's name replaced by its value and a PICTURE's `(name)` by the number.
@@ -218,7 +248,7 @@ impl Rewrite {
             self.pending.extend(self.tokens[self.at..=end].iter().flat_map(|t| t.messages.iter().cloned()));
             self.at = end + 1;
             self.pending.push(IWX0074.at(level.pos, format!("constant {name} AS an arithmetic expression (COBOL 2002, Micro Focus and GnuCOBOL; Enterprise COBOL has no constant entry): it stands for {value}, the expression's value truncated to an integer, as the standard gives it")));
-            self.constants.insert(name, Tok::Number(value.to_string()));
+            self.define(name, Tok::Number(value.to_string()));
             return Ok(());
         }
         let value = self.value()?;
@@ -236,7 +266,7 @@ impl Rewrite {
         self.at += 1;
         self.pending.push(IWX0002.at(level.pos, format!("{CONSTANT}: {name} stands for its value wherever it is used after this entry")));
         self.pending.extend(value.messages);
-        self.constants.insert(name, value.tok);
+        self.define(name, value.tok);
         Ok(())
     }
 

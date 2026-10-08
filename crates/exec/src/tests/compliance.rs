@@ -1376,7 +1376,7 @@ fn micro_focus_file_forms_run_alike_on_both_executors() {
 #[test]
 fn micro_focus_file_forms_are_warned_under_extended_and_refused_under_strict() {
     let warned: Vec<_> = diagnostics_under(MICRO_FOCUS_FILES, numeric::Compliance::Extended).into_iter().filter(|d| d.2.is_some_and(|id| id >= "IWX0036")).map(|d| (d.0, d.2)).collect();
-    assert_eq!(warned, [(5, Some("IWX0039")), (11, Some("IWX0037")), (27, Some("IWX0036")), (36, Some("IWX0036")), (41, Some("IWX0036")), (46, Some("IWX0036")), (48, Some("IWX0038"))]);
+    assert_eq!(warned, [(5, Some("IWX0039")), (5, Some("IWX0103")), (11, Some("IWX0037")), (27, Some("IWX0036")), (36, Some("IWX0036")), (41, Some("IWX0036")), (46, Some("IWX0036")), (48, Some("IWX0038"))]);
     let refused = syntax::parse(MICRO_FOCUS_FILES).unwrap_err();
     assert_eq!((refused.pos.line, refused.id), (11, Some("IWC0310")), "{refused}");
     let until_exit = MICRO_FOCUS_FILES.replace("       DATA DIVISION.\n       FD", "       DATA DIVISION.\n       FILE SECTION.\n       FD");
@@ -2410,4 +2410,58 @@ fn under_extended_concat_is_concatenate_and_a_parenthesised_position_is_at() {
     assert!(at(11).contains(&"IWX0101") && at(13).contains(&"IWX0101"), "{extended:?}");
     assert!(at(17).contains(&"IWX0102") && at(18).contains(&"IWX0102"), "{extended:?}");
     assert!(extended.iter().all(|d| d.3 == Severity::Warning), "{extended:?}");
+}
+
+/// GnuCOBOL's ASSIGN names: one no entry declares that the program uses, one after ASSIGN TO DISK
+/// that the program never sets, and a constant defined after the ASSIGN.
+const ASSIGN_NAMES: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. ASSIGNS.\n",
+    "       ENVIRONMENT DIVISION.\n",
+    "       INPUT-OUTPUT SECTION.\n",
+    "       FILE-CONTROL.\n",
+    "           SELECT AF ASSIGN TO OutName FILE STATUS IS FS.\n",
+    "           SELECT BF ASSIGN TO DISK BDD FILE STATUS IS FS.\n",
+    "           SELECT CF ASSIGN DYNAMIC C-NAME FILE STATUS IS FS.\n",
+    "       DATA DIVISION.\n",
+    "       FILE SECTION.\n",
+    "       FD AF.\n",
+    "       01 AREC PIC X(5).\n",
+    "       FD BF.\n",
+    "       01 BREC PIC X(5).\n",
+    "       FD CF.\n",
+    "       01 CREC PIC X(5).\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 FS PIC XX.\n",
+    "       78 C-NAME VALUE 'CDD'.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY '[' OutName(1:8) ']'\n",
+    "           MOVE 'ADD' TO OutName\n",
+    "           OPEN OUTPUT AF BF CF\n",
+    "           DISPLAY 'FS=' FS\n",
+    "           MOVE 'one' TO AREC  WRITE AREC\n",
+    "           MOVE 'two' TO BREC  WRITE BREC\n",
+    "           MOVE 'three' TO CREC  WRITE CREC\n",
+    "           CLOSE AF BF CF\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn under_extended_assign_names_are_declared_or_take_a_later_constant() {
+    let dir = temp("assign-names");
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, executor) in [("interpreter", Executor::Interpreter), ("vm", Executor::Vm)] {
+        let files = ["ADD", "BDD", "CDD"].map(|dd| dir.join(format!("{name}-{dd}")));
+        let dds: Vec<String> = ["ADD", "BDD", "CDD"].iter().zip(&files).map(|(dd, f)| format!("{dd}={}", f.display())).collect();
+        let ran = Harness::source(ASSIGN_NAMES).flags(EXTENDED).dds(&dds).run(executor);
+        assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), ("[OutName ]\nFS=00\n", Some(&Ending::StopRun)), "{name}: {}", ran.err);
+        let page = numeric::Options::default().code_page();
+        let written: Vec<String> = files.iter().map(|f| page.decode(&std::fs::read(f).unwrap()).to_string()).collect();
+        assert_eq!(written, ["one  ", "two  ", "three"], "{name}");
+    }
+    let warned: Vec<_> = diagnostics_under(ASSIGN_NAMES, numeric::Compliance::Extended).into_iter().filter(|d| d.2.is_some_and(|id| id >= "IWX0103")).map(|d| (d.0, d.2)).collect();
+    assert_eq!(warned, [(6, Some("IWX0103")), (7, Some("IWX0103")), (8, Some("IWX0104"))]);
+    let plain = ASSIGN_NAMES.replace("           SELECT CF ASSIGN DYNAMIC C-NAME FILE STATUS IS FS.\n", "           SELECT CF ASSIGN TO CDD FILE STATUS IS FS.\n").replace("       78 C-NAME VALUE 'CDD'.\n", "");
+    let strict = diagnostics_under(&plain, numeric::Compliance::Strict);
+    assert!(strict.iter().any(|d| (d.0, d.2) == (21, Some("IWC0001"))), "{strict:?}");
 }

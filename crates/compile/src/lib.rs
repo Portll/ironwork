@@ -375,7 +375,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         crt_status::rewrite(&mut program, &inherited.entries);
         call_parameters::rewrite(&mut program, &errors);
     }
-    declare_assign_items(&mut program, &inherited.entries);
+    declare_assign_items(&mut program, &inherited.entries, &mut errors);
     let linkage: Vec<DataEntry> = program.linkage.iter().chain(&inherited.entries).cloned().collect();
     let files: Vec<(&[DataEntry], Option<u32>)> = program.files.iter().map(|f| (f.records.as_slice(), f.record_max)).collect();
     let shared = layout::record_area_owners(&program.files, &program.environment).unwrap_or_else(|e| {
@@ -550,18 +550,26 @@ fn value_pictures(program: &mut Program, errors: &mut Vec<Error>) {
     }
 }
 
-fn declare_assign_items(program: &mut Program, inherited: &[DataEntry]) {
-    let mut missing: Vec<(String, Pos)> = Vec::new();
+/// The item an ASSIGN name stands for where the program declares none: 4,095 bytes holding the name
+/// as spelled, as cobc 3.2 declares it (C482).
+fn declare_assign_items(program: &mut Program, inherited: &[DataEntry], errors: &mut Vec<Error>) {
+    let mut missing: Vec<&AssignItem> = Vec::new();
     for a in program.files.iter().filter_map(|f| f.assign_item.as_ref()).filter(|a| a.declared_if_missing) {
         let name = &a.reference.name;
         let declared = program.working_storage.iter().chain(&program.local_storage).chain(&program.linkage).chain(inherited).chain(program.files.iter().flat_map(|f| &f.records)).any(|e| e.name.as_ref() == Some(name));
-        if !declared && !missing.iter().any(|(m, _)| m == name) {
-            missing.push((name.clone(), a.reference.pos));
+        if !declared && !missing.iter().any(|m| m.reference.name == *name) {
+            missing.push(a);
         }
     }
-    for (name, pos) in missing {
-        program.working_storage.push(report::entry(1, Some(name), Some("X(4095)".into()), None, pos));
-    }
+    let declared: Vec<DataEntry> = missing
+        .into_iter()
+        .map(|a| {
+            let (name, spelled, pos) = (&a.reference.name, &a.spelled, a.reference.pos);
+            errors.push(syntax::messages::IWX0103.at(pos, format!("{name} is not declared (GnuCOBOL and Micro Focus declare the name ASSIGN gives a file; Enterprise COBOL's assignment-name is never a data item): it is read as 01 {name} PIC X(4095) VALUE '{spelled}'")));
+            DataEntry { value: Some(Literal::Alnum(spelled.clone())), ..report::entry(1, Some(name.clone()), Some("X(4095)".into()), None, pos) }
+        })
+        .collect();
+    program.working_storage.extend(declared);
 }
 
 fn assign_items(program: &mut Program, layout: &layout::Layout, options: &Options, errors: &mut Vec<Error>) {

@@ -776,6 +776,12 @@ impl Parser<'_> {
         let named = |name: &str| self.tokens[procedure_from..self.at].iter().find(|t| matches!(&t.tok, Tok::Word(w) if w == name)).map(|t| t.pos);
         let undeclared = |name: &str| !declares(&working_storage, name) && !declares(&local_storage, name) && !declares(&linkage, name);
         let [crt_status, call_parameters] = [CRT_STATUS, CALL_PARAMETERS].map(|name| named(name).filter(|_| self.extended && undeclared(name)));
+        if self.extended {
+            let file_names: Vec<String> = files.iter().map(|f| f.name.clone()).collect();
+            for a in files.iter_mut().filter_map(|f| f.assign_item.as_mut()).filter(|a| !a.explicit && !file_names.contains(&a.reference.name)) {
+                a.declared_if_missing |= named(&a.reference.name).is_some();
+            }
+        }
         if let Some(pos) = crt_status {
             self.messages.push(crate::messages::IWX0057.at(pos, "COB-CRT-STATUS (GnuCOBOL's special register; Enterprise COBOL has no screen ACCEPT): it holds the key that ended the last screen ACCEPT, as GnuCOBOL's screenio.cpy numbers the keys"));
             working_storage.push(register_entry(CRT_STATUS, "9(4)", None, pos));
@@ -1161,10 +1167,12 @@ impl Parser<'_> {
                     if !using {
                         self.accept_word("TO");
                     }
-                    if using || self.accept_word("DYNAMIC") {
+                    let literal = |p: &Self| p.extended && matches!(p.peek(), Some(Tok::Alnum(_)));
+                    if (using || self.accept_word("DYNAMIC")) && !literal(self) {
                         let reference = self.reference()?;
                         f.assign = reference.name.clone();
-                        f.assign_item = Some(AssignItem { reference, explicit: true, declared_if_missing: false });
+                        let spelled = reference.name.clone();
+                        f.assign_item = Some(AssignItem { reference, explicit: true, declared_if_missing: false, spelled });
                         continue;
                     }
                     let disk = self.extended
@@ -1183,6 +1191,7 @@ impl Parser<'_> {
                         self.at += 1;
                     }
                     let at = self.pos();
+                    let spelled = self.tokens.get(self.at).and_then(|t| t.spelled.clone());
                     let (target, word) = match self.peek().cloned() {
                         Some(Tok::Word(w)) => (w, !external),
                         Some(Tok::Alnum(w)) => (w, false),
@@ -1190,7 +1199,8 @@ impl Parser<'_> {
                     };
                     self.at += 1;
                     if word {
-                        f.assign_item = Some(AssignItem { reference: Ref { name: target.clone(), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos: at }, explicit: false, declared_if_missing: disk });
+                        let spelled = spelled.unwrap_or_else(|| target.clone());
+                        f.assign_item = Some(AssignItem { reference: Ref { name: target.clone(), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos: at }, explicit: false, declared_if_missing: disk, spelled });
                     }
                     let target = target.to_ascii_uppercase();
                     f.assign = target.rsplit('-').next().filter(|_| target.contains("-S-") || target.starts_with("S-") || target.starts_with("AS-")).unwrap_or(&target).to_owned();

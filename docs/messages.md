@@ -914,6 +914,8 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0100 | W | `a period with no space after it ends {paragraph} (GnuCOBOL; Enterprise COBOL follows a separator period with a space): it is read as a separator period` |
 | IWX0101 | W | `FUNCTION CONCAT (GnuCOBOL's name for CONCATENATE; Enterprise COBOL has neither): it is read as FUNCTION CONCATENATE` |
 | IWX0102 | W | `{verb} (line, column) (Micro Focus's and RM/COBOL's; Enterprise COBOL has no screen): it is read as {verb} ... AT LINE line COLUMN column` |
+| IWX0103 | W | `{name} is not declared (GnuCOBOL and Micro Focus declare the name ASSIGN gives a file; Enterprise COBOL's assignment-name is never a data item): it is read as 01 {name} PIC X(4095) VALUE '{spelled}'` |
+| IWX0104 | W | `ASSIGN {name}: a constant defined after the ASSIGN (GnuCOBOL; Enterprise COBOL has no constant entry): the file's name is its value` |
 
 ## Run-time refusals
 

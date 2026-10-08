@@ -2714,7 +2714,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: ASSIGN_TO_DISK,
-        claim: "Under --compliance extended, Micro Focus's ASSIGN TO DISK followed by a name or a literal reads DISK as the device and what follows as the file's name: a literal names the DD, and a name is a data item each OPEN takes the DD name from (C361). Where neither the program nor a program containing it declares the item, it is declared for the program as an alphanumeric item of 4,095 bytes in WORKING-STORAGE, the length cobc 3.2 gives the item it declares under -std=mf. Enterprise COBOL reads DISK as the assignment-name and ignores the names after it",
+        claim: "Under --compliance extended, Micro Focus's ASSIGN TO DISK followed by a name or a literal reads DISK as the device and what follows as the file's name: a literal names the DD, and a name is a data item each OPEN takes the DD name from (C361). The same holds for a plain ASSIGN TO name that the PROCEDURE DIVISION uses and that names no file. Where neither the program nor a program containing it declares the item, it is declared for the program as an alphanumeric item of 4,095 bytes in WORKING-STORAGE holding the name as the source spells it, as cobc 3.2 declares it under -std=mf and its default dialect. Enterprise COBOL reads DISK as the assignment-name and ignores the names after it, and its assignment-name is never a data item",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[O(Extended), S(FileIo)]],
