@@ -26,7 +26,7 @@ names the line as it was then.
 
 | Message | Fix |
 |---|---|
-| IWS0105-E, a period was assumed before PROCEDURE DIVISION | The period, on a line of its own before the header |
+| IWS0105-E or, under extended, IWX0093-W, a period was assumed before PROCEDURE DIVISION | The period, on a line of its own before the header |
 | IWS0001-S, a period expected after the PROCEDURE DIVISION header, where the word found begins its line | The period, on a line of its own before that word |
 | IWS0104-E, a scope terminator no verb takes, discarded | The terminator removed |
 | IWX0061-W, a paragraph header in Area B | The header moved to column 8 |

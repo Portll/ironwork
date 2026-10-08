@@ -1268,6 +1268,15 @@ that name is the function's interface. A function no such source defines stays r
 IWC0106-S. A run finds the function's code as for any user-defined function: in the module, or by
 its name in a program library.
 
+### IWX0093-W A period missing before PROCEDURE DIVISION
+
+`IWX0093-W a period was required before PROCEDURE DIVISION (GnuCOBOL warns and assumes it;
+Enterprise COBOL assumes it at E): one was assumed`, at PROCEDURE.
+
+The last data description entry before PROCEDURE DIVISION ends there, as both compilers end it.
+Enterprise COBOL gives IGYDS1082-E, which ends a compile at return code 8, and strict keeps that as
+IWS0105-E; cobc 3.2 warns ("optional period used") and compiles on, as extended does.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

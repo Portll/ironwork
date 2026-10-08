@@ -43,7 +43,7 @@ fn run_repairs_the_program_and_its_member_then_runs_the_repaired_source() {
     assert_eq!(String::from_utf8_lossy(&o.stdout), "ONE\n[   ][   ]\n", "{}", stderr(&o));
     let said = stderr(&o);
     let fixed: Vec<&str> = said.lines().filter(|l| l.contains(": fixed ")).map(|l| l.split(": fixed ").nth(1).unwrap().split(':').next().unwrap()).collect();
-    assert_eq!(fixed, ["IWX0063", "IWS0105", "IWX0061", "IWS0104", "IWX0063"], "{}", stderr(&o));
+    assert_eq!(fixed, ["IWX0063", "IWX0093", "IWX0061", "IWS0104", "IWX0063"], "{}", stderr(&o));
     let diff = fs::read_to_string(out.join("autofix.diff")).unwrap();
     assert!(diff.contains("-           MAIN-PARA.\n+       MAIN-PARA.\n") && diff.contains("+           .\n        PROCEDURE DIVISION.\n"), "{diff}");
     assert!(diff.contains("MEMB.cpy\n@@ -1,1 +1,1 @@\n-       01 M PIC X(3) VALUE ''.\n+       01 M PIC X(3) VALUE ' '.\n"), "{diff}");

@@ -137,7 +137,7 @@ fn fix_for(m: &syntax::Error, lines: &[String]) -> Option<(Edit, String)> {
         "IWX0001" if ["and the file reads in free form", "column 7 holds", "a literal runs past column 72"].iter().any(|w| m.message.contains(w)) => {
             (Edit::InsertLine { before: 0, text: ">>SOURCE FORMAT FREE" }, "added >>SOURCE FORMAT FREE as the first line".into())
         }
-        "IWS0105" if starts_line => (Edit::InsertLine { before: line, text: PERIOD_LINE }, "put the period the compiler assumed on a line of its own".into()),
+        "IWS0105" | "IWX0093" if starts_line => (Edit::InsertLine { before: line, text: PERIOD_LINE }, "put the period the compiler assumed on a line of its own".into()),
         "IWS0001" if m.message.starts_with("expected a period after the PROCEDURE DIVISION header") && starts_line => {
             (Edit::InsertLine { before: line, text: PERIOD_LINE }, "ended the PROCEDURE DIVISION header with a period".into())
         }

@@ -1738,7 +1738,11 @@ impl Parser<'_> {
             // Enterprise COBOL assumes the period at E (IGYDS1082-E) and compiles on.
             if self.is_word("PROCEDURE") && self.word_at(1) == Some("DIVISION") {
                 let at = self.pos();
-                self.messages.push(crate::messages::IWS0105.at(at, "a period was required before PROCEDURE DIVISION: one was assumed"));
+                self.messages.push(if self.extended {
+                    crate::messages::IWX0093.at(at, "a period was required before PROCEDURE DIVISION (GnuCOBOL warns and assumes it; Enterprise COBOL assumes it at E): one was assumed")
+                } else {
+                    crate::messages::IWS0105.at(at, "a period was required before PROCEDURE DIVISION: one was assumed")
+                });
                 break;
             }
             let clause = self.name("a data description clause or a period")?;

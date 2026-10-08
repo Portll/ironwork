@@ -40,10 +40,10 @@ fn records_lines_and_characters_are_left_out_and_check_warns_of_each() {
     let o = ironwork(&["check", &path, "--compliance", "loose"]);
     assert_eq!(o.status.code(), Some(4), "{}", stderr(&o));
     let said = stderr(&o);
-    let ids: Vec<&str> = said.lines().filter_map(|l| l.split("warning: ").nth(1)).map(|w| &w[..7]).filter(|id| matches!(*id, "IWX0064" | "IWX0065" | "IWX0059" | "IWS0105")).collect();
+    let ids: Vec<&str> = said.lines().filter_map(|l| l.split("warning: ").nth(1)).map(|w| &w[..7]).filter(|id| matches!(*id, "IWX0064" | "IWX0065" | "IWX0059" | "IWX0093")).collect();
     assert_eq!(ids.iter().filter(|i| **i == "IWX0064").count(), 2, "{said}");
     assert_eq!(ids.iter().filter(|i| **i == "IWX0065").count(), 2, "{said}");
-    assert!(ids.contains(&"IWS0105") && ids.contains(&"IWX0059"), "{said}");
+    assert!(ids.contains(&"IWX0093") && ids.contains(&"IWX0059"), "{said}");
     assert!(said.contains("the record T-REC (--compliance loose): IWR0003-S TYPEDEF"), "{said}");
     assert_eq!(ironwork(&["check", &path, "--compliance", "relaxed"]).status.code(), Some(12));
     fs::remove_dir_all(dir).unwrap();
