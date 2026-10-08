@@ -76,11 +76,14 @@ impl Storage<'_> {
     #[inline(always)]
     pub fn digits(&self, at: usize, len: u32, kind: Kind) -> Option<i64> {
         let bytes = &self.mem[at..at + len as usize];
-        if let Kind::Packed { signed, .. } = kind
-            && len <= 9
-            && !self.options.invdata.is_some_and(|i| i.cleansign)
-        {
-            return packed_count(bytes, signed || self.options.numproc != Numproc::Nopfd);
+        if !self.options.invdata.is_some_and(|i| i.cleansign) {
+            match kind {
+                Kind::Packed { signed, .. } if len <= 9 => return packed_count(bytes, signed || self.options.numproc != Numproc::Nopfd),
+                Kind::Zoned { signed, sign: None | Some(SignClause { separate: false, position: SignPosition::Trailing }), .. } if len <= 16 => {
+                    return zoned_count(bytes, signed || self.options.numproc != Numproc::Nopfd);
+                }
+                _ => {}
+            }
         }
         store::digits(bytes, kind, || *self.options)
     }
@@ -204,6 +207,36 @@ fn packed_count(bytes: &[u8], signed: bool) -> Option<i64> {
     let m = ((eights >> 32) * 100_000_000 + (eights & 0xFFFF_FFFF)) * 10 + u64::from(last >> 4);
     let m = m as i64;
     Some(if sign == 0xB || sign == 0xD { -m } else { m })
+}
+
+/// A zoned item of 1 to 16 bytes, its sign in the last byte's zone, as `codec::zoned` reads it: its
+/// digit nibbles, every other zone ignored, the sign taken as F where `signed` is false; None where
+/// a digit is above 9 or the sign is not one.
+#[inline(always)]
+fn zoned_count(bytes: &[u8], signed: bool) -> Option<i64> {
+    let &last = bytes.last()?;
+    let sign = if signed { last >> 4 } else { 0xF };
+    if sign < 0xA {
+        return None;
+    }
+    let split = bytes.len().saturating_sub(8);
+    let (high, low) = (zoned_eight(&bytes[..split])?, zoned_eight(&bytes[split..])?);
+    let m = (high * 100_000_000 + low) as i64;
+    Some(if sign == 0xB || sign == 0xD { -m } else { m })
+}
+
+/// Up to 8 zoned bytes' digit nibbles as a number, None where one is above 9.
+#[inline(always)]
+fn zoned_eight(bytes: &[u8]) -> Option<u64> {
+    const LOW: u64 = 0x0F0F_0F0F_0F0F_0F0F;
+    let d = bytes.iter().fold(0u64, |w, &b| w << 8 | u64::from(b)) & LOW;
+    if (d + 0x0606_0606_0606_0606) & !LOW != 0 {
+        return None;
+    }
+    // Adjacent digits joined into 16-bit lanes of 0 to 99, then 32-bit lanes of 0 to 9999.
+    let twos = (d >> 8 & 0x00FF_00FF_00FF_00FF) * 10 + (d & 0x00FF_00FF_00FF_00FF);
+    let fours = (twos >> 16 & 0x0000_FFFF_0000_FFFF) * 100 + (twos & 0x0000_FFFF_0000_FFFF);
+    Some((fours >> 32) * 10_000 + (fours & 0xFFFF_FFFF))
 }
 
 /// `decimal::encode`'s bytes for `m`, its sign nibble `sign`.
@@ -388,6 +421,39 @@ mod tests {
             }).collect();
             let sign = [0xA, 0xB, 0xC, 0xD, 0xE, 0xF, 0x3][(next() % 7) as usize];
             *mem.last_mut().unwrap() = (*mem.last().unwrap() & 0xF0) | sign;
+            for numproc in [Numproc::Nopfd, Numproc::Pfd] {
+                let options = Options { numproc, ..Options::default() };
+                let s = Storage { mem: &mut mem, program: 0, local: 0, linkage: &[], options: &options };
+                let fast = s.digits(0, len, kind);
+                read += usize::from(fast.is_some());
+                assert_eq!(fast, store::digits(&s.mem[..], kind, || options), "{:02X?} as {kind:?} under {numproc:?}", s.mem);
+            }
+        }
+        assert!(read > 150_000, "only {read} reads");
+    }
+
+    #[test]
+    fn zoned_bytes_read_as_store_reads_them() {
+        let mut state = 0xBB67_AE85_84CA_A73Bu64;
+        let mut next = move || {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            state.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        };
+        let mut read = 0;
+        for _ in 0..200_000 {
+            let len = 1 + (next() % 18) as u32;
+            let signed = next() % 2 == 0;
+            let sign = [None, Some(SignClause { separate: false, position: SignPosition::Trailing }), Some(SignClause { separate: false, position: SignPosition::Leading })][(next() % 3) as usize];
+            let kind = Kind::Zoned { digits: len, scale: (next() % u64::from(len + 1)) as u32, signed, sign: if signed { sign } else { None } };
+            let mut mem: Vec<u8> = (0..len).map(|_| match next() % 16 {
+                0 => (next() & 0xFF) as u8,
+                1 => 0xC0 | (next() % 10) as u8,
+                _ => 0xF0 | (next() % 10) as u8,
+            }).collect();
+            let zone = [0xA, 0xB, 0xC, 0xD, 0xE, 0xF, 0x3, 0x0][(next() % 8) as usize];
+            *mem.last_mut().unwrap() = zone << 4 | (*mem.last().unwrap() & 0x0F);
             for numproc in [Numproc::Nopfd, Numproc::Pfd] {
                 let options = Options { numproc, ..Options::default() };
                 let s = Storage { mem: &mut mem, program: 0, local: 0, linkage: &[], options: &options };
