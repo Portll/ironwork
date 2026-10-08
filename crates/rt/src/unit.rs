@@ -959,6 +959,21 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
         i16::from_be_bytes([self.mem[RETURN_CODE], self.mem[RETURN_CODE + 1]])
     }
 
+    /// RETURN-CODE's bytes and whether they hold input, to put back with [`RunUnit::restore_return_code`].
+    pub fn kept_return_code(&self) -> ([u8; 2], bool) {
+        ([self.mem[RETURN_CODE], self.mem[RETURN_CODE + 1]], self.holds_input(RETURN_CODE, 2))
+    }
+
+    pub fn restore_return_code(&mut self, (bytes, input): ([u8; 2], bool)) {
+        self.mem[RETURN_CODE..RETURN_CODE + 2].copy_from_slice(&bytes);
+        self.mark_input(RETURN_CODE, 2, input);
+    }
+
+    /// RETURN-CODE as a value a MOVE stores: `S9(4) BINARY`'s.
+    pub fn return_code_value(&self) -> crate::storage::Val {
+        crate::storage::Val::Num(numeric::precision::Fixed::new(i128::from(self.return_code()), numeric::precision::Places::new(4, 0)))
+    }
+
     /// The current time: seconds since the epoch, and hundredths.
     pub fn now(&self) -> (i64, u32) {
         match self.clock {

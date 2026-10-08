@@ -442,6 +442,45 @@ impl Dialect {
     }
 }
 
+/// The compiler a compile emulates, `--target NAME`: the flags it stands for, which flags given
+/// after it override (docs/targets.md).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    /// IBM Enterprise COBOL 6.4 for z/OS, the default.
+    Ibm,
+    /// GnuCOBOL 3.2's cobc with its default dialect.
+    Gnucobol,
+    /// GnuCOBOL 3.2's `cobc -std=ibm-strict`.
+    GnucobolIbmStrict,
+}
+
+impl Target {
+    pub const ALL: [Self; 3] = [Self::Ibm, Self::Gnucobol, Self::GnucobolIbmStrict];
+
+    /// The value `--target` takes for it.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Ibm => "ibm",
+            Self::Gnucobol => "gnucobol",
+            Self::GnucobolIbmStrict => "gnucobol-ibm-strict",
+        }
+    }
+
+    pub fn named(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|t| t.name() == value)
+    }
+
+    /// The compliance level, dialect and DISPLAY form the target compiles with.
+    pub fn flags(self) -> [String; 3] {
+        let (compliance, dialect, display) = match self {
+            Self::Ibm => (Compliance::Strict, Dialect::Ibm, DispSign::Compat),
+            Self::Gnucobol => (Compliance::Extended, Dialect::Gnucobol, DispSign::Cobc),
+            Self::GnucobolIbmStrict => (Compliance::Strict, Dialect::Gnucobol, DispSign::CobcIbmStrict),
+        };
+        [compliance.flag().to_owned(), dialect.flag().to_owned(), format!("--numeric-display={}", display.display_name())]
+    }
+}
+
 /// A chosen assumption `--assume ID=VALUE` switches, by its place in [`SWITCHES`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Switched {
@@ -1266,6 +1305,13 @@ impl Options {
     /// Each switched assumption whose value in force is not `ibm`, with that value.
     pub fn alternatives_in_force(&self) -> impl Iterator<Item = (&'static str, &'static str)> {
         SWITCHES.iter().enumerate().map(|(i, (id, values))| (*id, values[self.switch_value(i)])).filter(|&(_, value)| value != "ibm")
+    }
+
+    /// Whether the program is compiled for GnuCOBOL: under `--dialect gnucobol`, or a compliance
+    /// level that reads GnuCOBOL's and Micro Focus's forms. Behaviours IBM and cobc both define
+    /// otherwise follow cobc then (docs/targets.md).
+    pub fn emulates_cobc(&self) -> bool {
+        self.dialect == Dialect::Gnucobol || self.compliance != Compliance::Strict
     }
 
     pub fn code_page(&self) -> &'static CodePage {

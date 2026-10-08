@@ -118,7 +118,7 @@ pub fn run<'w>(module: LoadedModule, r: Request<'_>, sysin: Box<dyn BufRead + 'w
     let trap_off = matches!(passed, Passed::Parm(p) if crate::le::parm::trap_off(p));
     passed.apply_parm(&mut run_unit);
     let addresses = passed.addresses(&mut run_unit, page);
-    let ending = crate::vm::run(&code, me, &mut run_unit, &addresses, passed.main()).and_then(|e| past_the_end(e, passed.main(), &id, last_paragraph).map_err(Halt::Abend));
+    let ending = crate::vm::run(&code, me, &mut run_unit, &addresses, passed.main()).and_then(|e| past_the_end(e, passed.main(), &id, last_paragraph, program.options.options.emulates_cobc()).map_err(Halt::Abend));
     let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.settle(&id, ending.is_ok()).map(drop));
     let closed = run_unit.close_all(matches!(&ending, Err(Halt::Abend(a)) if a.code.skips_termination(trap_off)));
     let ending = ending?;

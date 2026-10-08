@@ -115,3 +115,22 @@ fn provenance_and_the_journal_record_the_dialect() {
     assert!(fs::read_to_string(&ibm).unwrap().contains("\"dialect\":\"ibm\""));
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn a_target_stands_for_its_flags_and_the_flags_beside_it_override_them() {
+    let dir = temp("target");
+    let path = dir.join("RETMAIN.cbl");
+    let text = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. RETMAIN.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01 N PIC S9(3) VALUE -12.\n       PROCEDURE DIVISION.\n           MOVE 7 TO RETURN-CODE\n           DISPLAY N.\n";
+    fs::write(&path, text).unwrap();
+    let path = path.to_str().unwrap();
+    let run = |args: &[&str]| {
+        let o = ironwork(&[&["run", path], args].concat());
+        (String::from_utf8_lossy(&o.stdout).into_owned(), o.status.code())
+    };
+    assert_eq!(run(&["--target", "gnucobol"]), ("-012\n".to_owned(), Some(7)));
+    assert_eq!(run(&["--target=gnucobol-ibm-strict"]), ("012-\n".to_owned(), Some(7)));
+    assert_eq!(run(&["--target", "ibm"]).0, "01K\n");
+    assert_eq!(run(&["--numeric-display", "ibm", "--target", "gnucobol"]).0, "01K\n");
+    assert_eq!(ironwork(&["check", path, "--target", "mf"]).status.code(), Some(2));
+    fs::remove_dir_all(dir).unwrap();
+}

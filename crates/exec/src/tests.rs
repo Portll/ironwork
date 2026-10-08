@@ -1625,10 +1625,11 @@ fn call_by_reference_content_and_value_with_returning_and_return_code() {
         ]
         .concat(),
     );
+    // A CALL with RETURNING leaves the caller's RETURN-CODE as it was (Language Reference, CALL).
     let (out, err, ending) = run_unit(&format!("       CBL DYNAM\n{source}"), vec![], "");
-    assert_eq!(ending.as_ref().map(|e| e.1), Ok(4), "{ending:?} {err}");
-    assert_eq!(out, "XYZ BBB 0107 0004\n0201\n0101\n");
-    assert_eq!(run_unit(&source, vec![], "").0, "XYZ BBB 0107 0004\n0201\n0301\n");
+    assert_eq!(ending.as_ref().map(|e| e.1), Ok(0), "{ending:?} {err}");
+    assert_eq!(out, "XYZ BBB 0107 0000\n0201\n0101\n");
+    assert_eq!(run_unit(&source, vec![], "").0, "XYZ BBB 0107 0000\n0201\n0301\n");
 }
 
 #[test]

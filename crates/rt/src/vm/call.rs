@@ -129,6 +129,8 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let program = &lowered.program;
         let containers = self.containers_of(program);
         let by = By::Call { initial: program.initial };
+        // A CALL with RETURNING does not set RETURN-CODE (Language Reference, CALL statement); cobc's does.
+        let kept = plan.returning.filter(|_| !self.p.options.options.emulates_cobc()).map(|_| self.unit.kept_return_code());
         let (ending, returned) = callee::run(self, &Callee { index, by, mark: Some(mark), pos, lengths: &lengths }, |caller| {
             check_storage(lowered)?;
             let (base, fresh) = caller.unit.activate(index, program.initial);
@@ -194,6 +196,11 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         self.parmcheck_test(plan, &addresses, |unit| unit.programs[index].name.clone(), pos)?;
         self.spare.addresses = addresses;
         self.spare.lengths = lengths;
+        // A program with no RETURNING phrase gives its RETURN-CODE, compiled for GnuCOBOL (C491).
+        let returned = returned.or_else(|| self.p.options.options.emulates_cobc().then(|| self.unit.return_code_value()));
+        if let Some(kept) = kept {
+            self.unit.restore_return_code(kept);
+        }
         if let (Some(target), Some(val)) = (plan.returning, returned) {
             let dest = self.loc_written(target)?;
             store::assign(&self.facts(), self.unit, dest, val, None, pos)?;

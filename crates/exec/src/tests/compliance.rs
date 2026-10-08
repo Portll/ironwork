@@ -90,7 +90,9 @@ const RETURNING_OMITTED: &str = concat!(
 #[test]
 fn a_program_returning_omitted_returns_its_return_code_and_no_item() {
     let walked = Harness::source(RETURNING_OMITTED).flags(EXTENDED).run(Executor::Interpreter);
-    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("+0001\n0099 +0002\n", Some(&Ending::Goback)), "{}", walked.err);
+    // The item takes the RETURN-CODE, as cobc 3.2 gives it; cobc keeps its caller's RETURN-CODE
+    // after a program RETURNING OMITTED, where ironwork gives it the called program's (C491).
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("+0001\n0002 +0002\n", Some(&Ending::Goback)), "{}", walked.err);
     let vm = Harness::source(RETURNING_OMITTED).flags(EXTENDED).run(Executor::Vm);
     assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
     let parsed = syntax::parse_all_with(RETURNING_OMITTED, &syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended)).unwrap();
@@ -2267,4 +2269,74 @@ fn under_extended_a_value_gives_a_picture_and_a_missing_period_before_a_level_is
     let strict = diagnostics_under(VALUE_PICTURES, numeric::Compliance::Strict);
     assert!(strict.iter().any(|d| (d.0, d.2, d.3) == (6, Some("IWS0120"), Severity::Error)), "{strict:?}");
     assert!(strict.iter().any(|d| (d.0, d.2) == (7, Some("IWC0235"))), "{strict:?}");
+}
+
+/// A main program that CALLs one with no RETURNING phrase RETURNING an item, then runs past its
+/// last statement.
+const PAST_THE_END: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. RETMAIN.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 R PIC S9(9) BINARY VALUE 5.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           CALL 'RETSUB' RETURNING R\n",
+    "           DISPLAY 'R=' R.\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. RETSUB.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE 7 TO RETURN-CODE\n",
+    "           GOBACK.\n",
+    "       END PROGRAM RETSUB.\n",
+    "       END PROGRAM RETMAIN.\n",
+);
+
+#[test]
+fn a_gnucobol_target_gives_returning_the_return_code_and_ends_a_run_past_the_end_as_goback() {
+    for flags in [EXTENDED, &["--dialect=gnucobol"][..]] {
+        let walked = Harness::source(PAST_THE_END).flags(flags).run(Executor::Interpreter);
+        assert!(walked.out.starts_with("R=+") && walked.out.ends_with("7\n"), "{flags:?}: {}{}", walked.out, walked.err);
+        assert_eq!(walked.ending.as_ref().ok(), Some(&Ending::Goback), "{flags:?}: {}", walked.err);
+        let vm = Harness::source(PAST_THE_END).flags(flags).run(Executor::Vm);
+        assert_eq!((vm.out, vm.ending), (walked.out, walked.ending), "{flags:?}");
+    }
+    for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+        let ibm = Harness::source(PAST_THE_END).run(executor);
+        assert_eq!(ibm.out, "R=000000005\n", "{name}");
+        assert!(ibm.ending.as_ref().is_err_and(|a| a.message.starts_with("IGZ0037S")), "{name}: {:?}", ibm.ending);
+    }
+}
+
+/// A CALL ... RETURNING of a program that sets RETURN-CODE and returns an item.
+const RETURNING_KEEPS_RETURN_CODE: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. RCMAIN.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 R PIC S9(9) BINARY VALUE 5.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE 3 TO RETURN-CODE\n",
+    "           CALL 'RCSUB' RETURNING R\n",
+    "           DISPLAY R ' ' RETURN-CODE\n",
+    "           MOVE 0 TO RETURN-CODE\n",
+    "           STOP RUN.\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. RCSUB.\n",
+    "       DATA DIVISION.\n",
+    "       LINKAGE SECTION.\n",
+    "       01 Q PIC S9(9) BINARY.\n",
+    "       PROCEDURE DIVISION RETURNING Q.\n",
+    "           MOVE 7 TO RETURN-CODE\n",
+    "           MOVE 9 TO Q\n",
+    "           GOBACK.\n",
+    "       END PROGRAM RCSUB.\n",
+    "       END PROGRAM RCMAIN.\n",
+);
+
+#[test]
+fn a_call_with_returning_leaves_the_return_code_as_it_was_under_ibm() {
+    for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+        let ran = Harness::source(RETURNING_KEEPS_RETURN_CODE).run(executor);
+        assert_eq!(ran.out, "000000009 0003\n", "{name}: {}", ran.err);
+    }
 }

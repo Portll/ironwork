@@ -379,6 +379,7 @@ pub const INSPECT_TRAILING: &str = "C466";
 pub const COMP_X: &str = "C467";
 pub const PIC_X_COMP_5: &str = "C468";
 pub const GNUCOBOL_FLOATS: &str = "C469";
+pub const RETURNING_WITHOUT_PHRASE: &str = "C491";
 pub const RETURNING_ON_STOP: &str = "C480";
 pub const ANY_LENGTH: &str = "C481";
 pub const ASSIGN_TO_DISK: &str = "C482";
@@ -2552,7 +2553,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: PAST_THE_LAST_LINE,
-        claim: "A main program whose control runs past its last statement ends the run with IGZ0037S, 'The flow of control in program program-name proceeded beyond the last line of the program', and the application is terminated (LE Runtime Messages), user abend 4038: the Language Reference leaves the flow undefined there except under a CALL (Transfer of control: 'the program flow of control is undefined unless the program execution is in the nondeclarative procedures portion of a program under control of a CALL statement, in which case an implicit EXIT PROGRAM statement is executed'), and the Migration Guide says of the current compiler that 'a main program that executes beyond the last line of the program will still abend' (NOCMPR2). IBM's message names no statement; ironwork places the abend at the last paragraph, the one control ran out of. A program a caller passed arguments to, as an interface run passes them, and a CALLed program return there as an implicit EXIT PROGRAM does. A CICS task's first program is left as it was",
+        claim: "A main program whose control runs past its last statement ends the run with IGZ0037S, 'The flow of control in program program-name proceeded beyond the last line of the program', and the application is terminated (LE Runtime Messages), user abend 4038: the Language Reference leaves the flow undefined there except under a CALL (Transfer of control: 'the program flow of control is undefined unless the program execution is in the nondeclarative procedures portion of a program under control of a CALL statement, in which case an implicit EXIT PROGRAM statement is executed'), and the Migration Guide says of the current compiler that 'a main program that executes beyond the last line of the program will still abend' (NOCMPR2). IBM's message names no statement; ironwork places the abend at the last paragraph, the one control ran out of. A program a caller passed arguments to, as an interface run passes them, and a CALLed program return there as an implicit EXIT PROGRAM does. A CICS task's first program is left as it was. Compiled for GnuCOBOL (--dialect gnucobol, or --compliance extended, relaxed or loose), a main program that runs past its last statement ends the run as GOBACK does, as cobc 3.2 ends it, with return code RETURN-CODE",
         basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[Always]],
@@ -2675,6 +2676,13 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[O(Extended), U(NativeBinary)]],
+    },
+    Assumption {
+        id: RETURNING_WITHOUT_PHRASE,
+        claim: "A CALL ... RETURNING of a COBOL program whose PROCEDURE DIVISION header has no RETURNING phrase leaves the RETURNING item as it was: Enterprise COBOL requires the called program to have the phrase (Language Reference, CALL statement, RETURNING phrase) and says nothing of a program without it. Compiled for GnuCOBOL (--dialect gnucobol, or --compliance extended, relaxed or loose), the item takes the called program's RETURN-CODE, as cobc 3.2 and Micro Focus give it. A CALL with RETURNING leaves the caller's RETURN-CODE as it was ('The RETURN-CODE special register is not set by execution of CALL statements that include the RETURNING phrase'); compiled for GnuCOBOL it takes the called program's, as cobc's does, which keeps it only after a program whose header says RETURNING OMITTED",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[S(Call)]],
     },
     Assumption {
         id: GNUCOBOL_FLOATS,

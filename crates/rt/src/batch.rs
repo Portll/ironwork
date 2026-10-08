@@ -66,9 +66,13 @@ impl Passed<'_> {
 }
 
 /// A main program whose control ran past its last statement: IGZ0037S, a severity-3 condition that
-/// ends the run U4038 (assumption C456), placed at the last paragraph, the one control ran out of. A
-/// program a caller passed arguments to returns there, as an implicit EXIT PROGRAM does.
-pub fn past_the_end(ending: Ending, main: bool, program: &str, last_paragraph: Option<Pos>) -> Result<Ending, Abend> {
+/// ends the run U4038 (assumption C456), placed at the last paragraph, the one control ran out of;
+/// compiled for GnuCOBOL (`cobc`), the end of the run, as GOBACK ends it. A program a caller passed
+/// arguments to returns there, as an implicit EXIT PROGRAM does.
+pub fn past_the_end(ending: Ending, main: bool, program: &str, last_paragraph: Option<Pos>, cobc: bool) -> Result<Ending, Abend> {
+    if main && ending == Ending::EndOfProgram && cobc {
+        return Ok(Ending::Goback);
+    }
     if main && ending == Ending::EndOfProgram {
         let message = format!("IGZ0037S The flow of control in program {} proceeded beyond the last line of the program.", program.to_ascii_uppercase());
         return Err(Abend { code: AbendCode::user(4038), message, pos: last_paragraph.unwrap_or_default(), file: None });

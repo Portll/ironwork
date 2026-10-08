@@ -1204,10 +1204,9 @@ as cobc -std=ibm-strict does.
 ### IWX0077-W CALL ... GIVING
 
 `IWX0077-W CALL ... GIVING (Micro Focus and GnuCOBOL; Enterprise COBOL writes RETURNING): it is read
-as RETURNING`, at GIVING. Strict refuses it with IWC0327-S. One difference from cobc: a COBOL program
-called with no PROCEDURE DIVISION RETURNING phrase gives the item nothing under ironwork, as
-Enterprise COBOL requires the phrase (Language Reference, CALL), where cobc gives it the program's
-RETURN-CODE. The calls in the corpus that use GIVING name C routines.
+as RETURNING`, at GIVING. Strict refuses it with IWC0327-S. A COBOL program called with no
+PROCEDURE DIVISION RETURNING phrase gives the item its RETURN-CODE under extended, as cobc does
+(C491, [targets.md](targets.md)).
 
 ### IWX0078-W NUMBER-OF-CALL-PARAMETERS
 

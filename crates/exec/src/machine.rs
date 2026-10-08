@@ -1136,6 +1136,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         let suspends = dynamic && compiled.program.containers.is_empty();
         let containers = self.containers_of(&compiled.program);
         let by = By::Call { initial: compiled.program.initial };
+        // A CALL with RETURNING does not set RETURN-CODE (Language Reference, CALL statement); cobc's does.
+        let kept = c.returning.as_ref().filter(|_| !self.options.emulates_cobc()).map(|_| self.unit.kept_return_code());
         let (ending, returned) = callee::run(self, &Callee { index, by, mark: Some(mark), pos, lengths: &lengths }, |m| {
             let mut callee = Machine::activation_within(compiled, index, &mut *m.unit, false, containers)?;
             let entry = entry.and_then(|k| compiled.entries.get(k));
@@ -1156,6 +1158,11 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             return Ok(Some(Flow::End(Ending::Goback)));
         }
         self.parmcheck_test(c, &addresses, |unit| unit.programs[index].name.clone())?;
+        // A program with no RETURNING phrase gives its RETURN-CODE, compiled for GnuCOBOL (C491).
+        let returned = returned.or_else(|| self.options.emulates_cobc().then(|| self.unit.return_code_value()));
+        if let Some(kept) = kept {
+            self.unit.restore_return_code(kept);
+        }
         if let (Some(target), Some(val)) = (&c.returning, returned) {
             let dest = self.locate_written(|m| m.locate(target))?;
             self.assign(dest, val, None, pos)?;

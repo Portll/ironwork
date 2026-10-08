@@ -10,7 +10,7 @@ usage:
                [-debug] [--cics-return-warning=once|always|never] [--optimize=0|1|2] [-I <dir>]... [-L <dir>]... [--vm | --interpret]
                [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT | --argument path|OMITTED... [--arguments-out DIR]]
                [--exit-code] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
-               [--compliance strict|extended|relaxed|loose] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
+               [--target ibm|gnucobol|gnucobol-ibm-strict] [--compliance strict|extended|relaxed|loose] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
                [--source-format auto|fixed|free] [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind] [--screens path]
                [--env NAME=VALUE]... [--autofix <dir> | --remediate <dir>]
                                                        compile and run; CBL and PROCESS cards set the options
@@ -21,7 +21,7 @@ usage:
                                                        run a load module's first program on the VM, with the options
                                                        it was compiled with
   ironwork check <program.cbl> [-warnings-block] [--cics-return-warning=once|always|never] [-I <dir>]... [--autofix <dir> | --remediate <dir>]
-               [--compliance strict|extended|relaxed|loose] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
+               [--target ibm|gnucobol|gnucobol-ibm-strict] [--compliance strict|extended|relaxed|loose] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
                [--source-format auto|fixed|free] [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
                                                        compile only
   ironwork cics <program.cbl> [run flags] [--transid T] [--termid T] [--userid U] [--applid A] [--sysid S]
@@ -37,7 +37,7 @@ usage:
   ironwork compile <program.cbl>... [-o <dir>] [--bundle NAME] [--source-prefix DIR] [--native [--runtime DIR]] [-silent] [-strict-sort-keys]
                [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never]
                [--optimize=0|1|2] [--diagnostics text|json]
-               [--compliance strict|extended|relaxed|loose] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [-I <dir>]... [-L <dir>]...
+               [--target ibm|gnucobol|gnucobol-ibm-strict] [--compliance strict|extended|relaxed|loose] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [-I <dir>]... [-L <dir>]...
                [--source-format auto|fixed|free] [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
                                                        compile and lower each source's programs to a load module
   ironwork dump [--section NAME]... [--strings] [--no-check] <module.iwm>
@@ -49,7 +49,7 @@ usage:
                [--timeout SECONDS] [--hang-limit N]
                [--root DIR] [--clock <time>]
                [-I <dir>]... [-L <dir>]... [-silent] [-strict-sort-keys] [-debug] [--optimize=0|1|2]
-               [--compliance strict|extended|relaxed|loose] [--dialect ibm|gnucobol] [--assume ID=VALUE]...
+               [--target ibm|gnucobol|gnucobol-ibm-strict] [--compliance strict|extended|relaxed|loose] [--dialect ibm|gnucobol] [--assume ID=VALUE]...
                [--source-format auto|fixed|free] [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
                [--datasets DIR] [--proclib DIR]... [--user ID]
                                                        run a batch program, or with --job a job, on generated input
@@ -130,6 +130,13 @@ flags:
              default) writes file:line:col: [warning: |informational: ]ID-S message; json writes one
              object a line, with file, member (the COPY member, or null), line, col, id, severity
              and message. docs/messages.md lists the ids. --diagnostics=json works too
+  --target ibm|gnucobol|gnucobol-ibm-strict
+             the compiler to emulate: ibm (the default) is Enterprise COBOL 6.4, as --compliance strict
+             --dialect ibm; gnucobol is GnuCOBOL 3.2's cobc, as --compliance extended --dialect
+             gnucobol --numeric-display cobc; gnucobol-ibm-strict is cobc -std=ibm-strict, as
+             --compliance strict --dialect gnucobol --numeric-display cobc-ibm-strict. Flags given
+             with it override its own. docs/targets.md lists each behaviour a target sets.
+             --target=gnucobol works too
   --dialect ibm|gnucobol
              whose result to give where ironwork knowingly differs from GnuCOBOL: ibm (the default)
              gives Enterprise COBOL's, as the register of assumptions reads it; gnucobol gives that
@@ -962,6 +969,15 @@ fn driver() -> ExitCode {
             "--dialect" => match args.next().as_deref().and_then(numeric::Dialect::named) {
                 Some(d) => flags.push(d.flag().to_owned()),
                 None => refuse!("--dialect needs ibm or gnucobol"),
+            },
+            // A target's flags go first, so the flags given beside it override them.
+            "--target" => match args.next().as_deref().and_then(numeric::Target::named) {
+                Some(t) => drop(flags.splice(0..0, t.flags())),
+                None => refuse!("--target needs ibm, gnucobol or gnucobol-ibm-strict"),
+            },
+            f if f.starts_with("--target=") => match numeric::Target::named(&f["--target=".len()..]) {
+                Some(t) => drop(flags.splice(0..0, t.flags())),
+                None => refuse!("--target needs ibm, gnucobol or gnucobol-ibm-strict"),
             },
             f if f.starts_with("--dialect=") => match numeric::Dialect::named(&f["--dialect=".len()..]) {
                 Some(d) => flags.push(d.flag().to_owned()),

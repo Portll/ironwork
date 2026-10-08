@@ -59,6 +59,8 @@ source, then in the program's directory and each `-L` library, by name, and fail
 such a member, never a path. A user-defined function's definition is found the same way, by its
 external name as PGMNAME forms it, eight characters under the default COMPAT (C270). `run` and `check` compile a source's functions and function prototypes with its first
 program, which is the one a run enters even when functions come before it (assumption C270).
+`--target ibm|gnucobol|gnucobol-ibm-strict` names the compiler to emulate, and sets the compliance
+level, dialect and DISPLAY form that follow from it ([docs/targets.md](docs/targets.md)).
 `check` also compiles the source's other programs, contained or not, and gives the highest return
 code of them all, as IBM's compile does for the whole compilation group; `run` compiles each one
 when it is first called.

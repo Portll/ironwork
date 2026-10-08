@@ -464,7 +464,7 @@ fn run_main<'w>(
         m.run_procedure()
     });
     let last_paragraph = compiled.program.paragraphs.last().map(|p| p.pos);
-    let ending = ending.and_then(|e| past_the_end(e, passed.main(), &compiled.program.id, last_paragraph));
+    let ending = ending.and_then(|e| past_the_end(e, passed.main(), &compiled.program.id, last_paragraph, compiled.options.emulates_cobc()));
     let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.settle(&compiled.program.id, ending.is_ok()).map(drop));
     let closed = run_unit.close_all(ending.as_ref().is_err_and(|a| a.code.skips_termination(trap_off)));
     *kept = Some(unit::Remains { arguments: passed.returned(&addresses, &run_unit.mem), ..unit::Remains::of(&run_unit) });

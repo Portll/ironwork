@@ -12,4 +12,4 @@ pub mod sign;
 pub mod zoned;
 
 pub use binary::Native;
-pub use options::{Arith, Assumed, BinCheck, CicsReturnWarning, Compliance, Currency, Dialect, DispSign, EmptyLiteral, ExtraPlace, FastsrtAdvPrint, Initcheck, IntDate, LeServices, Nsymbol, Numcheck, Numproc, Options, Parmcheck, Pgmname, ProgramScope, LOOSE, Qualify, Quote, RELAXED, SortKeys, SourceFormat, Switched, Trunc, TruncCheck, UnresolvedCalls, Vlr, VsamOpenFs, ZonCheck};
+pub use options::{Arith, Assumed, BinCheck, CicsReturnWarning, Compliance, Currency, Dialect, DispSign, EmptyLiteral, ExtraPlace, FastsrtAdvPrint, Initcheck, IntDate, LeServices, Nsymbol, Numcheck, Numproc, Options, Parmcheck, Pgmname, ProgramScope, Target, LOOSE, Qualify, Quote, RELAXED, SortKeys, SourceFormat, Switched, Trunc, TruncCheck, UnresolvedCalls, Vlr, VsamOpenFs, ZonCheck};

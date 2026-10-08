@@ -206,7 +206,7 @@ fn run_main(code: &Code, id: &str, me: usize, run_unit: &mut RunUnit<'_, Rc<Code
     passed.apply_parm(run_unit);
     *addresses = passed.addresses(run_unit, page);
     let last_paragraph = code.program().and_then(|p| p.paragraphs.last().and_then(|para| p.debug.positions.get(para.at as usize).copied()));
-    let ending = rt::vm::run(code, me, run_unit, addresses, passed.main()).and_then(|e| crate::past_the_end(e, passed.main(), id, last_paragraph).map_err(Halt::Abend));
+    let ending = rt::vm::run(code, me, run_unit, addresses, passed.main()).and_then(|e| crate::past_the_end(e, passed.main(), id, last_paragraph, code.program().is_some_and(|p| p.options.options.emulates_cobc())).map_err(Halt::Abend));
     let settled = run_unit.sql.as_mut().map_or(Ok(()), |s| s.settle(id, ending.is_ok()).map(drop));
     let closed = run_unit.close_all(matches!(&ending, Err(Halt::Abend(a)) if a.code.skips_termination(trap_off)));
     let ending = ending?;
