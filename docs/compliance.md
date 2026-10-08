@@ -217,9 +217,10 @@ At each OPEN the item's value, its blanks taken off, is the DD name, folded to u
 and Micro Focus map a name with no directory to a file through `DD_name`, and a DD maps one here. A
 value that cannot be a DD name, such as a path, names no DD, nor does a name the run was not given,
 and the OPEN fails as it does for a missing DD, with status 35 for a file that must exist. ironwork
-never opens a host file a program names (C360). CLOSE closes the DD the OPEN found. A file that
-SORT or MERGE reads, writes or describes cannot take its name from a data item: the sort opens its
-files by their DD names.
+never opens a host file a program names (C360). CLOSE closes the DD the OPEN found. A file SORT or
+MERGE reads or writes takes its DD name from the item when the SORT or MERGE opens it, and FASTSRT
+never gives its I/O to DFSORT, which finds a data set by its DD; an SD's ASSIGN names nothing a run
+opens, and its item is not read (C500).
 
 With `--evidence --trace-marker`, each OPEN records the item's value as a `dynamic-file-path` sink
 at the SELECT, where cobolwork places the finding, with the input of that file's item alone

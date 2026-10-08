@@ -554,6 +554,8 @@ fn fastsrt_refusal<'a, P: Copy, X: Copy, H: SortHost<'a, P, X>>(x: &H, merge: bo
         "it applies only to SORT".into()
     } else if count > 1 {
         format!("{} names more than one file", if input { "USING" } else { "GIVING" })
+    } else if decl.assign_item.is_some() {
+        "it takes its name from a data item (assumption C500)".into()
     } else if decl.organization == Organization::LineSequential {
         "it is a line-sequential file".into()
     } else if decl.organization == Organization::Relative && !this.fixed {

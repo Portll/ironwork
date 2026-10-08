@@ -534,22 +534,6 @@ fn declare_assign_items(program: &mut Program, inherited: &[DataEntry]) {
 
 fn assign_items(program: &mut Program, layout: &layout::Layout, options: &Options, errors: &mut Vec<Error>) {
     let extended = options.compliance == numeric::Compliance::Extended;
-    let mut all = Vec::new();
-    program.paragraphs.iter().for_each(|p| inner_statements(&p.statements, &mut all));
-    let sorted: Vec<&str> = all
-        .iter()
-        .filter_map(|s| match s {
-            Stmt::Sorting(sorting) => match sorting.as_ref() {
-                Sorting::Sort(s) => Some(s),
-                _ => None,
-            },
-            _ => None,
-        })
-        .flat_map(|s| [&s.input, &s.output])
-        .filter_map(|io| if let Some(SortIo::Files(names)) = io { Some(names) } else { None })
-        .flatten()
-        .map(String::as_str)
-        .collect();
     let mut kept = Vec::new();
     for (k, f) in program.files.iter().enumerate() {
         let Some(a) = &f.assign_item else { continue };
@@ -570,8 +554,9 @@ fn assign_items(program: &mut Program, layout: &layout::Layout, options: &Option
         };
         if !matches!(layout.items[item].kind, rt::storage::Kind::Group | rt::storage::Kind::Alnum { .. }) {
             errors.push(syntax::messages::IWC0054.at(pos, format!("ASSIGN {name}: the item holding the file's name must be alphanumeric or a group")));
-        } else if f.sort || sorted.contains(&f.name.as_str()) {
-            errors.push(syntax::messages::IWR0022.at(pos, format!("ASSIGN {name}: a file SORT or MERGE reads, writes or describes taking its name from a data item is not supported yet")));
+        } else if f.sort {
+            // An SD is never opened: its ASSIGN names nothing a run reads (C500).
+            continue;
         } else {
             errors.push(syntax::messages::IWX0007.at(pos, format!("{}: each OPEN of {} takes its DD name from {name}", syntax::extended::ASSIGN_ITEM, f.name)));
             kept.push(k);

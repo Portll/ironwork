@@ -100,7 +100,7 @@ fn extended_compile(source: &str) -> Result<Compiled, Vec<syntax::Error>> {
 }
 
 #[test]
-fn the_item_is_named_with_a_warning_and_must_be_alphanumeric_and_outside_sort() {
+fn the_item_is_named_with_a_warning_and_must_be_alphanumeric() {
     let compiled = extended_compile(&reader("TO WS-DD")).unwrap_or_else(|e| panic!("{e:?}"));
     let warning = compiled.diagnostics.iter().find(|m| m.id == Some("IWX0007")).expect("IWX0007-W");
     assert_eq!((warning.pos.line, warning.severity), (6, Severity::Warning));
@@ -111,12 +111,67 @@ fn the_item_is_named_with_a_warning_and_must_be_alphanumeric_and_outside_sort() 
     assert!(errors.iter().any(|e| e.message == "ASSIGN FS: the item holding the file's name must be alphanumeric or a group"), "{errors:?}");
     let errors = extended_compile(&reader("USING NO-SUCH")).err().unwrap();
     assert!(errors.iter().any(|e| e.message == "ASSIGN NO-SUCH: not a data item"), "{errors:?}");
-    let sorted = reader("TO WS-DD")
-        .replace("               FILE STATUS FS.\n", "               FILE STATUS FS.\n           SELECT SORT-FILE ASSIGN TO SORTWK.\n           SELECT OUT-FILE ASSIGN TO OUTDD.\n")
-        .replace("       WORKING-STORAGE SECTION.\n", "       SD  SORT-FILE.\n       01  SORT-REC PIC X(6).\n       FD  OUT-FILE.\n       01  OUT-REC PIC X(6).\n       WORKING-STORAGE SECTION.\n")
-        .replace("           GOBACK.\n", "           SORT SORT-FILE ON ASCENDING KEY SORT-REC\n               USING IN-FILE GIVING OUT-FILE.\n           GOBACK.\n");
-    let errors = extended_compile(&sorted).err().unwrap();
-    assert!(errors.iter().any(|e| e.message == "ASSIGN WS-DD: a file SORT or MERGE reads, writes or describes taking its name from a data item is not supported yet"), "{errors:?}");
+}
+
+/// A SORT whose USING and GIVING files take their DD names from items, and whose SD names an item
+/// no DD has, the GIVING file then read back.
+fn sorter(card: &str) -> String {
+    [
+        card,
+        "       IDENTIFICATION DIVISION.\n",
+        "       PROGRAM-ID. T.\n",
+        "       ENVIRONMENT DIVISION.\n",
+        "       INPUT-OUTPUT SECTION.\n",
+        "       FILE-CONTROL.\n",
+        "           SELECT IN-FILE ASSIGN TO IN-NAME.\n",
+        "           SELECT SORT-FILE ASSIGN TO SORT-NAME.\n",
+        "           SELECT OUT-FILE ASSIGN TO OUT-NAME FILE STATUS FS.\n",
+        "       DATA DIVISION.\n",
+        "       FILE SECTION.\n",
+        "       FD  IN-FILE.\n",
+        "       01  IN-REC PIC X(6).\n",
+        "       SD  SORT-FILE.\n",
+        "       01  SORT-REC PIC X(6).\n",
+        "       FD  OUT-FILE.\n",
+        "       01  OUT-REC PIC X(6).\n",
+        "       WORKING-STORAGE SECTION.\n",
+        "       01  IN-NAME PIC X(8) VALUE 'UNSORTED'.\n",
+        "       01  SORT-NAME PIC X(8) VALUE 'NOSUCH'.\n",
+        "       01  OUT-NAME PIC X(8).\n",
+        "       01  FS PIC XX.\n",
+        "       PROCEDURE DIVISION.\n",
+        "           MOVE 'SORTED' TO OUT-NAME\n",
+        "           SORT SORT-FILE ON ASCENDING KEY SORT-REC\n",
+        "               USING IN-FILE GIVING OUT-FILE\n",
+        "           DISPLAY 'SORT ' FS\n",
+        "           OPEN INPUT OUT-FILE\n",
+        "           PERFORM 3 TIMES\n",
+        "               READ OUT-FILE\n",
+        "               DISPLAY OUT-REC\n",
+        "           END-PERFORM\n",
+        "           CLOSE OUT-FILE\n",
+        "           GOBACK.\n",
+    ]
+    .concat()
+}
+
+#[test]
+fn a_sort_opens_its_using_and_giving_files_by_the_names_their_items_hold() {
+    for card in ["", "       CBL FASTSRT\n"] {
+        let dir = temp(if card.is_empty() { "assign-sort" } else { "assign-sort-fastsrt" });
+        std::fs::create_dir_all(&dir).unwrap();
+        let (unsorted, sorted) = (dir.join("unsorted.txt"), dir.join("sorted.txt"));
+        std::fs::write(&unsorted, "CCC\nAAA\nBBB\n").unwrap();
+        let dds = [format!("UNSORTED={}:text", unsorted.display()), format!("SORTED={}:text", sorted.display())];
+        let compiled = extended_compile(&sorter(card)).unwrap_or_else(|e| panic!("{e:?}"));
+        let named: Vec<&str> = compiled.diagnostics.iter().filter(|m| m.id == Some("IWX0007")).map(|m| m.message.as_str()).collect();
+        assert!(named.len() == 2 && named.iter().all(|m| !m.contains("SORT-FILE")), "{named:?}");
+        let walked = Harness::source(&sorter(card)).flags(EXTENDED).dds(&dds).run(Executor::Interpreter);
+        assert_eq!(walked.out, "SORT 00\nAAA   \nBBB   \nCCC   \n", "{card}{}", walked.err);
+        assert!(walked.ending.is_ok(), "{:?}", walked.ending);
+        let vm = Harness::source(&sorter(card)).flags(EXTENDED).dds(&dds).run(Executor::Vm);
+        assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    }
 }
 
 /// What `pick` takes from each event a traced run of `source` raises.

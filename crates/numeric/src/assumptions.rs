@@ -390,6 +390,7 @@ pub const ALLOCATE_HEAP: &str = "C487";
 pub const CHAINING: &str = "C488";
 pub const CRT_STATUS_CODES: &str = "C489";
 pub const WIDE_PICTURES: &str = "C490";
+pub const SORT_FILE_ASSIGN_ITEM: &str = "C500";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2765,6 +2766,13 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[O(Extended), S(Arithmetic)]],
+    },
+    Assumption {
+        id: SORT_FILE_ASSIGN_ITEM,
+        claim: "Under --compliance extended, a file SORT or MERGE reads or writes whose ASSIGN names a data item takes its DD name from the item when the SORT or MERGE opens it, as any OPEN does (C360), and FASTSRT never gives its I/O to DFSORT, which finds a data set by its DD: COBOL does that file's I/O and sets its FILE STATUS. An SD's ASSIGN names nothing a run opens, and a data item it names is not read, as cobc 3.2 ignores it",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), S(Sort)], &[O(Extended), S(Merge)]],
     },
     Assumption {
         id: COMMAND_LINE_FROM_PARM,
