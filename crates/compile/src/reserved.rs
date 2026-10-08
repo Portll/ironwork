@@ -3,10 +3,18 @@
 use syntax::ast::{DataEntry, Program};
 use syntax::{Error, Pos};
 
+/// The words Enterprise COBOL reserves that cobc 3.2 reserves only in their own clause, its
+/// `--list-reserved` marking them context sensitive, which `--compliance extended` lets name an item.
+const CONTEXT_WORDS: &[&str] = &[
+    "APPLY", "AUTHOR", "BYTE-LENGTH", "COBOL", "DATE-COMPILED", "DATE-WRITTEN", "EVERY", "INSTALLATION", "MEMORY", "MODULES", "PASSWORD", "PROCESSING", "RECURSIVE",
+    "RERUN", "SECURITY", "TAPE", "TITLE", "UTF-8", "WRITE-ONLY", "XML-SCHEMA",
+];
+
 /// Pushes an error for each user-defined name in `program` that Enterprise COBOL reserves: data
-/// items, conditions, indexes, files, paragraphs and sections. PROGRAM-ID, SPECIAL-NAMES and report
-/// names are not checked.
-pub(crate) fn check(program: &Program, errors: &mut Vec<Error>) {
+/// items, conditions, indexes, files, paragraphs and sections, and under `--compliance extended`
+/// a warning in place of the error for a word GnuCOBOL reserves only in its own clause (IWX0097).
+/// PROGRAM-ID, SPECIAL-NAMES and report names are not checked.
+pub(crate) fn check(program: &Program, extended: bool, errors: &mut Vec<Error>) {
     let mut names: Vec<(&str, Pos, &str)> = Vec::new();
     let records = program.files.iter().map(|f| f.records.as_slice());
     for entries in [&program.working_storage, &program.local_storage, &program.linkage].map(Vec::as_slice).into_iter().chain(records) {
@@ -15,7 +23,12 @@ pub(crate) fn check(program: &Program, errors: &mut Vec<Error>) {
     names.extend(program.files.iter().map(|f| (f.name.as_str(), f.pos, "a file")));
     names.extend(program.paragraphs.iter().map(|p| (p.name.as_str(), p.pos, if p.is_section { "a section" } else { "a paragraph" })));
     for (name, pos, what) in names {
-        if rt::reserved_words::is_reserved(name) {
+        if !rt::reserved_words::is_reserved(name) {
+            continue;
+        }
+        if extended && CONTEXT_WORDS.contains(&name) {
+            errors.push(syntax::messages::IWX0097.at(pos, format!("{name} is a reserved word of Enterprise COBOL's that GnuCOBOL reserves only in its own clause: it names {what}")));
+        } else {
             errors.push(syntax::messages::IWC0188.at(pos, format!("{name} is a reserved word, so it cannot name {what}")));
         }
     }
@@ -44,7 +57,7 @@ mod tests {
         .concat();
         let program = syntax::parse(&src).unwrap_or_else(|e| panic!("{e}\n{src}"));
         let mut errors = Vec::new();
-        check(&program, &mut errors);
+        check(&program, false, &mut errors);
         errors.iter().map(|e| format!("{}: {}", e.pos.line, e.message)).collect()
     }
 
@@ -52,6 +65,16 @@ mod tests {
     fn a_reserved_data_name_is_refused_where_it_is_declared() {
         assert_eq!(refused(&["01 COUNT PIC 9(4)."], &["    GOBACK."]), ["5: COUNT is a reserved word, so it cannot name a data item"]);
         assert_eq!(refused(&["01 count PIC 9(4)."], &["    GOBACK."]), ["5: COUNT is a reserved word, so it cannot name a data item"], "the parser upper-cases names");
+    }
+
+    #[test]
+    fn under_extended_a_word_gnucobol_reserves_only_in_its_clause_names_an_item_with_a_warning() {
+        let src = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01 PASSWORD PIC X(8).\n       01 COUNT PIC 9.\n       PROCEDURE DIVISION.\n           GOBACK.\n";
+        let program = syntax::parse(src).unwrap();
+        let mut errors = Vec::new();
+        check(&program, true, &mut errors);
+        let shown: Vec<_> = errors.iter().map(|e| (e.pos.line, e.id)).collect();
+        assert_eq!(shown, [(5, Some("IWX0097")), (6, Some("IWC0188"))]);
     }
 
     #[test]

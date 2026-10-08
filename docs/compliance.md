@@ -1308,6 +1308,18 @@ alphanumeric and as long as the literal, a figurative constant's one character, 
 the literal's own length, as cobc 3.2 lays them out. A numeric literal, which cobc refuses there too,
 leaves the entry refused with IWC0235-S.
 
+### IWX0097-W A word GnuCOBOL reserves only in its own clause
+
+`IWX0097-W {name} is a reserved word of Enterprise COBOL's that GnuCOBOL reserves only in its own
+clause: it names {what}`, at the name.
+
+Twenty of Enterprise COBOL's reserved words are words cobc 3.2 reserves only where its own clause
+takes them (`cobc --list-reserved` marks them context sensitive): APPLY, AUTHOR, BYTE-LENGTH, COBOL,
+DATE-COMPILED, DATE-WRITTEN, EVERY, INSTALLATION, MEMORY, MODULES, PASSWORD, PROCESSING, RECURSIVE,
+RERUN, SECURITY, TAPE, TITLE, UTF-8, WRITE-ONLY and XML-SCHEMA. Under extended such a word may name
+a data item, a file, a paragraph or a section. Any other reserved word stays refused with IWC0188-S,
+as strict refuses them all.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

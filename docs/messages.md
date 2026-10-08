@@ -907,6 +907,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0094 | W | `the word {word} has letters outside COBOL's character set (GnuCOBOL reads a user-defined word's letters as UTF-8; Enterprise COBOL writes such a word in DBCS characters): it is read as a user-defined word` |
 | IWX0095 | W | `a period was required before level number {level} (cobc under -std=ibm warns and assumes it; Enterprise COBOL assumes it at E): one was assumed` |
 | IWX0096 | W | `{name} has no PICTURE (GnuCOBOL takes one from its VALUE; Enterprise COBOL requires one): it is read as PIC X({length})` |
+| IWX0097 | W | `{name} is a reserved word of Enterprise COBOL's that GnuCOBOL reserves only in its own clause: it names {what}` |
 
 ## Run-time refusals
 

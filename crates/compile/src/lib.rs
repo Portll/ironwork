@@ -278,7 +278,7 @@ fn compile_time_from(epoch: Option<&std::ffi::OsStr>, clock: std::time::Duration
 /// compiler options do not apply to one by one.
 pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: bool, when_compiled: CompileTime) -> Result<Compiled, Vec<Error>> {
     let mut errors = std::mem::take(&mut program.messages);
-    reserved::check(&program, &mut errors);
+    reserved::check(&program, numeric::Compliance::of(flags) == numeric::Compliance::Extended, &mut errors);
     let mut declared = program.working_storage.len();
     let mut program = declaratives::with_debug_item(markup::with_special_registers(sort::with_special_registers(registers::with_when_compiled(program, when_compiled))));
     switches::declare(&mut program, &mut errors);

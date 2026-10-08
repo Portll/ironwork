@@ -933,6 +933,7 @@ catalogue! {
     IWX0094 Warning "the word {word} has letters outside COBOL's character set (GnuCOBOL reads a user-defined word's letters as UTF-8; Enterprise COBOL writes such a word in DBCS characters): it is read as a user-defined word";
     IWX0095 Warning "a period was required before level number {level} (cobc under -std=ibm warns and assumes it; Enterprise COBOL assumes it at E): one was assumed";
     IWX0096 Warning "{name} has no PICTURE (GnuCOBOL takes one from its VALUE; Enterprise COBOL requires one): it is read as PIC X({length})";
+    IWX0097 Warning "{name} is a reserved word of Enterprise COBOL's that GnuCOBOL reserves only in its own clause: it names {what}";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.
