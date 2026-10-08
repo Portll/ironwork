@@ -846,6 +846,7 @@ catalogue! {
     IWS0106 Error "{literal}: Enterprise COBOL's alphanumeric literals hold at least one character; {how it is read}";
     IWS0107 Severe "{FLOAT-HEX-7 or FLOAT-HEX-15}: z390's zCOBOL floating point, not Enterprise COBOL's; --compliance extended reads it as {COMP-1 or COMP-2}";
     IWS0108 Severe "an inline PERFORM ended by a period with no END-PERFORM: Micro Focus's, not Enterprise COBOL's; --compliance extended reads the period as ending it";
+    IWS0120 Error "a period was required before level number {level}: one was assumed";
     IWX0001 Warning "free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}";
     IWX0002 Warning "constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry";
     IWX0003 Warning "<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =";
@@ -930,6 +931,8 @@ catalogue! {
     IWX0092 Warning "FUNCTION {name}, defined in {file} (GnuCOBOL; Enterprise COBOL takes a user-defined function only defined or prototyped before the program): it is invoked as that definition describes it";
     IWX0093 Warning "a period was required before PROCEDURE DIVISION (GnuCOBOL warns and assumes it; Enterprise COBOL assumes it at E): one was assumed";
     IWX0094 Warning "the word {word} has letters outside COBOL's character set (GnuCOBOL reads a user-defined word's letters as UTF-8; Enterprise COBOL writes such a word in DBCS characters): it is read as a user-defined word";
+    IWX0095 Warning "a period was required before level number {level} (cobc under -std=ibm warns and assumes it; Enterprise COBOL assumes it at E): one was assumed";
+    IWX0096 Warning "{name} has no PICTURE (GnuCOBOL takes one from its VALUE; Enterprise COBOL requires one): it is read as PIC X({length})";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

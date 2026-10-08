@@ -105,6 +105,11 @@ fn relation(subject: Expr, op: RelOp, negated: bool, object: Expr) -> Cond {
     if negated { Cond::Not(Box::new(c)) } else { c }
 }
 
+/// A level number a data description entry can begin with: 1 to 49, 66, 77 or 88.
+fn level_number(n: &str) -> bool {
+    n.bytes().all(|b| b.is_ascii_digit()) && n.len() <= 2 && matches!(n.parse::<u8>(), Ok(1..=49 | 66 | 77 | 88))
+}
+
 /// A number written as digits alone, which can be a procedure-name.
 fn digits(t: &Tok) -> bool {
     matches!(t, Tok::Number(n) if n.bytes().all(|b| b.is_ascii_digit()))
@@ -1736,6 +1741,17 @@ impl Parser<'_> {
         let mut floating = None;
         while !self.accept(&Tok::Period) {
             // Enterprise COBOL assumes the period at E (IGYDS1082-E) and compiles on.
+            if let Some(Tok::Number(level)) = self.peek().cloned()
+                && level_number(&level)
+            {
+                let at = self.pos();
+                self.messages.push(if self.extended {
+                    crate::messages::IWX0095.at(at, format!("a period was required before level number {level} (cobc under -std=ibm warns and assumes it; Enterprise COBOL assumes it at E): one was assumed"))
+                } else {
+                    crate::messages::IWS0120.at(at, format!("a period was required before level number {level}: one was assumed"))
+                });
+                break;
+            }
             if self.is_word("PROCEDURE") && self.word_at(1) == Some("DIVISION") {
                 let at = self.pos();
                 self.messages.push(if self.extended {

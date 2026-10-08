@@ -820,6 +820,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWS0106 | E | `{literal}: Enterprise COBOL's alphanumeric literals hold at least one character; {how it is read}` |
 | IWS0107 | S | `{FLOAT-HEX-7 or FLOAT-HEX-15}: z390's zCOBOL floating point, not Enterprise COBOL's; --compliance extended reads it as {COMP-1 or COMP-2}` |
 | IWS0108 | S | `an inline PERFORM ended by a period with no END-PERFORM: Micro Focus's, not Enterprise COBOL's; --compliance extended reads the period as ending it` |
+| IWS0120 | E | `a period was required before level number {level}: one was assumed` |
 | IWX0001 | W | `free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}` |
 | IWX0002 | W | `constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry` |
 | IWX0003 | W | `<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =` |
@@ -904,6 +905,8 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0092 | W | `FUNCTION {name}, defined in {file} (GnuCOBOL; Enterprise COBOL takes a user-defined function only defined or prototyped before the program): it is invoked as that definition describes it` |
 | IWX0093 | W | `a period was required before PROCEDURE DIVISION (GnuCOBOL warns and assumes it; Enterprise COBOL assumes it at E): one was assumed` |
 | IWX0094 | W | `the word {word} has letters outside COBOL's character set (GnuCOBOL reads a user-defined word's letters as UTF-8; Enterprise COBOL writes such a word in DBCS characters): it is read as a user-defined word` |
+| IWX0095 | W | `a period was required before level number {level} (cobc under -std=ibm warns and assumes it; Enterprise COBOL assumes it at E): one was assumed` |
+| IWX0096 | W | `{name} has no PICTURE (GnuCOBOL takes one from its VALUE; Enterprise COBOL requires one): it is read as PIC X({length})` |
 
 ## Run-time refusals
 

@@ -1290,6 +1290,24 @@ them in paragraph and data names. Such a letter has no case, and a word matches 
 with the same letters. Enterprise COBOL's DBCS user-defined words are written between shift-out and
 shift-in in a DBCS source, which ironwork does not read; strict refuses the letter with IWS0021-S.
 
+### IWX0095-W A period missing before a level number
+
+`IWX0095-W a period was required before level number {level} (cobc under -std=ibm warns and assumes
+it; Enterprise COBOL assumes it at E): one was assumed`, at the level number.
+
+A data description entry ends where the next entry's level number begins, as both compilers end it.
+Strict gives IWS0120-E, as Enterprise COBOL gives IGYDS1082-E, and compiles on at return code 8.
+
+### IWX0096-W A VALUE with no PICTURE
+
+`IWX0096-W {name} has no PICTURE (GnuCOBOL takes one from its VALUE; Enterprise COBOL requires one):
+it is read as PIC X({length})`, at the entry.
+
+An elementary item with no PICTURE or USAGE whose VALUE is an alphanumeric or hexadecimal literal is
+alphanumeric and as long as the literal, a figurative constant's one character, and ALL a literal's
+the literal's own length, as cobc 3.2 lays them out. A numeric literal, which cobc refuses there too,
+leaves the entry refused with IWC0235-S.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

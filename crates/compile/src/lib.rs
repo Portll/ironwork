@@ -371,6 +371,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     omitted::rewrite(&mut program, &inherited.entries, options.compliance == numeric::Compliance::Extended, &mut errors);
     any_length::rewrite(&mut program, &mut errors);
     if options.compliance == numeric::Compliance::Extended {
+        value_pictures(&mut program, &mut errors);
         crt_status::rewrite(&mut program, &inherited.entries);
         call_parameters::rewrite(&mut program, &errors);
     }
@@ -518,6 +519,37 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
 /// Micro Focus's ASSIGN TO DISK name where neither the program nor a program containing it declares
 /// the name: a 4,095-byte alphanumeric item of WORKING-STORAGE, as cobc 3.2 declares it under
 /// `-std=mf` (assumption C482).
+/// Under `--compliance extended`, an elementary item with no PICTURE or USAGE whose VALUE is a
+/// non-numeric literal takes PIC X of the literal's length, one for a figurative constant, as cobc
+/// 3.2 gives it (IWX0096).
+fn value_pictures(program: &mut Program, errors: &mut Vec<Error>) {
+    let records = [&mut program.working_storage, &mut program.local_storage, &mut program.linkage].into_iter().chain(program.files.iter_mut().map(|f| &mut f.records));
+    for entries in records {
+        for k in 0..entries.len() {
+            let e = &entries[k];
+            let group = entries.get(k + 1).is_some_and(|next| next.level > e.level && !matches!(next.level, 66 | 88) && !matches!(e.level, 77));
+            if e.picture.is_some() || e.usage.is_some() || matches!(e.level, 66 | 88) || group {
+                continue;
+            }
+            let length = |lit: &Literal| match lit {
+                Literal::Alnum(s) => Some(s.chars().count()),
+                Literal::Hex(b) => Some(b.len()),
+                Literal::Figurative(_) => Some(1),
+                _ => None,
+            };
+            let length = match &e.value {
+                Some(Literal::All(inner)) => length(inner),
+                Some(lit) => length(lit),
+                None => None,
+            };
+            let Some(length) = length.filter(|&n| n > 0) else { continue };
+            let name = e.name.clone().unwrap_or_else(|| "FILLER".into());
+            errors.push(syntax::messages::IWX0096.at(e.pos, format!("{name} has no PICTURE (GnuCOBOL takes one from its VALUE; Enterprise COBOL requires one): it is read as PIC X({length})")));
+            entries[k].picture = Some(format!("X({length})"));
+        }
+    }
+}
+
 fn declare_assign_items(program: &mut Program, inherited: &[DataEntry]) {
     let mut missing: Vec<(String, Pos)> = Vec::new();
     for a in program.files.iter().filter_map(|f| f.assign_item.as_ref()).filter(|a| a.declared_if_missing) {

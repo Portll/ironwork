@@ -2233,3 +2233,38 @@ fn under_extended_a_word_may_hold_letters_beyond_latin_1() {
     let refused = syntax::parse(WIDE_WORDS).unwrap_err();
     assert_eq!((refused.pos.line, refused.id), (5, Some("IWS0021")), "{refused}");
 }
+
+/// Entries whose PICTURE GnuCOBOL takes from the VALUE, and one missing its period before the next
+/// level number. The output is cobc 3.2's.
+const VALUE_PICTURES: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. VALPIC.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 W-ONE PIC X(5) VALUE 'ab'\n",
+    "       01 G.\n",
+    "          05 N VALUE \"xyz\".\n",
+    "          05 FILLER VALUE SPACES.\n",
+    "          05 FILLER VALUE ALL \"ab\".\n",
+    "       01 L PIC 9.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE FUNCTION LENGTH(G) TO L\n",
+    "           DISPLAY '[' G ']' L\n",
+    "           MOVE 'Q' TO N\n",
+    "           DISPLAY '[' G '][' W-ONE ']'\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn under_extended_a_value_gives_a_picture_and_a_missing_period_before_a_level_is_assumed() {
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let o = Harness::source(VALUE_PICTURES).flags(EXTENDED).run(executor);
+        assert_eq!((o.out.as_str(), o.ending), ("[xyz ab]6\n[Q   ab][ab   ]\n", Ok(Ending::Goback)), "{}", o.err);
+    }
+    let extended = diagnostics_under(VALUE_PICTURES, numeric::Compliance::Extended);
+    let ids = |line: u32| extended.iter().filter(|d| d.0 == line).filter_map(|d| d.2).collect::<Vec<_>>();
+    assert_eq!((ids(6), ids(7), ids(8), ids(9)), (vec!["IWX0095"], vec!["IWX0096"], vec!["IWX0096"], vec!["IWX0096"]), "{extended:?}");
+    let strict = diagnostics_under(VALUE_PICTURES, numeric::Compliance::Strict);
+    assert!(strict.iter().any(|d| (d.0, d.2, d.3) == (6, Some("IWS0120"), Severity::Error)), "{strict:?}");
+    assert!(strict.iter().any(|d| (d.0, d.2) == (7, Some("IWC0235"))), "{strict:?}");
+}
