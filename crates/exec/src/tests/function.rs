@@ -315,3 +315,48 @@ fn pgmname_forms_a_functions_external_name() {
     let o = Harness::source(&(prototype.to_owned() + &main)).dirs(vec![library.clone()]).run(Executor::Interpreter);
     assert_eq!(o.out, "CCCC\n", "{}", o.err);
 }
+
+const EXTENDED: &[&str] = &["--compliance=extended"];
+
+/// Every message compiling each program of `source` under `--compliance extended` gives.
+fn extended_messages(source: &str) -> String {
+    let programs = syntax::parse_all_with(source, &syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended)).unwrap_or_else(|e| panic!("{e}"));
+    let flags: Vec<String> = EXTENDED.iter().map(|f| f.to_string()).collect();
+    let mut all = Vec::new();
+    for p in programs {
+        all.extend(compile(p, &flags).map_or_else(|e| e, |c| c.diagnostics));
+    }
+    all.iter().map(Error::labelled).collect::<Vec<_>>().join("\n")
+}
+
+#[test]
+fn under_extended_a_function_defined_after_the_program_is_invoked_as_its_definition_describes_it() {
+    let main = program(&["FUNCTION WRAP"], &["01 A PIC X(5)."], &["MOVE FUNCTION WRAP('abc') TO A", "DISPLAY A", "GOBACK."]);
+    let source = main + &wrap();
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let o = Harness::source(&source).flags(EXTENDED).run(executor);
+        assert_eq!((o.out.as_str(), o.ending), ("<abc>\n", Ok(Ending::Goback)), "{}", o.err);
+    }
+    let extended = extended_messages(&source);
+    assert!(extended.contains("IWX0091-W FUNCTION WRAP, defined after this program in its source"), "{extended}");
+    let strict = messages(&source);
+    assert!(strict.contains("IWC0106-S FUNCTION WRAP: neither an intrinsic function nor a user-defined function defined or prototyped before this program"), "{strict}");
+}
+
+#[test]
+fn under_extended_exit_function_ends_the_function_as_goback_does() {
+    let early = function("EARLY", &[], &["01 R PIC X(3)."], "RETURNING R", &["MOVE 'one' TO R", "EXIT FUNCTION", "MOVE 'two' TO R", "GOBACK."]);
+    let main = program(&["FUNCTION EARLY"], &[], &["DISPLAY FUNCTION EARLY", "GOBACK."]);
+    let source = early + &main;
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let o = Harness::source(&source).flags(EXTENDED).run(executor);
+        assert_eq!((o.out.as_str(), o.ending), ("one\n", Ok(Ending::Goback)), "{}", o.err);
+    }
+    let extended = extended_messages(&source);
+    assert!(extended.contains("IWX0090-W EXIT FUNCTION"), "{extended}");
+    let strict = parse_error(&source);
+    assert!(strict.contains("EXIT FUNCTION: Enterprise COBOL does not yet support the format 4 EXIT statement"), "{strict}");
+    let outside = program(&[], &[], &["EXIT FUNCTION", "GOBACK."]);
+    let error = syntax::parse_all_with(&outside, &syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended)).unwrap_err().to_string();
+    assert!(error.contains("EXIT FUNCTION: Enterprise COBOL does not yet support"), "EXIT FUNCTION outside a function: {error}");
+}

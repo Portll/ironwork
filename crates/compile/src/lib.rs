@@ -2369,7 +2369,12 @@ impl Check<'_> {
                 }
                 if !self.intrinsic(&f.name) {
                     match self.functions.map(|all| all.iter().find(|u| u.name == f.name)) {
-                        Some(Some(udf)) => function::check_invocation(udf, f, self.layout, self.alphabetic, self.program.environment.decimal_point_comma, self.errors),
+                        Some(Some(udf)) => {
+                            if udf.later {
+                                self.errors.push(syntax::messages::IWX0091.at(f.pos, format!("FUNCTION {}, defined after this program in its source (GnuCOBOL; Enterprise COBOL takes a user-defined function only defined or prototyped before the program): it is invoked as that definition describes it", f.name)));
+                            }
+                            function::check_invocation(udf, f, self.layout, self.alphabetic, self.program.environment.decimal_point_comma, self.errors)
+                        }
                         Some(None) => self.errors.push(syntax::messages::IWC0106.at(f.pos, format!("FUNCTION {}: neither an intrinsic function nor a user-defined function defined or prototyped before this program", f.name))),
                         None => self.errors.push(syntax::messages::IWR0075.at(f.pos, format!("FUNCTION {}: a user-defined function is not supported here yet", f.name))),
                     }

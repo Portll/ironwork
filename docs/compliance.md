@@ -1235,6 +1235,26 @@ Enterprise COBOL writes SET): it is read as SET ... TO {name}`, at the MOVE.
 A MOVE whose sender and receivers are all procedure-pointers or function-pointers (including
 PROGRAM-POINTER, IWX0044) is the SET Enterprise COBOL writes for it. Strict keeps IWC0133.
 
+### IWX0090-W EXIT FUNCTION
+
+`IWX0090-W EXIT FUNCTION (COBOL 2002 and GnuCOBOL; Enterprise COBOL ends a user-defined function with
+GOBACK): it ends the function as GOBACK does`, at the statement.
+
+Inside a user-defined function's definition, EXIT FUNCTION returns to the invoking statement with the
+RETURNING item as it stands, as GOBACK does there. Outside one, and under strict, it stays refused
+with IWS0056-S.
+
+### IWX0091-W A function defined after the program
+
+`IWX0091-W FUNCTION {name}, defined after this program in its source (GnuCOBOL; Enterprise COBOL
+takes a user-defined function only defined or prototyped before the program): it is invoked as that
+definition describes it`, at the invocation.
+
+A program whose REPOSITORY paragraph names a function the same source defines or prototypes after it
+invokes it as that definition gives its parameters and RETURNING item, which cobc allows. A function
+defined in no source the compile reads, and a function prototyped nowhere, stay refused with
+IWC0106-S: its RETURNING item's class and size are not known when the program is compiled.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

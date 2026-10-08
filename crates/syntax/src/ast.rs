@@ -66,6 +66,9 @@ pub struct Program {
     /// The user-defined functions it may invoke: those defined or prototyped before it in its
     /// source, and a function itself.
     pub prototypes: Vec<Prototype>,
+    /// Under `--compliance extended`, the user-defined functions its source defines or prototypes
+    /// after it that its REPOSITORY paragraph names, which GnuCOBOL lets it invoke.
+    pub later_functions: Vec<Prototype>,
     /// The user-defined functions its REPOSITORY paragraph, or its outermost program's, names. One
     /// with an intrinsic function's name is invoked by that name only where it is named here.
     pub repository_functions: Vec<String>,

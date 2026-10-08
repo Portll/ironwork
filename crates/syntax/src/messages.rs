@@ -925,6 +925,8 @@ catalogue! {
     IWX0078 Warning "NUMBER-OF-CALL-PARAMETERS (GnuCOBOL's special register; Enterprise COBOL has none): it holds the number of arguments the program was called with, or of the run's arguments in the main program";
     IWX0079 Warning "an inline PERFORM ended by a period (Micro Focus; Enterprise COBOL ends it with END-PERFORM): the period ends the PERFORM and the sentence, as cobc -std=mf reads it";
     IWX0080 Warning "MOVE {name} of a procedure-pointer or function-pointer (GnuCOBOL and Micro Focus; Enterprise COBOL writes SET): it is read as SET ... TO {name}";
+    IWX0090 Warning "EXIT FUNCTION (COBOL 2002 and GnuCOBOL; Enterprise COBOL ends a user-defined function with GOBACK): it ends the function as GOBACK does";
+    IWX0091 Warning "FUNCTION {name}, defined after this program in its source (GnuCOBOL; Enterprise COBOL takes a user-defined function only defined or prototyped before the program): it is invoked as that definition describes it";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

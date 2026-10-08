@@ -78,6 +78,12 @@ pub fn parse(tokens: &[Token], options: Vec<String>, compliance: numeric::Compli
         parser.program(&options, &mut programs)?;
     }
     scope(&mut programs);
+    if parser.extended {
+        for p in &mut programs {
+            let later = parser.functions.iter().filter(|f| !p.prototypes.iter().any(|q| q.pos == f.pos) && p.repository_functions.contains(&f.name));
+            p.later_functions = later.cloned().collect();
+        }
+    }
     if let Some(first) = programs.iter().position(|p| p.function.is_none()) {
         programs[..=first].rotate_right(1);
     }
@@ -422,6 +428,8 @@ struct Parser<'a> {
     defined: Vec<String>,
     /// Parsing a function prototype, which may not have a REPOSITORY paragraph.
     in_prototype: bool,
+    /// Parsing a user-defined function's definition, where EXIT FUNCTION may end it.
+    in_function: bool,
     /// `--compliance extended` is in force.
     extended: bool,
     /// `--compliance relaxed` is: a sentence that does not parse becomes a hole.
@@ -475,6 +483,7 @@ impl<'a> Parser<'a> {
             functions: Vec::new(),
             defined: Vec::new(),
             in_prototype: false,
+            in_function: false,
             extended: false,
             relaxed: false,
             loose: false,
@@ -873,8 +882,9 @@ impl Parser<'_> {
         }
         let first = out.len();
         self.in_prototype = prototype;
+        self.in_function = !prototype;
         let body = self.program_body(name.clone(), false, true, options, out, false);
-        self.in_prototype = false;
+        (self.in_prototype, self.in_function) = (false, false);
         body?;
         let program = &mut out[first];
         program.function = Some(Function { external, prototype, pos });
@@ -2809,6 +2819,11 @@ impl Parser<'_> {
                 self.accept_any(&["RECORD", "RECORDS"]);
                 self.lock_phrase("UNLOCK", pos)?;
                 Stmt::Continue { pos }
+            }
+            "EXIT" if self.is_word("FUNCTION") && self.extended && self.in_function => {
+                self.at += 1;
+                self.messages.push(crate::messages::IWX0090.at(pos, "EXIT FUNCTION (COBOL 2002 and GnuCOBOL; Enterprise COBOL ends a user-defined function with GOBACK): it ends the function as GOBACK does"));
+                Stmt::Goback { pos }
             }
             "EXIT" if self.is_word("FUNCTION") => return Err(crate::messages::IWS0056.at(pos, "EXIT FUNCTION: Enterprise COBOL does not yet support the format 4 EXIT statement; GOBACK ends a user-defined function")),
             "EXIT" => match self.accept_any(&["PROGRAM", "PARAGRAPH", "SECTION", "PERFORM", "METHOD"]).as_deref() {
