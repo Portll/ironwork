@@ -194,7 +194,7 @@ const BCD: [u8; 100] = {
     let mut table = [0; 100];
     let mut k = 0;
     while k < 100 {
-        table[k] = ((k / 10) << 4 | k % 10) as u8;
+        table[k] = (((k / 10) << 4) | (k % 10)) as u8;
         k += 1;
     }
     table
