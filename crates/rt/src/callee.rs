@@ -237,6 +237,8 @@ pub fn run<'w, X: UnitHost<'w>, O, T, E: From<Abend>>(x: &mut X, callee: &Callee
 pub enum Bound {
     At(usize),
     Value(Val),
+    /// An alphanumeric literal for an ANY LENGTH parameter: a temporary of its bytes (C481).
+    Bytes(Vec<u8>),
 }
 
 /// Each formal parameter's address, for arguments `bound` and the parameters' record sizes: an
@@ -249,6 +251,7 @@ pub fn bound_addresses<H: Clone, L: Loader<H>>(unit: &mut RunUnit<'_, H, L>, bou
             Some(match b {
                 Bound::At(at) => *at,
                 Bound::Value(_) => unit.push_temporary(&vec![0; size]),
+                Bound::Bytes(b) => unit.push_temporary(b),
             })
         })
         .collect()

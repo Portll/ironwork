@@ -217,6 +217,7 @@ pub fn check_invocation(udf: &Udf, f: &FunctionCall, layout: &Layout, alphabetic
             }
             Expr::Operand(Operand::Ref(r)) if r.refmod.is_none() => r,
             Expr::Operand(Operand::Ref(_)) => continue,
+            Expr::Operand(Operand::Literal(Literal::Alnum(_) | Literal::Hex(_))) if formal.any_length => continue,
             _ if formal.any_length => {
                 errors.push(syntax::messages::IWR0076.at(f.pos, format!("ANY LENGTH on {}: ironwork reads it on an alphanumeric 01 or 77 parameter, and FUNCTION {name} argument {} is not a data item, whose length it would take", formal.name, k + 1)));
                 continue;

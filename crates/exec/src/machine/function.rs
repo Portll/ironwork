@@ -31,6 +31,13 @@ impl<'p> Machine<'p, '_, '_> {
                     let loc = self.locate(r)?;
                     (Bound::At(loc.offset), loc.len)
                 }
+                Expr::Operand(Operand::Literal(Literal::Alnum(_) | Literal::Hex(_))) if formal.any_length => match self.expr_value(arg, pos)? {
+                    Val::Bytes(b) => {
+                        let length = b.len();
+                        (Bound::Bytes(b), length)
+                    }
+                    value => (Bound::Value(value), 0),
+                },
                 _ => (Bound::Value(self.expr_value(arg, pos)?), 0),
             };
             bound.push(b);

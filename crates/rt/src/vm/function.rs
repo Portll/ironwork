@@ -38,6 +38,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                     (Bound::At(loc.offset), loc.len)
                 }
                 UserArgument::Value(c) => (Bound::Value(self.comparand(c, pos)?), 0),
+                UserArgument::Literal(b) => (Bound::Bytes(b.clone()), b.len()),
             };
             bound.push(b);
             lengths.push(length);

@@ -2306,7 +2306,7 @@ pub struct UserFunctionPlan {
     pub name: SymId, pub external: SymId, pub args: Vec<UserArgument>,
     pub refmod: Option<RefMod>, pub at: DebugId,
 }
-pub enum UserArgument { Reference(PlaceId), Value(Comparand) }
+pub enum UserArgument { Reference(PlaceId), Value(Comparand), Literal(Vec<u8>) }
 /// `Services.function` of a function definition (FUNCTION-ID without IS PROTOTYPE): a place for
 /// each formal parameter's LINKAGE record, in order, and one for the RETURNING record.
 pub struct FunctionDefinition { pub params: Vec<PlaceId>, pub returning: PlaceId }
@@ -2324,7 +2324,9 @@ same sequence when the operand is evaluated (assumption C274):
    located, its address passed, a reference-modified item at its first byte (C272). Any other, a
    BY VALUE item, a literal, an expression, LENGTH OF, ADDRESS OF or a function, is `Value`: the
    `Comparand` `expr_value` evaluates, a nested intrinsic function's arguments in their own
-   arithmetic whatever arithmetic holds the invocation.
+   arithmetic whatever arithmetic holds the invocation. An alphanumeric or hexadecimal literal for
+   an ANY LENGTH parameter, under `--compliance extended`, is `Literal`: its bytes, which a
+   temporary of their length takes, that length being the parameter's (C481).
 3. **The depth** is raised (§8.7), then `rt::callee::run` with `By::Function` wraps the
    activation, taint's pending read taken before it and resumed after it
    (`RunUnit::resume_statement`), since the function's statements start inside the invoking one.

@@ -48,6 +48,7 @@ impl<'c> Lower<'c> {
         for (arg, formal) in f.args.iter().zip(&udf.params) {
             args.push(match arg {
                 Expr::Operand(Operand::Ref(r)) if !formal.by_value => UserArgument::Reference(self.place(r, false)?),
+                Expr::Operand(Operand::Literal(lit @ (ast::Literal::Alnum(_) | ast::Literal::Hex(_)))) if formal.any_length => UserArgument::Literal(self.content_bytes(lit, f.pos)?),
                 _ => UserArgument::Value(self.comparand(arg, f.pos)?.0),
             });
         }

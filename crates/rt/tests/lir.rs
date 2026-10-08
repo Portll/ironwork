@@ -448,7 +448,7 @@ fn account() -> Class {
 
 #[test]
 fn user_defined_functions_round_trip() {
-    every_variant(&[UserArgument::Reference(2), UserArgument::Value(FLOAT_EXPR)], 2);
+    every_variant(&[UserArgument::Reference(2), UserArgument::Value(FLOAT_EXPR), UserArgument::Literal(vec![0xC1, 0x40])], 3);
     let plan = UserFunctionPlan {
         name: 1,
         external: 2,

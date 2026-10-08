@@ -828,8 +828,10 @@ moves, compares, displays and is reference-modified as an alphanumeric group of 
 length, and FUNCTION LENGTH gives that length; cobc 3.2 gives the same output on the probes
 checked. CobolCraft passes every packet buffer this way. Refused with IWR0076: an ANY LENGTH entry
 anywhere else, one that is not alphanumeric, one with OCCURS or REDEFINES, a RETURNING item written
-ANY LENGTH, one an ENTRY statement names, and a function argument that is not a data item, which
-would have no length of its own. Assumption C481. Strict refuses the clause (IWC0308).
+ANY LENGTH, one an ENTRY statement names, and a function argument that is neither a data item nor
+an alphanumeric or hexadecimal literal, which would have no length of its own; such a literal is
+passed in a temporary of its bytes, as long as they are. Assumption C481. Strict refuses the clause
+(IWC0308).
 
 ### IWX0036-W START KEY <, NOT > and <=
 

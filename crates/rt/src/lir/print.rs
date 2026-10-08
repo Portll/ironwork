@@ -424,6 +424,7 @@ impl<'a> Printer<'a> {
             let args = u.args.iter().map(|a| match a {
                 UserArgument::Reference(p) => self.place(*p),
                 UserArgument::Value(v) => format!("value {}", self.comparand(v)),
+                UserArgument::Literal(b) => format!("literal {}", self.bytes(b)),
             });
             let mut text = format!("FUNCTION {}({})", self.name(u.name), join(args, ", "));
             if let Some(r) = &u.refmod {

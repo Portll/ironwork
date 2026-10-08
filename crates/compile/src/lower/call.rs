@@ -77,7 +77,7 @@ impl Lower<'_> {
         })
     }
 
-    fn content_bytes(&mut self, lit: &Literal, pos: Pos) -> R<Vec<u8>> {
+    pub(super) fn content_bytes(&mut self, lit: &Literal, pos: Pos) -> R<Vec<u8>> {
         Ok(match lit {
             Literal::Alnum(s) => self.encode(s, pos)?,
             Literal::Hex(b) => b.clone(),

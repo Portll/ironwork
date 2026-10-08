@@ -1289,11 +1289,11 @@ fn any_length_is_refused_under_strict_and_where_ironwork_does_not_read_it() {
     assert_eq!(diagnostics_under(&returned, numeric::Compliance::Extended).first().map(|d| (d.0, d.2)), Some((7, Some("IWR0076"))));
     let numeric = called.replace("PIC X ANY LENGTH", "PIC 9 ANY LENGTH");
     assert_eq!(diagnostics_under(&numeric, numeric::Compliance::Extended).first().map(|d| (d.0, d.2)), Some((7, Some("IWR0076"))));
-    let literal = ANY_LENGTH_FUNCTION.replace("FIRSTCH(W5)", "FIRSTCH('LIT')");
+    let literal = ANY_LENGTH_FUNCTION.replace("FIRSTCH(W5)", "FIRSTCH(123)");
     let libraries = syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended);
     let main = syntax::parse_all_with(&literal, &libraries).unwrap().into_iter().find(|p| p.id == "FMAIN").unwrap();
     let flags: Vec<String> = EXTENDED.iter().map(|f| f.to_string()).collect();
-    let Err(refused) = compile(main, &flags) else { panic!("the literal argument compiled") };
+    let Err(refused) = compile(main, &flags) else { panic!("the numeric literal argument compiled") };
     assert_eq!(refused.iter().map(|e| (e.pos.line, e.id)).collect::<Vec<_>>(), [(23, Some("IWR0076"))]);
 }
 

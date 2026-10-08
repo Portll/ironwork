@@ -586,7 +586,7 @@ error if it meets one. `HostType::Zoned`'s sign is `rt::SignClause`.
 
 ### 8.1 Versions
 
-The format version is `major.minor`; this ironwork writes 1.3 and reads every 1.x minor, from
+The format version is `major.minor`; this ironwork writes 1.4 and reads every 1.x minor, from
 `Version::OLDEST_READABLE` in `rt::module`, which is 1.0. 1.0 is the first frozen format. It holds
 what the 0.x formats came to hold, the files that take their name from a data item and the places
 SSRANGE checks against their tables at the `LIR` section's end, and the `--assume` choices at the
@@ -602,7 +602,10 @@ key as malformed, rather than read its keys wrong. Modules marked 1.2 by ironwor
 hold the functions 87 to 89 and the `DisplayError` op, 40, which came after the bump; a 1.2 reader
 from before them refuses such a module as holding an unknown tag. 1.3 adds the functions 90 and 91,
 SUBSTITUTE and SUBSTITUTE-CASE, and `DispSign` 2 and 3, GnuCOBOL's two ways of showing a number
-(§5.1), all under `--compliance extended` or `--dialect gnucobol`. A 0.x module is refused, and compiling the source again is the remedy (question 1).
+(§5.1), all under `--compliance extended` or `--dialect gnucobol`; modules marked 1.3 can also
+hold the function 92, NUMBER-OF-CALL-PARAMETERS, which came after the bump. 1.4 adds `UserArgument`
+2, `Literal`, an alphanumeric literal passed to an ANY LENGTH parameter under `--compliance
+extended` (lir.md §9.15). A 0.x module is refused, and compiling the source again is the remedy (question 1).
 
 | The reader finds | It does |
 |---|---|

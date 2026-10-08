@@ -85,11 +85,14 @@ pub struct UserFunctionPlan {
 }
 
 /// A data item passed BY REFERENCE passes its address. Any other argument passes its value, which
-/// the function's activation moves into a temporary its formal parameter describes (C272).
+/// the function's activation moves into a temporary its formal parameter describes (C272). An
+/// alphanumeric literal for an ANY LENGTH parameter passes its bytes, in a temporary of their
+/// length, which is the parameter's length (C481).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UserArgument {
     Reference(PlaceId),
     Value(Comparand),
+    Literal(Vec<u8>),
 }
 
 /// A user-defined function's definition: a place naming each formal parameter's whole LINKAGE
@@ -102,7 +105,7 @@ pub struct FunctionDefinition {
 
 codec_struct!(CallPlan { target, args, returning, on_exception, not_on_exception });
 codec_struct!(UserFunctionPlan { name, external, args, refmod, at });
-codec_enum!(UserArgument { Reference(place) = 0, Value(value) = 1 });
+codec_enum!(UserArgument { Reference(place) = 0, Value(value) = 1, Literal(bytes) = 2 });
 codec_struct!(FunctionDefinition { params, returning });
 codec_enum!(CallTarget { Named { name, le } = 0, Dynamic(name) = 1, Pointer(place) = 2, Entry(place) = 3 });
 codec_enum!(CallArg { Reference(place) = 0, Content(chars) = 1, Value(value) = 2, Omitted = 3 });

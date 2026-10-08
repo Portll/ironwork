@@ -394,6 +394,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
             match a {
                 UserArgument::Reference(q) => place(*q)?,
                 UserArgument::Value(c) => comparand(c)?,
+                UserArgument::Literal(_) => {}
             }
         }
         if let Some(r) = &u.refmod {

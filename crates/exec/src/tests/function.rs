@@ -360,3 +360,17 @@ fn under_extended_exit_function_ends_the_function_as_goback_does() {
     let error = syntax::parse_all_with(&outside, &syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended)).unwrap_err().to_string();
     assert!(error.contains("EXIT FUNCTION: Enterprise COBOL does not yet support"), "EXIT FUNCTION outside a function: {error}");
 }
+
+#[test]
+fn under_extended_an_any_length_parameter_takes_a_literal_at_its_own_length() {
+    let shown = function("SHOWN", &[], &["01 S PIC X ANY LENGTH.", "01 R PIC 9(4)."], "USING S RETURNING R", &["DISPLAY '[' S ']'", "MOVE FUNCTION LENGTH(S) TO R", "GOBACK."]);
+    let main = program(&["FUNCTION SHOWN"], &["01 W PIC X(2) VALUE 'xy'."], &["DISPLAY FUNCTION SHOWN('abc')", "DISPLAY FUNCTION SHOWN('hello world')", "DISPLAY FUNCTION SHOWN(W)", "GOBACK."]);
+    let source = shown + &main;
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let o = Harness::source(&source).flags(EXTENDED).run(executor);
+        assert_eq!((o.out.as_str(), o.ending), ("[abc]\n0003\n[hello world]\n0011\n[xy]\n0002\n", Ok(Ending::Goback)), "{}", o.err);
+    }
+    let numeric = source.replace("SHOWN('abc')", "SHOWN(123)");
+    let refused = extended_messages(&numeric);
+    assert!(refused.contains("IWR0076-S ANY LENGTH on S"), "{refused}");
+}
