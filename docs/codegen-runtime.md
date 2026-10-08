@@ -292,14 +292,32 @@ The companion documents carry their own open questions for the operator, listed 
 - **Places at code generation.** Each value's places follow from its PICTURE, its literal, or its
   operands' places, dmax and ARITH (`count::result_places`), so generated code carries bare `i64`
   counts and the places as constants.
+- **Digits in words.** Generated code reads packed items of up to 9 bytes and zoned items of up to 16
+  as whole words, checking every digit nibble at once and converting lane by lane, and stores
+  packed, zoned and TRUNC(STD) binary items whose digits fit a `u64` in place, packed two digits a
+  table lookup. Each is property-tested against `store::digits` or `store::count_bytes`, and any
+  other item, or CLEANSIGN, takes the general path.
+- **Loops run whole.** Blocks whose ops and branch all have fast paths run in one loop over one
+  storage handle, a block ending in a select by its last op's arm among them. A linear SEARCH whose
+  one WHEN compares an unsigned zoned key with an item for equality runs as one scan of the keys
+  (`Storage::scan_zoned`): each key a word, their digits checked once where the scan stops, the
+  index written once. A scan that passes a key not all F-zone digits, or whose index lies within
+  the keys or the item, writes nothing and the loop's own steps run.
+- **CALL without an activation.** A static CALL of a program whose storage is already initialized,
+  entered at its PROCEDURE DIVISION, with no LOCAL-STORAGE, RETURNING, EXTERNAL or GLOBAL binding,
+  no CICS task and nothing watching the run, runs the program's generated code from its start
+  (`NativeProgram::direct`) over its activation's storage, after the depth, call list, argument
+  lengths, activation and linkage binding the VM's CALL does. Where that code reaches what its fast
+  paths do not decide, the VM's activation is built as for any CALL and takes the program on from
+  that block, branch or op (`Vm::run_called_after`).
 - **The run.** A native executable runs as `ironwork run module.iwm` does: the same flags for a
   batch run, messages and exit statuses (`rt::exit`, `rt::batch`). With no compiler at hand, CALL
   finds a program in its module or as `NAME.iwm` in its `-L` directories, never from source.
 - **Testing.** `ironwork compile --native-harness` builds every module written into one test
   executable, and `tools/native-diff.py` runs each NIST CCVS85 program as `ironwork run X.iwm` and
   natively, comparing exit status, standard output, standard error and files.
-- **B6, M5 Pro cycles against `cobc -O2`:** packed, callheavy and seqio are within it (0.7, 1.0 and
-  0.4 times); tblsrch's linear SEARCH is 3.8 times.
+- **B6, M5 Pro cycles against `cobc -O2`:** all four are faster than `cobc -O2`: packed 0.39,
+  callheavy 0.45, seqio 0.30 and tblsrch 0.65 to 0.85 times, the last a run of 0.05G cycles.
 
 **Verification.** Every step keeps today's tests and oracle cases passing. V1, V2, and any assumption
 lowering forces, are recorded in `numeric::assumptions::ASSUMPTIONS` with their basis, and settled
