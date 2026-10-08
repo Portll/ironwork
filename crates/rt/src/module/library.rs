@@ -7,7 +7,7 @@ use crate::bms::Mapset;
 use crate::lir::{Class, ClassPart, Program, SymId};
 use crate::oo::{ClassCode, JAVA_LANG_OBJECT, MethodCode, Part};
 use crate::unit::{FoundClass, LoadError, LoadedProgram};
-use crate::vm::{Code, Native};
+use crate::vm::{Code, NativeProgram};
 use numeric::governs::Facts;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -38,7 +38,7 @@ struct Read {
     facts: Vec<Option<Facts>>,
     first: bool,
     /// The generated code of each program, by ordinal, of a module an executable holds.
-    natives: Vec<Option<Native>>,
+    natives: Vec<Option<NativeProgram>>,
 }
 
 type Found = LoadedProgram<Rc<Code>>;
@@ -63,7 +63,7 @@ impl Modules {
     }
 
     /// As [`Modules::add_first`], each program run by its generated code in `natives`, by ordinal.
-    pub fn add_first_native(&mut self, path: PathBuf, module: LoadedModule, natives: Vec<Option<Native>>) -> usize {
+    pub fn add_first_native(&mut self, path: PathBuf, module: LoadedModule, natives: Vec<Option<NativeProgram>>) -> usize {
         let k = self.register(path, module, true);
         self.read[k].natives = natives;
         k

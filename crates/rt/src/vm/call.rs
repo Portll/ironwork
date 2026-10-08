@@ -7,6 +7,7 @@ use super::{Code, Halt, Lowered, R, Spare, Stop, Vm, check_storage, not_yet};
 use crate::abend::{Abend, Ending};
 use crate::callee::{self, Arguments, Bindings, By, Callee};
 use crate::cics;
+use crate::fast::{Stopped, Storage};
 use crate::le::{self, LeHost};
 use crate::lir::{Base, CallArg, CallPlan, CallTarget, Chars, LeService, Operand, PlaceId, SenderCheck, Step};
 use crate::loc;
@@ -129,11 +130,31 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let containers = self.containers_of(program);
         let by = By::Call { initial: program.initial };
         let (ending, returned) = callee::run(self, &Callee { index, by, mark: Some(mark), pos, lengths: &lengths }, |caller| {
+            check_storage(lowered)?;
+            let (base, fresh) = caller.unit.activate(index, program.initial);
+            let stopped = match lowered.whole {
+                Some(direct) if !fresh && entry.is_none() && !suspends && runs_direct(caller.unit, program) => {
+                    let mut linkage = std::mem::take(&mut caller.spare.linkage);
+                    linkage.clear();
+                    linkage.resize(program.storage.linkage.len(), None);
+                    let mut using = std::mem::take(&mut caller.spare.using);
+                    using.clear();
+                    using.extend(program.storage.using.iter().map(|&o| Some(usize::from(o))));
+                    let bindings = Bindings { records: &[], using, addresses: &addresses, returning: None };
+                    bindings.bind(caller.unit, &mut linkage);
+                    caller.spare.using = bindings.using;
+                    let stopped = direct(&mut Storage { mem: &mut caller.unit.mem, program: base, local: 0, linkage: &linkage, options: &program.options.options });
+                    caller.spare.linkage = linkage;
+                    match stopped {
+                        Stopped::Ended(ending) => return Ok((Ok(ending), None)),
+                        stopped => Some(stopped),
+                    }
+                }
+                _ => None,
+            };
             let spare = &mut caller.spare;
             let tables = Spare { linkage: std::mem::take(&mut spare.linkage), armed: std::mem::take(&mut spare.armed), frames: std::mem::take(&mut spare.frames), ..Spare::default() };
             // Built where it runs and initialized there: returning the activation would copy it.
-            check_storage(lowered)?;
-            let (base, fresh) = caller.unit.activate(index, program.initial);
             let mut vm = Vm::over_reusing(lowered, index, base, &mut *caller.unit, false, containers, tables);
             vm.start_storage(fresh)?;
             let entry = entry.and_then(|k| program.services.entries.get(k));
@@ -146,7 +167,10 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             caller.spare.using = bindings.using;
             (vm.cics_handlers, vm.first) = (caller.cics_handlers.lend(suspends), caller.first);
             vm.spare = std::mem::take(&mut caller.spare);
-            let ran = vm.run_called(entry.map(|e| (e.paragraph, e.block)));
+            let ran = match stopped {
+                Some(stopped) => vm.run_called_after(stopped),
+                None => vm.run_called(entry.map(|e| (e.paragraph, e.block))),
+            };
             caller.spare = std::mem::take(&mut vm.spare);
             let ending = match ran.map_err(Stop::halt) {
                 Err(Halt::Unimplemented(what)) => return Err(Stop::from(Halt::Unimplemented(what))),
@@ -367,4 +391,21 @@ impl<'w, L: Loader<Rc<Code>>> Arguments<'w, PlaceId, Operand> for Vm<'_, '_, 'w,
         let tested = self.loc(place).and_then(|loc| self.numcheck(loc, SenderCheck::Item, pos).map(|()| loc));
         self.lift(tested, pos)
     }
+}
+
+/// Whether a CALL of `program`, its activation's storage already initialized, needs nothing of an
+/// activation of the VM that its generated code run from the start does not do: no LOCAL-STORAGE,
+/// RETURNING, EXTERNAL or GLOBAL data or file to bind, no CICS task, and nothing watching the run.
+fn runs_direct<H: Clone, L: Loader<H>>(unit: &RunUnit<'_, H, L>, program: &crate::lir::Program) -> bool {
+    let (storage, scope) = (&program.storage, &program.services.scope);
+    storage.local_image.is_empty()
+        && storage.returning.is_none()
+        && scope.records.is_empty()
+        && scope.files.is_empty()
+        && unit.cics.is_none()
+        && unit.statements.is_none()
+        && unit.taint.is_none()
+        && !unit.limited()
+        && unit.observer.is_none()
+        && program.options.options.numcheck.is_none()
 }

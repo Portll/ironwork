@@ -3,6 +3,7 @@
 //! and counted stores. Every function answers None where the VM's general path must decide, and
 //! writes nothing then, so that generated code can run the op as the VM runs it instead.
 
+pub use crate::abend::Ending;
 pub use crate::count::{binop, modulo, negated, order};
 pub use crate::lir::Base;
 pub use crate::storage::Kind;
@@ -23,6 +24,20 @@ pub enum Leave {
     End(u32),
     Op(u32, usize),
 }
+
+/// Where a called program's generated code, run from the program's start over its activation's
+/// storage, stopped: at the ending a terminator gives, or where the VM takes the activation on, at
+/// a block, at a block's terminator whose condition it did not decide, or at an op whose fast path
+/// declined, with the arm the block's earlier ops left.
+pub enum Stopped {
+    Ended(Ending),
+    Block(u32),
+    End(u32),
+    Op(u32, usize, Option<u8>),
+}
+
+/// A called program's generated code from its start (`Stopped`).
+pub type Direct = fn(&mut Storage) -> Stopped;
 
 /// An activation's storage as generated code reaches it.
 pub struct Storage<'a> {

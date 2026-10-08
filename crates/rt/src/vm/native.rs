@@ -17,6 +17,15 @@ use std::rc::Rc;
 /// watched.
 pub type Native = fn(&mut dyn Machine, BlockId, usize) -> Option<Result<Exit, Stop>>;
 
+/// A program's generated code: `run` as the VM's dispatch hands it control, and `direct`, where the
+/// generator wrote one, running the program from its start without an activation of the VM, which
+/// a CALL that needs nothing else of one runs (`call_nested`).
+#[derive(Clone, Copy)]
+pub struct NativeProgram {
+    pub run: Native,
+    pub direct: Option<crate::fast::Direct>,
+}
+
 /// The VM's activation as generated code drives it.
 pub trait Machine {
     /// Whether anything watches the run, so that only the VM's own dispatch may run it.

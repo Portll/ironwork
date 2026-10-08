@@ -8,6 +8,7 @@ use crate::arith;
 use crate::bms::Mapset;
 use crate::callee;
 use crate::cics::{self, CicsCommand, CicsHost, ExitTarget, Handlers};
+use crate::fast::Stopped;
 use crate::lir::{Base, BlockId, Chars, CicsId, Operand, ParaId, PlaceId, Step, SymId};
 use crate::storage::Loc;
 use crate::store::{self, ProgramFacts};
@@ -68,8 +69,19 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         self.run_taking_exits(at, false)
     }
 
+    /// `run_called` for an activation whose program's generated code ran from the program's start
+    /// until it `stopped` where the VM takes it on.
+    pub(super) fn run_called_after(&mut self, stopped: Stopped) -> R<Ending> {
+        let ending = self.run_after(stopped);
+        self.taking_exits(ending, false)
+    }
+
     fn run_taking_exits(&mut self, at: Option<(ParaId, BlockId)>, runs_level: bool) -> R<Ending> {
-        let mut ending = self.run_from(at);
+        let ending = self.run_from(at);
+        self.taking_exits(ending, runs_level)
+    }
+
+    fn taking_exits(&mut self, mut ending: R<Ending>, runs_level: bool) -> R<Ending> {
         loop {
             let abend = match ending.map_err(Stop::halt) {
                 Err(Halt::Abend(abend)) => abend,

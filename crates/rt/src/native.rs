@@ -12,7 +12,7 @@ use crate::module::{LoadedModule, Modules, read};
 use crate::oo::ClassCode;
 use crate::refusal::IWR0073;
 use crate::unit::{Clock, FoundClass, LoadError, LoadedProgram, Loader, RunUnit};
-use crate::vm::{Code, Halt, Native};
+use crate::vm::{Code, Halt, NativeProgram};
 use crate::vocab::Pos;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -30,7 +30,7 @@ pub struct ModuleLoader {
 
 impl ModuleLoader {
     /// The module a run begins with, each of its programs run by its generated code in `natives`.
-    pub fn new(dirs: Vec<PathBuf>, path: &Path, module: LoadedModule, natives: Vec<Option<Native>>) -> Self {
+    pub fn new(dirs: Vec<PathBuf>, path: &Path, module: LoadedModule, natives: Vec<Option<NativeProgram>>) -> Self {
         let mut modules = Modules::new(dirs, verify);
         modules.add_first_native(path.to_owned(), module, natives);
         Self { modules }
@@ -88,7 +88,7 @@ pub struct Request<'a> {
     pub clock: Clock,
     pub parm: Option<&'a str>,
     /// The generated code of the module's programs, by ordinal.
-    pub natives: Vec<Option<Native>>,
+    pub natives: Vec<Option<NativeProgram>>,
 }
 
 fn refused(message: String) -> Halt {
@@ -136,12 +136,12 @@ fn usage(message: &str) -> ExitCode {
 
 /// The executable's whole run, as `ironwork run module.iwm` gives it: on a thread with the driver's
 /// stack, a panic exiting as ironwork's internal error.
-pub fn main(path: &'static str, module: &'static [u8], natives: &'static [Option<Native>]) -> ExitCode {
+pub fn main(path: &'static str, module: &'static [u8], natives: &'static [Option<NativeProgram>]) -> ExitCode {
     main_with(path, module, natives, std::env::args().skip(1).collect())
 }
 
 /// [`main`] given its arguments.
-pub fn main_with(path: &'static str, module: &'static [u8], natives: &'static [Option<Native>], args: Vec<String>) -> ExitCode {
+pub fn main_with(path: &'static str, module: &'static [u8], natives: &'static [Option<NativeProgram>], args: Vec<String>) -> ExitCode {
     match std::thread::Builder::new().stack_size(64 << 20).spawn(move || batch(path, module, natives, args)).map(|t| t.join()) {
         Ok(Ok(code)) => code,
         _ => exit::status(Outcome::Internal),
@@ -150,7 +150,7 @@ pub fn main_with(path: &'static str, module: &'static [u8], natives: &'static [O
 
 /// Its arguments read, the module read and its first program checked, the run, an abend or a
 /// construct the VM does not run said on standard error, and the exit status.
-fn batch(path: &str, module: &[u8], natives: &[Option<Native>], args: Vec<String>) -> ExitCode {
+fn batch(path: &str, module: &[u8], natives: &[Option<NativeProgram>], args: Vec<String>) -> ExitCode {
     exit::follow(Convention::Band);
     let (mut dirs, mut dds, mut clock, mut parm) = (Vec::new(), Vec::new(), Clock::System, None);
     let mut args = args.into_iter();

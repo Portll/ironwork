@@ -1,8 +1,10 @@
 //! Control flow (lir.md §8.4, §9.10): the dispatch loop over blocks, the frames and return points
 //! of assumption C99, transfers, and a procedure a statement or a `Debug` runs in a loop of its own.
 
+use super::native::Machine;
 use super::{Code, Halt, R, Stop, Vm, not_yet};
 use crate::abend::{Abend, AbendCode, Ending, Signal};
+use crate::fast::Stopped;
 use crate::lir::{BlockId, DebugId, Frame, FrameKind, ParaId, RangeId, ReturnPoint, Step, Terminator};
 use crate::unit::{Event, Loader};
 use crate::vocab::Pos;
@@ -74,6 +76,41 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             self.line = self.pos(paragraph.at).line;
         }
         match self.dispatch(block, 0)? {
+            Exit::End(e) => Ok(e),
+            Exit::Completed | Exit::Left(_) => Ok(Ending::EndOfProgram),
+        }
+    }
+
+    /// `run_from` the program's start, for an activation whose program's generated code ran from
+    /// there until it `stopped`: the VM's own steps from that point on.
+    pub(super) fn run_after(&mut self, stopped: Stopped) -> R<Ending> {
+        let p = self.p;
+        let Some(paragraph) = p.paragraphs.get(p.procedure_start as usize) else { return Ok(Ending::EndOfProgram) };
+        self.segment = paragraph.priority;
+        self.arrival = Arrival::Start;
+        let next = match stopped {
+            Stopped::Ended(ending) => return Ok(ending),
+            Stopped::Block(block) => Next::Block(block),
+            Stopped::End(block) => self.end(block, None, 0)?,
+            Stopped::Op(block, from, mut arm) => {
+                let mut next = None;
+                for k in from..p.blocks[block as usize].ops.len() {
+                    next = self.run_op(block, k, &mut arm, 0)?;
+                    if next.is_some() {
+                        break;
+                    }
+                }
+                match next {
+                    Some(next) => next,
+                    None => self.end(block, arm, 0)?,
+                }
+            }
+        };
+        let exit = match next {
+            Next::Block(block) => self.dispatch(block, 0)?,
+            Next::Exit(exit) => exit,
+        };
+        match exit {
             Exit::End(e) => Ok(e),
             Exit::Completed | Exit::Left(_) => Ok(Ending::EndOfProgram),
         }

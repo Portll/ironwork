@@ -41,7 +41,7 @@ use zarch::ebcdic::{self, CodePage, Collation};
 
 pub use cics::run_task;
 pub use flow::{Exit, Next};
-pub use native::{Machine, Native};
+pub use native::{Machine, Native, NativeProgram};
 pub(crate) use flow::Arrival;
 
 type R<T> = Result<T, Stop>;
@@ -129,6 +129,8 @@ struct Lowered {
     literals: Vec<Option<(i64, numeric::precision::Places)>>,
     /// The program's generated code, in an executable `ironwork compile --native` built.
     native: Option<Native>,
+    /// Its generated code from the program's start, which a CALL may run without an activation.
+    whole: Option<crate::fast::Direct>,
 }
 
 impl Code {
@@ -141,9 +143,9 @@ impl Code {
     }
 
     /// The program run by its generated code where nothing watches the run.
-    pub fn with_native(mut self, native: Option<Native>) -> Self {
+    pub fn with_native(mut self, native: Option<NativeProgram>) -> Self {
         if let Ok(lowered) = &mut self.lowered {
-            lowered.native = native;
+            (lowered.native, lowered.whole) = (native.map(|n| n.run), native.and_then(|n| n.direct));
         }
         self
     }
@@ -188,7 +190,7 @@ impl Lowered {
         let literals = program.consts.iter().map(value::const_number).collect();
         let numbers = program.places.iter().map(place::number_item).collect();
         let direct = program.places.iter().map(place::direct).collect();
-        Self { program, collation, ordinals, high_value, low_value, entry_of, receivers, variables, pure, quick, direct, numbers, literals, native: None }
+        Self { program, collation, ordinals, high_value, low_value, entry_of, receivers, variables, pure, quick, direct, numbers, literals, native: None, whole: None }
     }
 }
 

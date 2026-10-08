@@ -13,8 +13,8 @@ use rt::vocab::{BinOp, RelOp};
 use numeric::Numproc;
 use std::fmt::Write;
 
-const PRELUDE: &str = "use ironwork_rt::fast::*;\nuse ironwork_rt::vm::{Exit, Machine, Next, Stop};\n";
-const LINTS: &str = "#![forbid(unsafe_code)]\n#![allow(clippy::all, unreachable_code, unused_labels, unused_mut, unused_variables)]\n";
+const PRELUDE: &str = "use ironwork_rt::fast::*;\nuse ironwork_rt::vm::{Exit, Machine, NativeProgram, Next, Stop};\n";
+const LINTS: &str = "#![forbid(unsafe_code)]\n#![allow(clippy::all, unreachable_code, unused_assignments, unused_labels, unused_mut, unused_variables)]\n";
 
 /// The executable's main.rs: each program's generated code, then `main` handing the module and that
 /// code to the runtime.
@@ -47,10 +47,12 @@ fn programs_text(module: &str, programs: &[Program]) -> String {
             natives.push("None".to_owned());
             continue;
         }
-        natives.push(format!("Some(program_{k})"));
-        out.push_str(&Gen { k, p, fns: String::new() }.program());
+        let (text, whole) = Gen { k, p, fns: String::new() }.program();
+        let direct = if whole { format!("Some(direct_{k})") } else { "None".to_owned() };
+        natives.push(format!("Some(NativeProgram {{ run: program_{k}, direct: {direct} }})"));
+        out.push_str(&text);
     }
-    let _ = write!(out, "\npub static NATIVES: [Option<ironwork_rt::vm::Native>; {}] = [{}];\n", natives.len(), natives.join(", "));
+    let _ = write!(out, "\npub static NATIVES: [Option<NativeProgram>; {}] = [{}];\n", natives.len(), natives.join(", "));
     let _ = writeln!(out, "\npub static MODULE: &[u8] = include_bytes!({module:?});");
     out
 }
@@ -169,6 +171,57 @@ impl Code<'_> {
     }
 }
 
+impl Code<'_> {
+    /// The program run from block `start` over its activation's storage, through the blocks of
+    /// `whole`, until an ending or a block, a branch or an op the VM must take on (`Stopped`).
+    fn direct(&self, whole: &[bool], start: usize) -> String {
+        let k = self.k;
+        let mut out = format!("\nfn direct_{k}(s: &mut Storage) -> Stopped {{\n    let mut block = {start}u32;\n    loop {{\n        match block {{\n");
+        let go = |t: u32| if whole[t as usize] { format!("block = {t}") } else { format!("return Stopped::Block({t})") };
+        for (b, block) in self.p.blocks.iter().enumerate().filter(|&(b, _)| whole[b]) {
+            let _ = writeln!(out, "            {b} => {{");
+            if let Some((name, when, at_end)) = &self.scans[b] {
+                let _ = write!(out, "                if let Some(found) = {name}(s) {{\n                    if found {{\n                        {};\n                    }} else {{\n                        {};\n                    }}\n                    continue;\n                }}\n", go(*when), go(*at_end));
+            }
+            let select = matches!(block.end, Terminator::Select(_));
+            if select {
+                let _ = writeln!(out, "                let mut arm = None;");
+            }
+            let arm = if select { "arm" } else { "None" };
+            for (i, op) in self.ops[b].iter().enumerate() {
+                let Some((name, arms)) = op else { unreachable!("a whole block's op has a fast path") };
+                if select && *arms {
+                    let _ = writeln!(out, "                match {name}(s) {{\n                    Some(size_error) => arm = Some(u8::from(size_error)),\n                    None => return Stopped::Op({b}, {i}, {arm}),\n                }}");
+                } else {
+                    let _ = writeln!(out, "                if {name}(s).is_none() {{\n                    return Stopped::Op({b}, {i}, {arm});\n                }}");
+                }
+            }
+            match (&block.end, &self.conds[b]) {
+                (Terminator::Jump(t), _) => {
+                    let _ = writeln!(out, "                {};", go(*t));
+                }
+                (Terminator::Branch { then, otherwise, .. }, Some(name)) => {
+                    let _ = write!(out, "                match {name}(s) {{\n                    Some(true) => {},\n                    Some(false) => {},\n                    None => return Stopped::End({b}),\n                }}\n", go(*then), go(*otherwise));
+                }
+                (Terminator::Select(targets), _) => {
+                    let _ = writeln!(out, "                match arm {{");
+                    for (a, t) in targets.iter().enumerate() {
+                        let _ = writeln!(out, "                    Some({a}) => {},", go(*t));
+                    }
+                    let _ = writeln!(out, "                    _ => unreachable!(\"the arm of a fast op is 0 or 1\"),\n                }}");
+                }
+                (Terminator::End(e), _) => {
+                    let _ = writeln!(out, "                return Stopped::Ended(Ending::{e:?});");
+                }
+                _ => unreachable!("a whole block ends in a jump, a fast branch, a select or an ending"),
+            }
+            let _ = writeln!(out, "            }}");
+        }
+        out.push_str("            _ => unreachable!(\"block {block} is not run whole\"),\n        }\n    }\n}\n");
+        out
+    }
+}
+
 /// A place's storage as generated code reaches it: an address expression of type Option<usize>.
 struct At {
     expr: String,
@@ -177,7 +230,8 @@ struct At {
 }
 
 impl Gen<'_> {
-    fn program(mut self) -> String {
+    /// The program's generated code, and whether it has a `direct` function.
+    fn program(mut self) -> (String, bool) {
         let (k, p) = (self.k, self.p);
         let entries: Vec<u32> = p.paragraphs.iter().map(|para| para.entry).collect();
         let ops: Vec<Vec<Option<(String, bool)>>> = p.blocks.iter().enumerate().map(|(b, block)| block.ops.iter().enumerate().map(|(i, op)| self.op(b, i, op)).collect()).collect();
@@ -214,8 +268,28 @@ impl Gen<'_> {
         if fast.contains(&true) {
             out.push_str(&code.region(&fast));
         }
+        // The blocks a CALL may run without an activation: as fast ones, at a paragraph's entry
+        // too, and ending at an ending as well.
+        let whole: Vec<bool> = p
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(b, block)| match &block.end {
+                Terminator::End(_) => ops[b].iter().all(Option::is_some),
+                _ => fast[b] || (entries.contains(&(b as u32)) && ops[b].iter().all(Option::is_some) && match &block.end {
+                    Terminator::Jump(_) => true,
+                    Terminator::Branch { .. } => conds[b].is_some(),
+                    Terminator::Select(targets) => targets.len() >= 2 && matches!(ops[b].last(), Some(Some((_, true)))),
+                    _ => false,
+                }),
+            })
+            .collect();
+        let start = p.paragraphs.get(p.procedure_start as usize).map(|para| para.entry as usize).filter(|&b| whole[b]);
+        if let Some(start) = start {
+            out.push_str(&code.direct(&whole, start));
+        }
         out.push_str(&self.fns);
-        out
+        (out, start.is_some())
     }
 
     /// A fast path for op `i` of block `b`: its function's name, and whether it gives the op's arm.
