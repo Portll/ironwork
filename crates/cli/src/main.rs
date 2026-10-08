@@ -883,8 +883,9 @@ fn driver() -> ExitCode {
             },
             "--native" => native = true,
             "--native-harness" => harness = true,
-            "--runtime" => match args.next() {
-                Some(dir) => runtime = Some(std::path::PathBuf::from(dir)),
+            "--runtime" => match args.next().map(|dir| (std::path::absolute(&dir), dir)) {
+                Some((Ok(dir), _)) => runtime = Some(dir),
+                Some((Err(e), dir)) => refuse!(format!("--runtime {dir}: {e}")),
                 None => refuse!("--runtime needs a directory"),
             },
             "--section" => match args.next().as_deref().map(|n| (n.to_owned(), dump::section_named(n))) {
