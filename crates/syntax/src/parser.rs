@@ -306,10 +306,13 @@ fn gnucobol_float(word: &str, pos: Pos) -> Option<Error> {
         return Some(crate::messages::IWC0314.at(pos, "PROGRAM-POINTER: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's; --compliance extended reads it as PROCEDURE-POINTER"));
     }
     let ibm = match word {
-        "FLOAT-SHORT" => "COMP-1",
-        "FLOAT-LONG" => "COMP-2",
+        "FLOAT-SHORT" | "FLOAT-HEX-7" => "COMP-1",
+        "FLOAT-LONG" | "FLOAT-HEX-15" => "COMP-2",
         _ => return None,
     };
+    if word.starts_with("FLOAT-HEX") {
+        return Some(crate::messages::IWS0107.at(pos, format!("{word}: z390's zCOBOL floating point, not Enterprise COBOL's; --compliance extended reads it as {ibm}")));
+    }
     Some(crate::messages::IWS0101.at(pos, format!("{word}: GnuCOBOL's and Micro Focus's floating point, not Enterprise COBOL's; --compliance extended reads it as {ibm}")))
 }
 

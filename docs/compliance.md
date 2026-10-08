@@ -702,8 +702,18 @@ read as COMP-1, IBM's hexadecimal floating point`, at the usage word.
 point, so a value with no exact form, such as 0.001, can differ in its last digits: as COMP-1 it
 holds 0.00099999993. DISPLAY shows them as it shows any COMP-1 or COMP-2 item, `-.99999993E-03`
 where cobc shows `-0.001`. The other floating-point usages, FLOAT-DECIMAL-16 and -34,
-FLOAT-BINARY-32, -64 and -128, FLOAT-EXTENDED and z390's FLOAT-HEX-7, -15 and -30, stay refused.
+FLOAT-BINARY-32, -64 and -128, FLOAT-EXTENDED and z390's FLOAT-HEX-30, stay refused.
 Assumption C469. Strict refuses FLOAT-SHORT and FLOAT-LONG (IWS0101).
+
+### IWX0066-W FLOAT-HEX-7 and FLOAT-HEX-15
+
+`IWX0066-W FLOAT-HEX-7 (z390's zCOBOL; Enterprise COBOL writes COMP-1): it is read as COMP-1, the
+same hexadecimal floating point`, at the usage word.
+
+z390's zCOBOL names IBM's short and long hexadecimal floating point FLOAT-HEX-7 and FLOAT-HEX-15,
+and they are read as COMP-1 and COMP-2 with no change of value. cobc refuses both. FLOAT-HEX-30,
+z390's extended hexadecimal floating point, has no Enterprise COBOL usage and stays refused, as do
+z390's FLOAT-BINARY and FLOAT-DECIMAL forms. Strict refuses FLOAT-HEX-7 and -15 (IWS0107).
 
 ### IWX0028-W PERFORM ... FOREVER
 

@@ -6,7 +6,7 @@
 //! PROCEDURE DIVISION header (docs/compliance.md).
 
 use crate::lexer::{Tok, Token};
-use crate::messages::{IWX0002, IWX0004, IWX0005, IWX0006, IWX0009, IWX0027, IWX0044};
+use crate::messages::{IWX0002, IWX0004, IWX0005, IWX0006, IWX0009, IWX0027, IWX0044, IWX0066};
 use crate::{Error, Pos};
 use std::collections::HashMap;
 
@@ -81,7 +81,7 @@ pub fn rewrite(tokens: Vec<Token>, cards: &[String]) -> Result<Vec<Token>, Error
                 r.binary_usage()?;
                 continue;
             }
-            Tok::Word(w) if data && (w == "FLOAT-SHORT" || w == "FLOAT-LONG") => {
+            Tok::Word(w) if data && matches!(w.as_str(), "FLOAT-SHORT" | "FLOAT-LONG" | "FLOAT-HEX-7" | "FLOAT-HEX-15") => {
                 r.float_usage();
                 continue;
             }
@@ -236,13 +236,18 @@ impl Rewrite {
     /// `[USAGE [IS]] BINARY-SHORT [SIGNED|UNSIGNED]` and the other binary usages in a data entry, as
     /// `PIC S9(n) COMP-5`, or `PIC 9(n) COMP-5` when unsigned: SIGNED is the default where the word
     /// does not fix the sign.
-    /// FLOAT-SHORT or FLOAT-LONG read as COMP-1 or COMP-2, IBM's hexadecimal floating point.
+    /// FLOAT-SHORT or FLOAT-LONG, and z390's FLOAT-HEX-7 or FLOAT-HEX-15, read as COMP-1 or COMP-2,
+    /// IBM's hexadecimal floating point.
     fn float_usage(&mut self) {
         let mut token = self.tokens[self.at].clone();
         let Tok::Word(usage) = &token.tok else { unreachable!("the caller saw a word") };
-        let ibm = if usage == "FLOAT-SHORT" { "COMP-1" } else { "COMP-2" };
-        let shown = format!("{usage} (GnuCOBOL and Micro Focus; Enterprise COBOL writes COMP-1 and COMP-2): it is read as {ibm}, IBM's hexadecimal floating point");
-        token.messages.insert(0, IWX0027.at(token.pos, shown));
+        let ibm = if matches!(usage.as_str(), "FLOAT-SHORT" | "FLOAT-HEX-7") { "COMP-1" } else { "COMP-2" };
+        let message = if usage.starts_with("FLOAT-HEX") {
+            IWX0066.at(token.pos, format!("{usage} (z390's zCOBOL; Enterprise COBOL writes {ibm}): it is read as {ibm}, the same hexadecimal floating point"))
+        } else {
+            IWX0027.at(token.pos, format!("{usage} (GnuCOBOL and Micro Focus; Enterprise COBOL writes COMP-1 and COMP-2): it is read as {ibm}, IBM's hexadecimal floating point"))
+        };
+        token.messages.insert(0, message);
         token.tok = Tok::Word(ibm.into());
         token.spelled = None;
         self.at += 1;

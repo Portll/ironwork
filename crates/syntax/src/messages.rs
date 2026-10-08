@@ -842,6 +842,7 @@ catalogue! {
     IWS0104 Error "{terminator}: an explicit scope terminator with no verb open for it; it was discarded";
     IWS0105 Error "a period was required before {word}: one was assumed";
     IWS0106 Error "{literal}: Enterprise COBOL's alphanumeric literals hold at least one character; {how it is read}";
+    IWS0107 Severe "{FLOAT-HEX-7 or FLOAT-HEX-15}: z390's zCOBOL floating point, not Enterprise COBOL's; --compliance extended reads it as {COMP-1 or COMP-2}";
     IWX0001 Warning "free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}";
     IWX0002 Warning "constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry";
     IWX0003 Warning "<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =";
@@ -906,6 +907,7 @@ catalogue! {
     IWX0063 Warning "{literal} (GnuCOBOL and Micro Focus; Enterprise COBOL's literals hold at least one character): {how it is read}";
     IWX0064 Warning "{record} (--compliance loose): {why ironwork refuses it}; it is left out, and a statement naming one of its items compiles as a hole";
     IWX0065 Warning "{message} (--compliance loose): {what is left out}";
+    IWX0066 Warning "{FLOAT-HEX-7 or FLOAT-HEX-15} (z390's zCOBOL; Enterprise COBOL writes {COMP-1 or COMP-2}): it is read as {COMP-1 or COMP-2}, the same hexadecimal floating point";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

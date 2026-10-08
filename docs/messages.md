@@ -816,6 +816,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWS0104 | E | `{terminator}: an explicit scope terminator with no verb open for it; it was discarded` |
 | IWS0105 | E | `a period was required before {word}: one was assumed` |
 | IWS0106 | E | `{literal}: Enterprise COBOL's alphanumeric literals hold at least one character; {how it is read}` |
+| IWS0107 | S | `{FLOAT-HEX-7 or FLOAT-HEX-15}: z390's zCOBOL floating point, not Enterprise COBOL's; --compliance extended reads it as {COMP-1 or COMP-2}` |
 | IWX0001 | W | `free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}` |
 | IWX0002 | W | `constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry` |
 | IWX0003 | W | `<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =` |
@@ -880,6 +881,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0063 | W | `{literal} (GnuCOBOL and Micro Focus; Enterprise COBOL's literals hold at least one character): {how it is read}` |
 | IWX0064 | W | `{record} (--compliance loose): {why ironwork refuses it}; it is left out, and a statement naming one of its items compiles as a hole` |
 | IWX0065 | W | `{message} (--compliance loose): {what is left out}` |
+| IWX0066 | W | `{FLOAT-HEX-7 or FLOAT-HEX-15} (z390's zCOBOL; Enterprise COBOL writes {COMP-1 or COMP-2}): it is read as {COMP-1 or COMP-2}, the same hexadecimal floating point` |
 
 ## Run-time refusals
 

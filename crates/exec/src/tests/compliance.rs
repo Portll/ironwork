@@ -2079,3 +2079,30 @@ fn display_shows_numbers_as_the_compliance_level_or_the_flag_says_alike_on_both_
     let card = format!("       CBL DISPSIGN(COMPAT)\n{NUMBERS}");
     assert_eq!(Harness::source(&card).flags(EXTENDED).run(Executor::Interpreter).out, ibm);
 }
+
+/// z390's short and long hexadecimal floating point beside COMP-2.
+const Z390_FLOATS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. Z390F.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       77 E FLOAT-HEX-7 VALUE 1.5.\n",
+    "       77 D FLOAT-HEX-15 VALUE 123456789012345.\n",
+    "       77 C COMP-2 VALUE 123456789012345.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           COMPUTE E = E * 2\n",
+    "           DISPLAY E ' ' D\n",
+    "           IF D = C DISPLAY 'SAME' END-IF\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn float_hex_7_and_15_are_comp_1_and_comp_2_alike_on_both_executors() {
+    let walked = Harness::source(Z390_FLOATS).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (" .30000000E 01  .12345678901234500E 15\nSAME\n", Some(&Ending::Goback)), "{}", walked.err);
+    let vm = Harness::source(Z390_FLOATS).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    assert_eq!(diagnostics_under(Z390_FLOATS, numeric::Compliance::Extended), [(5, 13, Some("IWX0066"), Severity::Warning), (6, 13, Some("IWX0066"), Severity::Warning)]);
+    let refused = syntax::parse(Z390_FLOATS).unwrap_err();
+    assert_eq!((refused.pos.line, refused.id), (5, Some("IWS0107")), "{refused}");
+}

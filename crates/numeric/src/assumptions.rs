@@ -2677,7 +2677,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: GNUCOBOL_FLOATS,
-        claim: "Under --compliance extended, FLOAT-SHORT and FLOAT-LONG are read as COMP-1 and COMP-2, IBM's short and long hexadecimal floating point, by the operator's ruling of 2026-10-07 that they mimic IBM's behaviour. cobc 3.2 and Micro Focus hold them in IEEE binary floating point, and cobc shows them in the fewest decimal digits that give the value back: a value with no exact binary or hexadecimal form can differ in its last digits, and DISPLAY shows IBM's external floating point (C14) where cobc shows 1.5. The other floating-point usages, FLOAT-DECIMAL, FLOAT-BINARY, FLOAT-EXTENDED and z390's FLOAT-HEX, stay refused",
+        claim: "Under --compliance extended, FLOAT-SHORT and FLOAT-LONG are read as COMP-1 and COMP-2, IBM's short and long hexadecimal floating point, by the operator's ruling of 2026-10-07 that they mimic IBM's behaviour. cobc 3.2 and Micro Focus hold them in IEEE binary floating point, and cobc shows them in the fewest decimal digits that give the value back: a value with no exact binary or hexadecimal form can differ in its last digits, and DISPLAY shows IBM's external floating point (C14) where cobc shows 1.5. z390's FLOAT-HEX-7 and FLOAT-HEX-15 are IBM's short and long hexadecimal floating point by z390's own definition, and are read as COMP-1 and COMP-2 exactly. The other floating-point usages, FLOAT-DECIMAL, FLOAT-BINARY, FLOAT-EXTENDED and FLOAT-HEX-30, stay refused",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[O(Extended), U(Float)]],
