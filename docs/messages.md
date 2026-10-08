@@ -903,6 +903,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0091 | W | `FUNCTION {name}, defined after this program in its source (GnuCOBOL; Enterprise COBOL takes a user-defined function only defined or prototyped before the program): it is invoked as that definition describes it` |
 | IWX0092 | W | `FUNCTION {name}, defined in {file} (GnuCOBOL; Enterprise COBOL takes a user-defined function only defined or prototyped before the program): it is invoked as that definition describes it` |
 | IWX0093 | W | `a period was required before PROCEDURE DIVISION (GnuCOBOL warns and assumes it; Enterprise COBOL assumes it at E): one was assumed` |
+| IWX0094 | W | `the word {word} has letters outside COBOL's character set (GnuCOBOL reads a user-defined word's letters as UTF-8; Enterprise COBOL writes such a word in DBCS characters): it is read as a user-defined word` |
 
 ## Run-time refusals
 

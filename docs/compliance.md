@@ -1277,6 +1277,17 @@ The last data description entry before PROCEDURE DIVISION ends there, as both co
 Enterprise COBOL gives IGYDS1082-E, which ends a compile at return code 8, and strict keeps that as
 IWS0105-E; cobc 3.2 warns ("optional period used") and compiles on, as extended does.
 
+### IWX0094-W Letters outside COBOL's set in a word
+
+`IWX0094-W the word {word} has letters outside COBOL's character set (GnuCOBOL reads a user-defined
+word's letters as UTF-8; Enterprise COBOL writes such a word in DBCS characters): it is read as a
+user-defined word`, at the word's first use.
+
+A word may hold letters beyond Latin-1, such as kanji and kana, as a UTF-8 source of GnuCOBOL's holds
+them in paragraph and data names. Such a letter has no case, and a word matches only a word spelled
+with the same letters. Enterprise COBOL's DBCS user-defined words are written between shift-out and
+shift-in in a DBCS source, which ironwork does not read; strict refuses the letter with IWS0021-S.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

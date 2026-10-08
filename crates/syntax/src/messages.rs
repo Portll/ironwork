@@ -929,6 +929,7 @@ catalogue! {
     IWX0091 Warning "FUNCTION {name}, defined after this program in its source (GnuCOBOL; Enterprise COBOL takes a user-defined function only defined or prototyped before the program): it is invoked as that definition describes it";
     IWX0092 Warning "FUNCTION {name}, defined in {file} (GnuCOBOL; Enterprise COBOL takes a user-defined function only defined or prototyped before the program): it is invoked as that definition describes it";
     IWX0093 Warning "a period was required before PROCEDURE DIVISION (GnuCOBOL warns and assumes it; Enterprise COBOL assumes it at E): one was assumed";
+    IWX0094 Warning "the word {word} has letters outside COBOL's character set (GnuCOBOL reads a user-defined word's letters as UTF-8; Enterprise COBOL writes such a word in DBCS characters): it is read as a user-defined word";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

@@ -2204,3 +2204,32 @@ fn a_moved_procedure_pointer_is_set_and_upon_stderr_writes_standard_error() {
     let warned: Vec<_> = diagnostics_under(POINTER_MOVES, numeric::Compliance::Extended).into_iter().filter(|d| d.2 != Some("IWX0044")).map(|d| (d.0, d.2)).collect();
     assert_eq!(warned, [(11, Some("IWX0080")), (12, Some("IWX0080")), (14, Some("IWX0056"))]);
 }
+
+/// A program whose paragraph and data names are Japanese, as a UTF-8 source of GnuCOBOL's writes
+/// them.
+const WIDE_WORDS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. WIDE.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  件数 PIC 9(3) VALUE 0.\n",
+    "       PROCEDURE DIVISION.\n",
+    "       0000-主処理.\n",
+    "           PERFORM 1000-加算 3 TIMES\n",
+    "           DISPLAY 'COUNT ' 件数\n",
+    "           GOBACK.\n",
+    "       1000-加算.\n",
+    "           ADD 1 TO 件数.\n",
+);
+
+#[test]
+fn under_extended_a_word_may_hold_letters_beyond_latin_1() {
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let o = Harness::source(WIDE_WORDS).flags(&["--compliance=extended"]).run(executor);
+        assert_eq!((o.out.as_str(), o.ending), ("COUNT 003\n", Ok(Ending::Goback)), "{}", o.err);
+    }
+    let warned: Vec<_> = diagnostics_under(WIDE_WORDS, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0094")).map(|d| d.0).collect();
+    assert_eq!(warned, [5, 7, 8], "one warning for each word, at its first use");
+    let refused = syntax::parse(WIDE_WORDS).unwrap_err();
+    assert_eq!((refused.pos.line, refused.id), (5, Some("IWS0021")), "{refused}");
+}

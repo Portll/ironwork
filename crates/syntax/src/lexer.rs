@@ -76,6 +76,8 @@ struct Lexer<'a> {
     n_is_dbcs: bool,
     /// How a zero-length alphanumeric literal is read.
     empty: numeric::EmptyLiteral,
+    /// The words with letters outside COBOL's character set already warned of (IWX0094).
+    wide_words: Vec<String>,
 }
 
 /// The most characters a DBCS literal holds (Language Reference SC27-8713-03, p. 42).
@@ -116,6 +118,7 @@ pub fn lex_with(source: &Source, compliance: Compliance, empty: numeric::EmptyLi
         warned: vec![false; source.free.len()],
         n_is_dbcs,
         empty,
+        wide_words: Vec::new(),
     };
     while lx.at < lx.chars.len() {
         lx.next_token()?;
@@ -143,6 +146,12 @@ fn ebcdic_lowercase(byte: u8) -> Option<char> {
 
 fn non_cobol(c: char) -> bool {
     u32::from(c) <= 0xFF && !c.is_ascii_alphanumeric() && !" \n+-*/=$,;.\"'()><:_&".contains(c)
+}
+
+/// A letter beyond Latin-1, such as a kanji or kana, which `--compliance extended` reads in a
+/// user-defined word (IWX0094).
+fn wide_letter(c: char) -> bool {
+    u32::from(c) > 0xFF && c.is_alphabetic()
 }
 
 impl Lexer<'_> {
@@ -340,7 +349,7 @@ impl Lexer<'_> {
                     _ => return Err(crate::messages::IWS0019.at(pos, "a sign must be followed by a number")),
                 }
             }
-            _ if c.is_ascii_alphanumeric() || c == '.' || non_cobol(c) => {
+            _ if c.is_ascii_alphanumeric() || c == '.' || non_cobol(c) || (self.extended && wide_letter(c)) => {
                 let tok = self.number_or_word(pos)?;
                 match tok {
                     Tok::Word(w) if w == "EXEC" || w == "EXECUTE" => {
@@ -460,13 +469,17 @@ impl Lexer<'_> {
 
     fn number_or_word(&mut self, pos: Pos) -> Result<Tok, Error> {
         let start = self.at;
-        while let Some(c) = self.peek(0).filter(|&c| is_word_char(c) || non_cobol(c)) {
+        while let Some(c) = self.peek(0).filter(|&c| is_word_char(c) || non_cobol(c) || (self.extended && wide_letter(c))) {
             if non_cobol(c) {
                 self.pending.push(crate::messages::IWS0025.at(self.pos(), format!("non-COBOL character {c:?}: the character was accepted")).graded(crate::Severity::Error));
             }
             self.at += 1;
         }
         let run: String = self.chars[start..self.at].iter().collect();
+        if run.chars().any(wide_letter) && !self.wide_words.contains(&run) {
+            self.pending.push(crate::messages::IWX0094.at(pos, format!("the word {run} has letters outside COBOL's character set (GnuCOBOL reads a user-defined word's letters as UTF-8; Enterprise COBOL writes such a word in DBCS characters): it is read as a user-defined word")));
+            self.wide_words.push(run.clone());
+        }
         let all_digits = run.chars().all(|c| c.is_ascii_digit());
         if all_digits && self.peek(0) == Some(self.point()) && self.peek(1).is_some_and(|c| c.is_ascii_digit()) {
             self.at += 1;
