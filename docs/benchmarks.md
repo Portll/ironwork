@@ -13,10 +13,12 @@ work of 2026-10-07; at f60f7833 it meets every target on both runners (see
 ## Method
 
 `tools/bench.sh` builds ironwork release, compiles each `bench/*.cbl` with
-`cobc -x -O2 -std=ibm-strict`, runs each program `RUNS` times (default five) under the interpreter
-(`ironwork run --interpret`), the VM (`ironwork run --vm`) and cobc, interleaved, and prints the median wall
-times and the VM's ratio to each. It reports any difference between the VM's output and the
-interpreter's, and any difference between ironwork's and cobc's (see Correctness). The cobc times
+`cobc -x -O2 -std=ibm-strict` and all four with `ironwork compile --native`, runs each program `RUNS`
+times (default five) under the interpreter (`ironwork run --interpret`), the VM (`ironwork run --vm`),
+as native code and under cobc, interleaved, and prints the median wall times, the VM's ratio to the
+interpreter and to cobc, and native code's ratio to cobc. It reports any difference between the VM's
+output and the interpreter's or native code's, and any difference between ironwork's and cobc's (see
+Correctness). `NATIVE=0` leaves native code out. The cobc times
 below were taken at `-std=ibm`, under which cobc generates the same C for these four programs.
 
 | | |
