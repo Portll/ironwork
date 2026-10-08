@@ -7,14 +7,14 @@
 use numeric::precision::Places;
 use rt::count::{const_number, mod_places, result_places};
 use rt::fixed::places_of;
-use rt::lir::{ArithPlan, Argument, Base, Comparand, Compare, Cond, CondId, Count, Expr, ExprId, Func, IntExpr, Mode, Op, Operand, Place, PlaceId, Program, Terminator};
+use rt::lir::{ArithPlan, Argument, Base, Comparand, Compare, Cond, CondId, Count, Expr, ExprId, Func, IntExpr, Mode, Op, Operand, Place, PlaceId, Program, Subscript, Terminator};
 use rt::storage::Kind;
 use rt::vocab::{BinOp, RelOp};
 use numeric::Numproc;
 use std::fmt::Write;
 
 const PRELUDE: &str = "use ironwork_rt::fast::*;\nuse ironwork_rt::vm::{Exit, Machine, Next, Stop};\n";
-const LINTS: &str = "#![forbid(unsafe_code)]\n#![allow(clippy::all, unused_labels, unused_mut, unused_variables)]\n";
+const LINTS: &str = "#![forbid(unsafe_code)]\n#![allow(clippy::all, unreachable_code, unused_labels, unused_mut, unused_variables)]\n";
 
 /// The executable's main.rs: each program's generated code, then `main` handing the module and that
 /// code to the runtime.
@@ -69,6 +69,9 @@ struct Code<'a> {
     entries: &'a [u32],
     ops: &'a [Vec<Option<(String, bool)>>],
     conds: &'a [Option<String>],
+    /// Each block that begins a linear SEARCH a scan runs: the scan's name, the WHEN's block and
+    /// the AT END block.
+    scans: &'a [Option<(String, u32, u32)>],
 }
 
 impl Code<'_> {
@@ -124,19 +127,37 @@ impl Code<'_> {
         let go = |t: u32| if fast[t as usize] { format!("block = {t}") } else { format!("break Leave::To({t})") };
         for (b, block) in self.p.blocks.iter().enumerate().filter(|&(b, _)| fast[b]) {
             let _ = writeln!(out, "                {b} => {{");
+            if let Some((name, when, at_end)) = &self.scans[b] {
+                let _ = write!(out, "                    if let Some(found) = {name}(&mut s) {{\n                        if found {{\n                            {};\n                        }} else {{\n                            {};\n                        }}\n                        continue;\n                    }}\n", go(*when), go(*at_end));
+            }
+            let select = matches!(block.end, Terminator::Select(_));
+            if select {
+                let _ = writeln!(out, "                    let mut arm = None;");
+            }
             for (i, op) in self.ops[b].iter().enumerate() {
-                let Some((name, _)) = op else { unreachable!("a fast block's op has a fast path") };
-                let _ = writeln!(out, "                    if {name}(&mut s).is_none() {{\n                        break Leave::Op({b}, {i});\n                    }}");
+                let Some((name, arms)) = op else { unreachable!("a fast block's op has a fast path") };
+                if select && *arms {
+                    let _ = writeln!(out, "                    match {name}(&mut s) {{\n                        Some(size_error) => arm = Some(u8::from(size_error)),\n                        None => break Leave::Op({b}, {i}),\n                    }}");
+                } else {
+                    let _ = writeln!(out, "                    if {name}(&mut s).is_none() {{\n                        break Leave::Op({b}, {i});\n                    }}");
+                }
                 let _ = writeln!(resume, "        ({b}, {i}) => {},", self.block(b, i, true));
             }
             match (&block.end, &self.conds[b]) {
                 (Terminator::Jump(t), _) => {
                     let _ = writeln!(out, "                    {};", go(*t));
                 }
+                (Terminator::Select(targets), _) => {
+                    let _ = writeln!(out, "                    match arm {{");
+                    for (a, t) in targets.iter().enumerate() {
+                        let _ = writeln!(out, "                        Some({a}) => {},", go(*t));
+                    }
+                    let _ = writeln!(out, "                        _ => unreachable!(\"the arm of a fast op is 0 or 1\"),\n                    }}");
+                }
                 (Terminator::Branch { then, otherwise, .. }, Some(name)) => {
                     let _ = write!(out, "                    match {name}(&s) {{\n                        Some(true) => {},\n                        Some(false) => {},\n                        None => break Leave::End({b}),\n                    }}\n", go(*then), go(*otherwise));
                 }
-                _ => unreachable!("a fast block ends in a jump or a fast branch"),
+                _ => unreachable!("a fast block ends in a jump, a fast branch or a select"),
             }
             let _ = writeln!(out, "                }}");
         }
@@ -162,21 +183,24 @@ impl Gen<'_> {
         let ops: Vec<Vec<Option<(String, bool)>>> = p.blocks.iter().enumerate().map(|(b, block)| block.ops.iter().enumerate().map(|(i, op)| self.op(b, i, op)).collect()).collect();
         let conds: Vec<Option<String>> = p.blocks.iter().map(|block| if let Terminator::Branch { cond, .. } = block.end { self.cond_fn(cond) } else { None }).collect();
         // A block that runs whole in generated code: no paragraph begins at it, each op has a fast
-        // path that gives no arm, and its terminator is a jump or a branch with a fast condition.
+        // path, and its terminator is a jump, a branch with a fast condition, or a select of two or
+        // more blocks by the arm its last op's fast path gives.
         let fast: Vec<bool> = p
             .blocks
             .iter()
             .enumerate()
             .map(|(b, block)| {
-                let ends = match block.end {
+                let ends = match &block.end {
                     Terminator::Jump(_) => true,
                     Terminator::Branch { .. } => conds[b].is_some(),
+                    Terminator::Select(targets) => targets.len() >= 2 && matches!(ops[b].last(), Some(Some((_, true)))),
                     _ => false,
                 };
-                ends && !entries.contains(&(b as u32)) && ops[b].iter().all(|o| matches!(o, Some((_, false))))
+                ends && !entries.contains(&(b as u32)) && ops[b].iter().all(Option::is_some)
             })
             .collect();
-        let code = Code { k, p, entries: &entries, ops: &ops, conds: &conds };
+        let scans: Vec<Option<(String, u32, u32)>> = (0..p.blocks.len()).map(|b| if fast[b] { self.scan(b, &fast) } else { None }).collect();
+        let code = Code { k, p, entries: &entries, ops: &ops, conds: &conds, scans: &scans };
         let mut out = format!("\nfn program_{k}(m: &mut dyn Machine, block: u32, floor: usize) -> Option<Result<Exit, Stop>> {{\n    if m.watched() {{\n        return None;\n    }}\n    Some(blocks_{k}(m, block, floor))\n}}\n");
         let _ = write!(out, "\nfn blocks_{k}(m: &mut dyn Machine, mut block: u32, floor: usize) -> Result<Exit, Stop> {{\n    loop {{\n        let next = match block {{\n");
         for (b, &whole) in fast.iter().enumerate() {
@@ -245,6 +269,16 @@ impl Gen<'_> {
                     false,
                 )
             }
+            Op::Set { from: Operand::Const(c), to, plan } if !matches!(plan, rt::lir::MovePlan::Refused(_)) => {
+                let (n, at) = const_number(&self.p.consts[*c as usize])?;
+                let dest = self.at(*to)?;
+                let store = match dest.kind {
+                    Kind::Index if at.dec == 0 => "s.set_index(dest, n)?;".to_owned(),
+                    k if stored(k, self.p.places[*to as usize].scaling).is_some() => format!("s.store(dest, {}, {}, (n, {}), false, false)?;", dest.len, kind(k)?, places(at)),
+                    _ => return None,
+                };
+                (format!("    let n = {n}i64;\n    let dest = {}?;\n    {store}\n    Some(false)\n", dest.expr), false)
+            }
             Op::SearchAll(id) => (self.search_all(&self.p.plans.search_all[*id as usize])?, true),
             _ => return None,
         };
@@ -310,6 +344,70 @@ impl Gen<'_> {
             "    let (mut low, mut high) = (1i64, {count}i64);\n    while low <= high {{\n        let mid = (low + high) / 2;\n        let dest = {}?;\n        s.set_index(dest, mid)?;\n        let mut outcome = std::cmp::Ordering::Equal;\n        'keys: {{\n{keys}        }}\n        match outcome {{\n            std::cmp::Ordering::Less => low = mid + 1,\n            std::cmp::Ordering::Greater => high = mid - 1,\n            std::cmp::Ordering::Equal => return Some(false),\n        }}\n    }}\n    Some(true)\n",
             index.expr
         ))
+    }
+
+    /// A linear SEARCH beginning at fast block `a` that `Storage::scan_zoned` runs: `a`, with no ops,
+    /// tests an index against a table of a fixed count; its then block, with no ops, tests one
+    /// unsigned zoned key of the occurrence the index names for equality with an item of the same
+    /// kind no subscript moves; that block's otherwise block only adds 1 to the index and goes back
+    /// to `a`. The scan's name, the WHEN's block and the AT END block.
+    fn scan(&mut self, a: usize, fast: &[bool]) -> Option<(String, u32, u32)> {
+        let p = self.p;
+        let Terminator::Branch { cond, then: test, otherwise: at_end } = p.blocks[a].end else { return None };
+        let Cond::InTable { index, count: Count::Fixed(count) } = p.conds[cond as usize] else { return None };
+        let Terminator::Branch { cond: when_cond, then: when, otherwise: step } = p.blocks[test as usize].end else { return None };
+        if !p.blocks[a].ops.is_empty() || !fast[test as usize] || !p.blocks[test as usize].ops.is_empty() || !fast[step as usize] || count >= i32::MAX as u32 {
+            return None;
+        }
+        let ix = &p.places[index as usize];
+        if !statik(ix) || ix.kind != Kind::Index {
+            return None;
+        }
+        let [Op::SetInt { target, value: IntExpr::Fixed { expr, prepass, .. } }] = p.blocks[step as usize].ops.as_slice() else { return None };
+        let Expr::Bin(x, BinOp::Add, y) = p.exprs[*expr as usize] else { return None };
+        let (Expr::Operand(Operand::Load(q)), Expr::Operand(Operand::Const(c))) = (&p.exprs[x as usize], &p.exprs[y as usize]) else { return None };
+        let one = const_number(&p.consts[*c as usize]).is_some_and(|(n, at)| n == 1 && at.dec == 0);
+        if p.blocks[step as usize].end != Terminator::Jump(a as u32) || !prepass.is_empty() || !one || !self.same(*target, index) || !self.same(*q, index) {
+            return None;
+        }
+        let Cond::Rel { a: l, op: RelOp::Eq, b: r, how: Compare::Fixed } = &p.conds[when_cond as usize] else { return None };
+        let occurrence = |c: &Comparand| {
+            let Comparand::Operand(Operand::Load(e)) = c else { return None };
+            let place = &p.places[*e as usize];
+            let [Subscript { stride, value: IntExpr::Item(q) }] = place.subscripts.as_slice() else { return None };
+            let plain = place.moved.is_empty() && place.odo.is_empty() && place.refmod.is_none() && matches!(place.base, Base::Program | Base::Local | Base::ReturnCode);
+            (plain && self.same(*q, index)).then_some((place, *stride))
+        };
+        let ((element, stride), key) = match (occurrence(l), occurrence(r)) {
+            (Some(e), None) => (e, r),
+            (None, Some(e)) => (e, l),
+            _ => return None,
+        };
+        let Comparand::Operand(Operand::Load(k)) = key else { return None };
+        let (key, kind) = self.zoned(key)?;
+        if element.kind != kind || element.scaling != 0 || !p.places[*k as usize].subscripts.is_empty() {
+            return None;
+        }
+        let table = element.table.map_or("None".to_owned(), |t| format!("Some(({}, {}))", t.displacement, t.extent));
+        let occurrence = |n: u32| format!("s.element(Base::{:?}, {}, {}, &[({n}, {stride})], {table})", element.base, element.offset, element.len);
+        let name = format!("scan_{}_{a}", self.k);
+        let _ = write!(
+            self.fns,
+            "\n#[inline]\nfn {name}(s: &mut Storage) -> Option<bool> {{\n    let index = s.at(Base::{:?}, {}, 4)?;\n    let from = s.integer(index, 4, Kind::Index)?;\n    let first = {}?;\n    {}?;\n    let key = {}?;\n    let (ix, found) = s.scan_zoned(index, first, {stride}, from, {count}, key, {})?;\n    s.set_index(index, ix)?;\n    Some(found)\n}}\n",
+            ix.base,
+            ix.offset,
+            occurrence(1),
+            occurrence(count),
+            key.expr,
+            element.len
+        );
+        Some((name, when, at_end))
+    }
+
+    /// Whether places `a` and `b` are the same storage at a constant address, of the same kind.
+    fn same(&self, a: PlaceId, b: PlaceId) -> bool {
+        let (x, y) = (&self.p.places[a as usize], &self.p.places[b as usize]);
+        statik(x) && statik(y) && (x.base, x.offset, x.len, x.kind) == (y.base, y.offset, y.len, y.kind)
     }
 
     /// Each place of `places` located, as the VM locates them before it evaluates, None for one the
