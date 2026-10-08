@@ -721,6 +721,13 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
         position.checked_sub(1).and_then(|i| self.argument_lengths[self.argument_starts[k]..end].get(i)).copied().unwrap_or(0)
     }
 
+    /// The number of arguments program `me`'s latest activation was called with; in the main
+    /// program, the number of the run's arguments.
+    pub fn argument_count_of(&self, me: usize) -> usize {
+        let Some(k) = self.calls.iter().rposition(|&p| p == me) else { return self.arguments.words.len() };
+        self.argument_starts.get(k + 1).copied().unwrap_or(self.argument_lengths.len()) - self.argument_starts[k]
+    }
+
     /// Program `me`'s storage holds its initial values, and its GO TOs go where they are written.
     pub fn initialized(&mut self, me: usize) {
         self.programs[me].initialized = true;

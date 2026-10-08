@@ -4,6 +4,7 @@
 pub mod any_length;
 pub mod arith;
 pub mod cics_bind;
+mod call_parameters;
 mod crt_status;
 mod classes;
 pub mod constructs;
@@ -23,6 +24,7 @@ pub mod numcheck;
 mod omitted;
 pub mod oo;
 mod operands;
+mod pointer_moves;
 pub mod picture;
 pub mod printer;
 pub mod report;
@@ -370,6 +372,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     any_length::rewrite(&mut program, &mut errors);
     if options.compliance == numeric::Compliance::Extended {
         crt_status::rewrite(&mut program, &inherited.entries);
+        call_parameters::rewrite(&mut program, &errors);
     }
     declare_assign_items(&mut program, &inherited.entries);
     let linkage: Vec<DataEntry> = program.linkage.iter().chain(&inherited.entries).cloned().collect();
@@ -391,6 +394,9 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     layout.name_files(&program.files, linage_counters.iter().map(|c| c.map(counter_item)).collect());
     assign_items(&mut program, &layout, &options, &mut errors);
     corresponding::expand(&mut program, &layout, &mut errors);
+    if options.compliance == numeric::Compliance::Extended {
+        pointer_moves::rewrite(&mut program, &layout, &mut errors);
+    }
     condition_subjects(&mut program, &layout);
     dbcs_values(&layout, &mut errors);
     numeric_values(&layout, &mut errors);
@@ -1454,7 +1460,7 @@ impl Check<'_> {
                     && upon.device == "SYSERR"
                     && self.extended
                 {
-                    self.errors.push(syntax::messages::IWX0056.at(*pos, "DISPLAY UPON SYSERR (GnuCOBOL and Micro Focus; Enterprise COBOL has no such device): the line is written to the run's standard error"));
+                    self.errors.push(syntax::messages::IWX0056.at(*pos, format!("DISPLAY UPON {} (GnuCOBOL and Micro Focus; Enterprise COBOL has no such device): the line is written to the run's standard error", upon.name)));
                 } else if let Some(upon) = upon
                     && !DISPLAY_DEVICES.contains(&upon.device.as_str())
                 {

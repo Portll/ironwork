@@ -320,14 +320,17 @@ fn gnucobol_float(word: &str, pos: Pos) -> Option<Error> {
 /// GnuCOBOL's special register for the key that ended a screen ACCEPT.
 pub const CRT_STATUS: &str = "COB-CRT-STATUS";
 
-/// `77 COB-CRT-STATUS PIC 9(4) VALUE 0`, as GnuCOBOL declares the register.
-fn crt_status_entry(pos: Pos) -> DataEntry {
+/// GnuCOBOL's special register for the number of arguments the running program was called with.
+pub const CALL_PARAMETERS: &str = "NUMBER-OF-CALL-PARAMETERS";
+
+/// `77 name PIC picture [usage] VALUE 0`, as GnuCOBOL declares a special register.
+fn register_entry(name: &str, picture: &str, usage: Option<Usage>, pos: Pos) -> DataEntry {
     DataEntry {
         level: 77,
-        name: Some(CRT_STATUS.into()),
+        name: Some(name.into()),
         spelled: None,
-        picture: Some("9(4)".into()),
-        usage: None,
+        picture: Some(picture.into()),
+        usage,
         value: Some(Literal::Number("0".into())),
         redefines: None,
         occurs: None,
@@ -756,11 +759,16 @@ impl Parser<'_> {
         if self.dli && !declares(&working_storage, "DIBSTAT") && !declares(&linkage, "DIBSTAT") {
             working_storage.splice(0..0, system_entries("DLZDIB")?);
         }
-        let names_crt_status = self.tokens[procedure_from..self.at].iter().any(|t| matches!(&t.tok, Tok::Word(w) if w == CRT_STATUS));
-        if self.extended && names_crt_status && !declares(&working_storage, CRT_STATUS) && !declares(&local_storage, CRT_STATUS) && !declares(&linkage, CRT_STATUS) {
-            let pos = self.tokens[procedure_from..self.at].iter().find(|t| matches!(&t.tok, Tok::Word(w) if w == CRT_STATUS)).map_or_else(Pos::default, |t| t.pos);
+        let named = |name: &str| self.tokens[procedure_from..self.at].iter().find(|t| matches!(&t.tok, Tok::Word(w) if w == name)).map(|t| t.pos);
+        let undeclared = |name: &str| !declares(&working_storage, name) && !declares(&local_storage, name) && !declares(&linkage, name);
+        let [crt_status, call_parameters] = [CRT_STATUS, CALL_PARAMETERS].map(|name| named(name).filter(|_| self.extended && undeclared(name)));
+        if let Some(pos) = crt_status {
             self.messages.push(crate::messages::IWX0057.at(pos, "COB-CRT-STATUS (GnuCOBOL's special register; Enterprise COBOL has no screen ACCEPT): it holds the key that ended the last screen ACCEPT, as GnuCOBOL's screenio.cpy numbers the keys"));
-            working_storage.push(crt_status_entry(pos));
+            working_storage.push(register_entry(CRT_STATUS, "9(4)", None, pos));
+        }
+        if let Some(pos) = call_parameters {
+            self.messages.push(crate::messages::IWX0078.at(pos, "NUMBER-OF-CALL-PARAMETERS (GnuCOBOL's special register; Enterprise COBOL has none): it holds the number of arguments the program was called with, or of the run's arguments in the main program"));
+            working_storage.push(register_entry(CALL_PARAMETERS, "S9(9)", Some(Usage::Binary), pos));
         }
         let exec_declarations = std::mem::take(&mut self.exec_declarations);
         let (mut nested, mut contained) = (Vec::new(), Vec::new());
@@ -2467,6 +2475,8 @@ impl Parser<'_> {
                 let mut upon = if self.accept_word("UPON") {
                     let name = self.name("a mnemonic name")?;
                     let device = self.mnemonics.iter().find(|(m, _)| *m == name).map_or_else(|| name.clone(), |(_, e)| e.clone());
+                    // GnuCOBOL's STDERR is the device SYSERR names.
+                    let device = if self.extended && device == "STDERR" { "SYSERR".to_owned() } else { device };
                     Some(Upon { name, device })
                 } else {
                     None
@@ -2983,7 +2993,14 @@ impl Parser<'_> {
             self.messages.push(crate::messages::IWX0051.at(pos, "an inline PERFORM with AFTER phrases (GnuCOBOL and Micro Focus; Enterprise COBOL takes them only when PERFORM names a procedure): the body runs for each combination, the last AFTER varying fastest"));
         }
         let body = self.block(&["END-PERFORM"])?;
-        self.expect_word("END-PERFORM")?;
+        if self.peek() == Some(&Tok::Period) {
+            if !self.extended {
+                return Err(crate::messages::IWS0108.at(self.pos(), "an inline PERFORM ended by a period with no END-PERFORM: Micro Focus's, not Enterprise COBOL's; --compliance extended reads the period as ending it"));
+            }
+            self.messages.push(crate::messages::IWX0079.at(self.pos(), "an inline PERFORM ended by a period (Micro Focus; Enterprise COBOL ends it with END-PERFORM): the period ends the PERFORM and the sentence, as cobc -std=mf reads it"));
+        } else {
+            self.expect_word("END-PERFORM")?;
+        }
         Ok(Stmt::PerformInline { body, repeat, pos })
     }
 
@@ -3427,6 +3444,15 @@ impl Parser<'_> {
     }
 
     fn call(&mut self, pos: Pos) -> R<Call> {
+        if self.is_word("STATIC") && matches!(self.peek_at(1), Some(Tok::Alnum(_))) {
+            let at = self.pos();
+            if !self.extended {
+                return Err(crate::messages::IWC0326.at(at, "CALL STATIC: GnuCOBOL's call convention, not Enterprise COBOL's; --compliance extended reads it"));
+            }
+            self.at += 1;
+            let Some(Tok::Alnum(name)) = self.peek() else { unreachable!("a literal follows STATIC") };
+            self.messages.push(crate::messages::IWX0076.at(at, format!("CALL STATIC (GnuCOBOL; Enterprise COBOL's CALL names no call convention): it is read as CALL '{name}', which calls the same program")));
+        }
         let target = match self.operand()? {
             Operand::Ref(r) if r.qualifiers.is_empty() && r.subscripts.is_empty() && r.refmod.is_none() => match self.repository_programs.iter().find(|(name, _)| *name == r.name) {
                 Some((_, called)) => Operand::Literal(Literal::Alnum(called.clone())),
@@ -3456,7 +3482,19 @@ impl Parser<'_> {
                 }
             }
         }
-        let returning = if self.accept_word("RETURNING") { Some(self.reference()?) } else { None };
+        let returning = if self.accept_word("RETURNING") {
+            Some(self.reference()?)
+        } else if self.is_word("GIVING") {
+            let at = self.pos();
+            if !self.extended {
+                return Err(crate::messages::IWC0327.at(at, "CALL ... GIVING: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's, which writes RETURNING; --compliance extended reads it"));
+            }
+            self.messages.push(crate::messages::IWX0077.at(at, "CALL ... GIVING (Micro Focus and GnuCOBOL; Enterprise COBOL writes RETURNING): it is read as RETURNING"));
+            self.at += 1;
+            Some(self.reference()?)
+        } else {
+            None
+        };
         let [exception] = self.on_phrases(&["ON", "EXCEPTION", "OVERFLOW"], &["END-CALL"], |p| {
             p.accept_word("ON");
             p.accept_any(&["EXCEPTION", "OVERFLOW"]).map(|_| 0).ok_or_else(|| p.error("EXCEPTION or OVERFLOW"))

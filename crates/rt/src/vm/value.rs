@@ -516,6 +516,10 @@ impl<'p, L: Loader<Rc<Code>>> Evaluator for Call<'_, 'p, '_, '_, L> {
     fn argument_length(&mut self, position: usize) -> usize {
         self.vm.unit.argument_length_of(self.vm.me, position)
     }
+
+    fn argument_count(&mut self) -> usize {
+        self.vm.unit.argument_count_of(self.vm.me)
+    }
 }
 
 #[cfg(test)]
@@ -590,6 +594,10 @@ mod tests {
             None
         }
         fn argument_length(&mut self, _: usize) -> usize {
+            0
+        }
+
+        fn argument_count(&mut self) -> usize {
             0
         }
 

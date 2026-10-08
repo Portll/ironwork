@@ -344,6 +344,8 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0323 | S | `{verb} {item}: a receiving operand of an arithmetic statement must be numeric or numeric-edited, and {item} is {class}` |
 | IWC0324 | S | `LABEL RECORDS {name}: not defined as a data-name` |
 | IWC0325 | S | `FD {file}: RECORDING MODE F, but its records are {shortest} to {longest} bytes` |
+| IWC0326 | S | `CALL STATIC: GnuCOBOL's call convention, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0327 | S | `CALL ... GIVING: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's, which writes RETURNING; --compliance extended reads it` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
 | IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |
@@ -817,6 +819,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWS0105 | E | `a period was required before {word}: one was assumed` |
 | IWS0106 | E | `{literal}: Enterprise COBOL's alphanumeric literals hold at least one character; {how it is read}` |
 | IWS0107 | S | `{FLOAT-HEX-7 or FLOAT-HEX-15}: z390's zCOBOL floating point, not Enterprise COBOL's; --compliance extended reads it as {COMP-1 or COMP-2}` |
+| IWS0108 | S | `an inline PERFORM ended by a period with no END-PERFORM: Micro Focus's, not Enterprise COBOL's; --compliance extended reads the period as ending it` |
 | IWX0001 | W | `free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}` |
 | IWX0002 | W | `constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry` |
 | IWX0003 | W | `<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =` |
@@ -871,7 +874,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0053 | W | `FUNCTION CONCATENATE (GnuCOBOL; Enterprise COBOL has no such function): its arguments' characters joined, a number's as its digits` |
 | IWX0054 | W | `COPY {name}. (GnuCOBOL and Micro Focus; Enterprise COBOL reads the name as {name}.): the member is {name}, and the periods after it end the statement` |
 | IWX0055 | W | `PROCEDURE DIVISION CHAINING (GnuCOBOL and Micro Focus; Enterprise COBOL's main program takes its PARM through USING): each item takes the run's argument in its position, its bytes left-justified, where one is given` |
-| IWX0056 | W | `DISPLAY UPON SYSERR (GnuCOBOL and Micro Focus; Enterprise COBOL has no such device): the line is written to the run's standard error` |
+| IWX0056 | W | `DISPLAY UPON {SYSERR or STDERR} (GnuCOBOL and Micro Focus; Enterprise COBOL has no such device): the line is written to the run's standard error` |
 | IWX0057 | W | `COB-CRT-STATUS (GnuCOBOL's special register; Enterprise COBOL has no screen ACCEPT): it holds the key that ended the last screen ACCEPT, as GnuCOBOL's screenio.cpy numbers the keys` |
 | IWX0058 | W | `tab stops (GnuCOBOL and Micro Focus; Enterprise COBOL source holds no tab): {why each tab reaches the next column after a multiple of 8}` |
 | IWX0059 | W | `{construct} (--compliance relaxed): {why ironwork refuses it}; it compiles as a hole, and a run that reaches it ends with IWR0078` |
@@ -891,6 +894,11 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0073 | W | `FUNCTION-ID with no IDENTIFICATION DIVISION header before it (COBOL 2002 and GnuCOBOL; Enterprise COBOL requires the header): the function reads as though IDENTIFICATION DIVISION. came before it` |
 | IWX0074 | W | `constant {name} AS an arithmetic expression (COBOL 2002, Micro Focus and GnuCOBOL; Enterprise COBOL has no constant entry): it stands for {value}, the expression's value truncated to an integer, as the standard gives it` |
 | IWX0075 | W | `no IDENTIFICATION DIVISION or PROGRAM-ID (GnuCOBOL under -std=mf or -std=ibm assumes them; Enterprise COBOL requires them): the program is named {name}, after its file{, and the statements it begins with are read as its PROCEDURE DIVISION}` |
+| IWX0076 | W | `CALL STATIC (GnuCOBOL; Enterprise COBOL's CALL names no call convention): it is read as CALL {literal}, which calls the same program` |
+| IWX0077 | W | `CALL ... GIVING (Micro Focus and GnuCOBOL; Enterprise COBOL writes RETURNING): it is read as RETURNING` |
+| IWX0078 | W | `NUMBER-OF-CALL-PARAMETERS (GnuCOBOL's special register; Enterprise COBOL has none): it holds the number of arguments the program was called with, or of the run's arguments in the main program` |
+| IWX0079 | W | `an inline PERFORM ended by a period (Micro Focus; Enterprise COBOL ends it with END-PERFORM): the period ends the PERFORM and the sentence, as cobc -std=mf reads it` |
+| IWX0080 | W | `MOVE {name} of a procedure-pointer or function-pointer (GnuCOBOL and Micro Focus; Enterprise COBOL writes SET): it is read as SET ... TO {name}` |
 
 ## Run-time refusals
 

@@ -47,6 +47,9 @@ pub trait Evaluator {
     /// The length of the argument in USING position `position`, from 1, of the running
     /// activation: 0 for one omitted or not passed, and in the main program.
     fn argument_length(&mut self, position: usize) -> usize;
+    /// The number of arguments the running activation's caller passed; in the main program, the
+    /// number of the run's arguments.
+    fn argument_count(&mut self) -> usize;
     /// The CRT STATUS code of the key that ended the last screen ACCEPT, 0 before any.
     fn crt_status(&mut self) -> u16;
     /// The run's argument in position `position`, from 1: the word of the job step's PARM there.
@@ -893,6 +896,10 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
         "CRT STATUS" => {
             arity(0..=0, args)?;
             Ok(Val::Num(Fixed::new(i128::from(x.crt_status()), Places::new(4, 0))))
+        }
+        "CALL PARAMETERS" => {
+            arity(0..=0, args)?;
+            Ok(integer(x.argument_count() as i128, 9))
         }
         "CHAINING ARGUMENT" => {
             arity(2..=2, args)?;

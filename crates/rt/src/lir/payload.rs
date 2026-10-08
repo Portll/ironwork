@@ -363,6 +363,7 @@ functions! {
     CrtStatus = 89, "CRT STATUS", 0..=0;
     Substitute = 90, "SUBSTITUTE", 3..=usize::MAX;
     SubstituteCase = 91, "SUBSTITUTE-CASE", 3..=usize::MAX;
+    CallParameters = 92, "CALL PARAMETERS", 0..=0;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

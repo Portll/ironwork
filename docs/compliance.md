@@ -1034,10 +1034,11 @@ copies them: `123` into a PIC 9 item gives 1. An item with no word keeps its val
 every item of a program another one called. ACAS's posting programs take their date range this
 way. Assumption C488. Strict refuses it (IWC0320).
 
-### IWX0056-W DISPLAY UPON SYSERR
+### IWX0056-W DISPLAY UPON SYSERR or STDERR
 
 `IWX0056-W DISPLAY UPON SYSERR (GnuCOBOL and Micro Focus; Enterprise COBOL has no such device): the line
-is written to the run's standard error`, at the DISPLAY.
+is written to the run's standard error`, at the DISPLAY. GnuCOBOL's STDERR is the same device, with
+its own name in the warning.
 
 The line goes to the run's standard error, with or without NO ADVANCING, as cobc 3.2 writes it; it
 reaches the VM as `Op::DisplayError`, tag 40. Strict keeps IWC0073.
@@ -1187,6 +1188,51 @@ an integer, as the standard gives it`, at the level number.
 literals and numeric constants defined before it with +, -, *, / and parentheses: ironwork works it
 exactly, as fractions, and truncates the result toward zero (ISO 2002 7.3.6.3). Any other operand is
 refused, naming what the expression may hold.
+
+### IWX0076-W CALL STATIC
+
+`IWX0076-W CALL STATIC (GnuCOBOL; Enterprise COBOL's CALL names no call convention): it is read as
+CALL '{literal}', which calls the same program`, at STATIC.
+
+GnuCOBOL's `CALL STATIC literal` links the program statically. Which program runs is the same as
+for `CALL literal`, so ironwork reads the CALL without the word. Strict refuses it with IWC0326-S,
+as cobc -std=ibm-strict does.
+
+### IWX0077-W CALL ... GIVING
+
+`IWX0077-W CALL ... GIVING (Micro Focus and GnuCOBOL; Enterprise COBOL writes RETURNING): it is read
+as RETURNING`, at GIVING. Strict refuses it with IWC0327-S. One difference from cobc: a COBOL program
+called with no PROCEDURE DIVISION RETURNING phrase gives the item nothing under ironwork, as
+Enterprise COBOL requires the phrase (Language Reference, CALL), where cobc gives it the program's
+RETURN-CODE. The calls in the corpus that use GIVING name C routines.
+
+### IWX0078-W NUMBER-OF-CALL-PARAMETERS
+
+`IWX0078-W NUMBER-OF-CALL-PARAMETERS (GnuCOBOL's special register; Enterprise COBOL has none): it
+holds the number of arguments the program was called with, or of the run's arguments in the main
+program`, where a program names it and declares no item of the name.
+
+The register is `PIC S9(9) BINARY`, shown in nine digits as cobc shows it. It takes its value where
+the program is entered, first in the PROCEDURE DIVISION and after each ENTRY: the number of
+arguments the CALL passed, OMITTED ones included, or in the main program the number of words of the
+run's PARM, as cobc counts a main program's command-line arguments. Func 92 `CALL PARAMETERS` reads
+it on both executors.
+
+### IWX0079-W An inline PERFORM a period ends
+
+`IWX0079-W an inline PERFORM ended by a period (Micro Focus; Enterprise COBOL ends it with
+END-PERFORM): the period ends the PERFORM and the sentence, as cobc -std=mf reads it`, at the period.
+
+Micro Focus lets a separator period end every open statement, an inline PERFORM included; cobc
+accepts it under -std=mf and refuses it under its default dialect. Strict refuses it with IWS0108-S.
+
+### IWX0080-W A MOVE of a procedure-pointer
+
+`IWX0080-W MOVE {name} of a procedure-pointer or function-pointer (GnuCOBOL and Micro Focus;
+Enterprise COBOL writes SET): it is read as SET ... TO {name}`, at the MOVE.
+
+A MOVE whose sender and receivers are all procedure-pointers or function-pointers (including
+PROGRAM-POINTER, IWX0044) is the SET Enterprise COBOL writes for it. Strict keeps IWC0133.
 
 ## Relaxed
 

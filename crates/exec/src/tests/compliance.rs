@@ -2106,3 +2106,101 @@ fn float_hex_7_and_15_are_comp_1_and_comp_2_alike_on_both_executors() {
     let refused = syntax::parse(Z390_FLOATS).unwrap_err();
     assert_eq!((refused.pos.line, refused.id), (5, Some("IWS0107")), "{refused}");
 }
+
+/// An inline PERFORM a period ends, CALL STATIC ... GIVING, and NUMBER-OF-CALL-PARAMETERS in the
+/// main program and in programs called with one and two arguments.
+const CALL_FORMS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. CALLFORM.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 Z PIC 9 VALUE 0.\n",
+    "       01 A PIC X(5).\n",
+    "       01 R PIC S9(9) BINARY.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           PERFORM VARYING Z FROM 1 BY 1 UNTIL Z > 2\n",
+    "            IF Z = 1\n",
+    "              DISPLAY 'ONE'\n",
+    "            END-IF.\n",
+    "           DISPLAY 'AFTER ' Z\n",
+    "           CALL STATIC 'SUB1' USING A GIVING R\n",
+    "           CALL 'SUB2' USING A A\n",
+    "           CALL 'SUB2' USING A\n",
+    "           DISPLAY 'MAIN ' NUMBER-OF-CALL-PARAMETERS\n",
+    "           STOP RUN.\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. SUB1.\n",
+    "       DATA DIVISION.\n",
+    "       LINKAGE SECTION.\n",
+    "       01 X PIC X.\n",
+    "       PROCEDURE DIVISION USING X.\n",
+    "           DISPLAY 'SUB1 ' NUMBER-OF-CALL-PARAMETERS\n",
+    "           GOBACK.\n",
+    "       END PROGRAM SUB1.\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. SUB2.\n",
+    "       DATA DIVISION.\n",
+    "       LINKAGE SECTION.\n",
+    "       01 X PIC X.\n",
+    "       01 Y PIC X.\n",
+    "       PROCEDURE DIVISION USING X Y.\n",
+    "           DISPLAY 'SUB2 ' NUMBER-OF-CALL-PARAMETERS\n",
+    "           GOBACK.\n",
+    "       END PROGRAM SUB2.\n",
+    "       END PROGRAM CALLFORM.\n",
+);
+
+#[test]
+fn call_static_giving_call_parameters_and_a_period_ending_perform_run_as_cobc_runs_them() {
+    // cobc 3.2 -std=mf's output; its default dialect refuses the PERFORM the period ends.
+    let walked = Harness::source(CALL_FORMS).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("ONE\nAFTER 3\nSUB1 +000000001\nSUB2 +000000002\nSUB2 +000000001\nMAIN +000000000\n", Some(&Ending::StopRun)), "{}", walked.err);
+    let vm = Harness::source(CALL_FORMS).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    let warned: Vec<_> = diagnostics_under(CALL_FORMS, numeric::Compliance::Extended).into_iter().map(|d| (d.0, d.2)).collect();
+    assert_eq!(warned, [(12, Some("IWX0079")), (14, Some("IWX0076")), (14, Some("IWX0077")), (17, Some("IWX0078"))]);
+    let refused = |text: &str| syntax::parse(text).unwrap_err().id;
+    assert_eq!(refused(CALL_FORMS), Some("IWS0108"));
+    let ended = CALL_FORMS.replace("            END-IF.\n", "            END-IF\n           END-PERFORM\n");
+    assert_eq!(refused(&ended), Some("IWC0326"));
+    assert_eq!(refused(&ended.replace("CALL STATIC", "CALL")), Some("IWC0327"));
+}
+
+/// A procedure-pointer MOVEd to another and to a table entry, CALLed through, and a line written
+/// UPON STDERR.
+const POINTER_MOVES: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. PTRMOVE.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 P1 PROGRAM-POINTER.\n",
+    "       01 P2 PROGRAM-POINTER.\n",
+    "       01 T.\n",
+    "          05 PS PROGRAM-POINTER OCCURS 2.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           SET P1 TO ENTRY 'HELLO'\n",
+    "           MOVE P1 TO P2\n",
+    "           MOVE P2 TO PS(2)\n",
+    "           CALL PS(2)\n",
+    "           DISPLAY 'to stderr' UPON STDERR\n",
+    "           IF P1 = PS(2) DISPLAY 'SAME' END-IF\n",
+    "           STOP RUN.\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. HELLO.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY 'HELLO'\n",
+    "           GOBACK.\n",
+    "       END PROGRAM HELLO.\n",
+    "       END PROGRAM PTRMOVE.\n",
+);
+
+#[test]
+fn a_moved_procedure_pointer_is_set_and_upon_stderr_writes_standard_error() {
+    let walked = Harness::source(POINTER_MOVES).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("HELLO\nSAME\n", Some(&Ending::StopRun)), "{}", walked.err);
+    assert!(walked.err.contains("to stderr"), "{}", walked.err);
+    let vm = Harness::source(POINTER_MOVES).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending, vm.err.contains("to stderr")), (walked.out, walked.ending, true));
+    let warned: Vec<_> = diagnostics_under(POINTER_MOVES, numeric::Compliance::Extended).into_iter().filter(|d| d.2 != Some("IWX0044")).map(|d| (d.0, d.2)).collect();
+    assert_eq!(warned, [(11, Some("IWX0080")), (12, Some("IWX0080")), (14, Some("IWX0056"))]);
+}

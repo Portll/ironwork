@@ -78,6 +78,10 @@ impl<'p> Evaluator for Call<'_, 'p, '_, '_, '_> {
     fn argument_length(&mut self, position: usize) -> usize {
         self.machine.unit.argument_length_of(self.machine.me, position)
     }
+
+    fn argument_count(&mut self) -> usize {
+        self.machine.unit.argument_count_of(self.machine.me)
+    }
 }
 
 impl<'p> Machine<'p, '_, '_> {
