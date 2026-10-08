@@ -327,6 +327,15 @@ impl Lexer<'_> {
                 let text = self.quoted(pos)?;
                 self.emit(Tok::Alnum(format!("{text}\0")), pos);
             }
+            '.' if self.extended && next.is_some_and(|n| n.is_ascii_alphabetic()) && matches!(self.tokens.last().map(|t| &t.tok), Some(Tok::Word(w)) if matches!(w.as_str(), "PROGRAM-ID" | "FUNCTION-ID" | "CLASS-ID" | "METHOD-ID")) => {
+                let paragraph = match self.tokens.last().map(|t| &t.tok) {
+                    Some(Tok::Word(w)) => w.clone(),
+                    _ => String::new(),
+                };
+                self.pending.push(crate::messages::IWX0100.at(pos, format!("a period with no space after it ends {paragraph} (GnuCOBOL; Enterprise COBOL follows a separator period with a space): it is read as a separator period")));
+                self.at += 1;
+                self.emit(Tok::Period, pos);
+            }
             '.' if self.separator_follows(1) => {
                 self.at += 1;
                 // A period alone in the PROCEDURE DIVISION is an empty sentence, which strict reads too.

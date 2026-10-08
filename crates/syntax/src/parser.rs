@@ -2498,7 +2498,8 @@ impl Parser<'_> {
                 let mut items = Vec::new();
                 let no_advancing_ahead = |p: &Self| p.is_word("NO") && p.word_at(1) == Some("ADVANCING");
                 // LINE and POSITION are reserved words, never items: a screen phrase starts there.
-                while self.starts_operand() && !no_advancing_ahead(self) && !matches!(self.word(), Some("LINE" | "POSITION")) {
+                let erase_ahead = |p: &Self| p.is_word("ERASE") || (p.is_word("BLANK") && matches!(p.word_at(1), Some("SCREEN" | "LINE")));
+                while self.starts_operand() && !no_advancing_ahead(self) && !erase_ahead(self) && !matches!(self.word(), Some("LINE" | "POSITION")) {
                     items.push(self.operand()?);
                 }
                 let mut screen = self.screen_phrases(None)?;
@@ -2572,6 +2573,14 @@ impl Parser<'_> {
                 let target = self.reference()?;
                 if let Some(refused) = self.accept_message_count(pos) {
                     return Ok(refused);
+                }
+                if self.extended && self.is_word("FROM") && self.word_at(1) == Some("ESCAPE") {
+                    let at = self.tokens[self.at + 1].pos;
+                    self.at += 2;
+                    self.accept_word("KEY");
+                    self.messages.push(crate::messages::IWX0098.at(at, "ACCEPT ... FROM ESCAPE KEY (GnuCOBOL; Enterprise COBOL has no screen ACCEPT): the code of the key that ended the last screen ACCEPT, as COB-CRT-STATUS holds it"));
+                    let key = FunctionCall { name: "CRT STATUS".into(), args: Vec::new(), modifier: None, refmod: None, all_subscripts: Vec::new(), pos };
+                    return Ok(Stmt::Compute { targets: vec![Target { r: target, rounded: false }], expr: Expr::Operand(Operand::Function(key)), size_error: None, pos });
                 }
                 if let Some(size) = self.screen_size() {
                     self.unreserved_terminator("END-ACCEPT", "ACCEPT");
@@ -3782,7 +3791,16 @@ impl Parser<'_> {
     }
 
     fn inspect(&mut self, pos: Pos) -> R<Inspect> {
-        let target = if self.is_word("FUNCTION") { self.operand()? } else { Operand::Ref(self.reference()?) };
+        let literal = self.extended && matches!(self.peek(), Some(Tok::Alnum(_) | Tok::Hex(_)));
+        let target = if self.is_word("FUNCTION") || literal { self.operand()? } else { Operand::Ref(self.reference()?) };
+        let written = match &target {
+            Operand::Literal(Literal::Alnum(s)) => format!("'{s}'"),
+            Operand::Literal(Literal::Hex(_)) => "X'...'".to_owned(),
+            _ => String::new(),
+        };
+        if literal {
+            self.messages.push(crate::messages::IWX0099.at(pos, format!("INSPECT {written} (GnuCOBOL; Enterprise COBOL inspects a data item): its characters are tallied")));
+        }
         let (mut tallying, mut replacing, mut converting) = (Vec::new(), Vec::new(), None);
         if self.accept_word("TALLYING") {
             while self.starts_ref() && self.word_at(1) == Some("FOR") || self.starts_ref() && !self.is_word("REPLACING") && self.tally_counter_ahead() {
@@ -3845,6 +3863,10 @@ impl Parser<'_> {
         }
         if tallying.is_empty() && replacing.is_empty() && converting.is_none() {
             return Err(self.error("TALLYING, REPLACING or CONVERTING"));
+        }
+        if literal && (!replacing.is_empty() || converting.is_some()) {
+            let phrase = if converting.is_some() { "CONVERTING" } else { "REPLACING" };
+            return Err(crate::messages::IWS0121.at(pos, format!("INSPECT {written} {phrase}: a literal is not a receiving item")));
         }
         Ok(Inspect { target, tallying, replacing, converting, pos })
     }

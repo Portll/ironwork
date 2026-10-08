@@ -847,6 +847,7 @@ catalogue! {
     IWS0107 Severe "{FLOAT-HEX-7 or FLOAT-HEX-15}: z390's zCOBOL floating point, not Enterprise COBOL's; --compliance extended reads it as {COMP-1 or COMP-2}";
     IWS0108 Severe "an inline PERFORM ended by a period with no END-PERFORM: Micro Focus's, not Enterprise COBOL's; --compliance extended reads the period as ending it";
     IWS0120 Error "a period was required before level number {level}: one was assumed";
+    IWS0121 Severe "INSPECT {literal} {phrase}: a literal is not a receiving item";
     IWX0001 Warning "free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}";
     IWX0002 Warning "constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry";
     IWX0003 Warning "<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =";
@@ -934,6 +935,9 @@ catalogue! {
     IWX0095 Warning "a period was required before level number {level} (cobc under -std=ibm warns and assumes it; Enterprise COBOL assumes it at E): one was assumed";
     IWX0096 Warning "{name} has no PICTURE (GnuCOBOL takes one from its VALUE; Enterprise COBOL requires one): it is read as PIC X({length})";
     IWX0097 Warning "{name} is a reserved word of Enterprise COBOL's that GnuCOBOL reserves only in its own clause: it names {what}";
+    IWX0098 Warning "ACCEPT ... FROM ESCAPE KEY (GnuCOBOL; Enterprise COBOL has no screen ACCEPT): the code of the key that ended the last screen ACCEPT, as COB-CRT-STATUS holds it";
+    IWX0099 Warning "INSPECT {literal} (GnuCOBOL; Enterprise COBOL inspects a data item): its characters are tallied";
+    IWX0100 Warning "a period with no space after it ends {paragraph} (GnuCOBOL; Enterprise COBOL follows a separator period with a space): it is read as a separator period";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

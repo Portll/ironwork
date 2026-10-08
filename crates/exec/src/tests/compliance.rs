@@ -2340,3 +2340,39 @@ fn a_call_with_returning_leaves_the_return_code_as_it_was_under_ibm() {
         assert_eq!(ran.out, "000000009 0003\n", "{name}: {}", ran.err);
     }
 }
+
+/// GnuCOBOL forms of real programs: a period right after PROGRAM-ID, INSPECT of a literal, a
+/// DISPLAY that clears the screen with no AT, and ACCEPT FROM ESCAPE KEY.
+const GNUCOBOL_FORMS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID.FORMS.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 N PIC 9(2) VALUE 0.\n",
+    "       01 K PIC 9(4) VALUE 9999.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           INSPECT 'HOLA HOY' TALLYING N FOR ALL 'HO'\n",
+    "           DISPLAY 'N=' N\n",
+    "           GOBACK.\n",
+    "       SCREENS.\n",
+    "           DISPLAY SPACES ERASE SCREEN\n",
+    "           DISPLAY SPACE BLANK SCREEN\n",
+    "           ACCEPT K FROM ESCAPE KEY.\n",
+);
+
+#[test]
+fn under_extended_gnucobol_forms_of_real_programs_compile_and_run() {
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let o = Harness::source(GNUCOBOL_FORMS).flags(EXTENDED).run(executor);
+        assert_eq!((o.out.as_str(), o.ending), ("N=02\n", Ok(Ending::Goback)), "{}", o.err);
+    }
+    let extended = diagnostics_under(GNUCOBOL_FORMS, numeric::Compliance::Extended);
+    let at = |line: u32| extended.iter().filter(|d| d.0 == line).filter_map(|d| d.2).collect::<Vec<_>>();
+    assert_eq!((at(2), at(8), at(14)), (vec!["IWX0100"], vec!["IWX0099"], vec!["IWX0098"]), "{extended:?}");
+    assert!(extended.iter().all(|d| d.3 == Severity::Warning), "{extended:?}");
+    let refused = syntax::parse(GNUCOBOL_FORMS).unwrap_err();
+    assert_eq!(refused.id, Some("IWS0026"), "{refused}");
+    let replacing = GNUCOBOL_FORMS.replace("TALLYING N FOR ALL 'HO'", "REPLACING ALL 'HO' BY 'XX'");
+    let error = syntax::parse_all_with(&replacing, &syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended)).unwrap_err();
+    assert_eq!(error.id, Some("IWS0121"), "{error}");
+}

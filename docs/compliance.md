@@ -1319,6 +1319,32 @@ RERUN, SECURITY, TAPE, TITLE, UTF-8, WRITE-ONLY and XML-SCHEMA. Under extended s
 a data item, a file, a paragraph or a section. Any other reserved word stays refused with IWC0188-S,
 as strict refuses them all.
 
+### IWX0098-W ACCEPT FROM ESCAPE KEY
+
+`IWX0098-W ACCEPT ... FROM ESCAPE KEY (GnuCOBOL; Enterprise COBOL has no screen ACCEPT): the code of
+the key that ended the last screen ACCEPT, as COB-CRT-STATUS holds it`, at ESCAPE.
+
+The receiver takes the code COB-CRT-STATUS takes after a screen ACCEPT (assumption C489): 0 for
+ENTER, 1000 plus n for PFn, 2005 for CLEAR, as GnuCOBOL's `cob_accept_escape_key` gives the last
+ACCEPT's status. Strict refuses it with IWS0060-S.
+
+### IWX0099-W INSPECT of a literal
+
+`IWX0099-W INSPECT {literal} (GnuCOBOL; Enterprise COBOL inspects a data item): its characters are
+tallied`, at INSPECT.
+
+INSPECT TALLYING counts in an alphanumeric or hexadecimal literal as in a data item holding it.
+REPLACING and CONVERTING would store into the literal and are refused with IWS0121-S.
+
+### IWX0100-W PROGRAM-ID.NAME
+
+`IWX0100-W a period with no space after it ends {paragraph} (GnuCOBOL; Enterprise COBOL follows a
+separator period with a space): it is read as a separator period`, at the period.
+
+A period written right before the program's name, as in `PROGRAM-ID.SALESREPORT.`, ends
+PROGRAM-ID, FUNCTION-ID, CLASS-ID or METHOD-ID as a separator period would. Elsewhere a period needs
+the space after it, as under strict.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

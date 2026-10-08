@@ -821,6 +821,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWS0107 | S | `{FLOAT-HEX-7 or FLOAT-HEX-15}: z390's zCOBOL floating point, not Enterprise COBOL's; --compliance extended reads it as {COMP-1 or COMP-2}` |
 | IWS0108 | S | `an inline PERFORM ended by a period with no END-PERFORM: Micro Focus's, not Enterprise COBOL's; --compliance extended reads the period as ending it` |
 | IWS0120 | E | `a period was required before level number {level}: one was assumed` |
+| IWS0121 | S | `INSPECT {literal} {phrase}: a literal is not a receiving item` |
 | IWX0001 | W | `free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}` |
 | IWX0002 | W | `constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry` |
 | IWX0003 | W | `<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =` |
@@ -908,6 +909,9 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0095 | W | `a period was required before level number {level} (cobc under -std=ibm warns and assumes it; Enterprise COBOL assumes it at E): one was assumed` |
 | IWX0096 | W | `{name} has no PICTURE (GnuCOBOL takes one from its VALUE; Enterprise COBOL requires one): it is read as PIC X({length})` |
 | IWX0097 | W | `{name} is a reserved word of Enterprise COBOL's that GnuCOBOL reserves only in its own clause: it names {what}` |
+| IWX0098 | W | `ACCEPT ... FROM ESCAPE KEY (GnuCOBOL; Enterprise COBOL has no screen ACCEPT): the code of the key that ended the last screen ACCEPT, as COB-CRT-STATUS holds it` |
+| IWX0099 | W | `INSPECT {literal} (GnuCOBOL; Enterprise COBOL inspects a data item): its characters are tallied` |
+| IWX0100 | W | `a period with no space after it ends {paragraph} (GnuCOBOL; Enterprise COBOL follows a separator period with a space): it is read as a separator period` |
 
 ## Run-time refusals
 
