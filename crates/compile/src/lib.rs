@@ -2370,8 +2370,10 @@ impl Check<'_> {
                 if !self.intrinsic(&f.name) {
                     match self.functions.map(|all| all.iter().find(|u| u.name == f.name)) {
                         Some(Some(udf)) => {
-                            if udf.later {
-                                self.errors.push(syntax::messages::IWX0091.at(f.pos, format!("FUNCTION {}, defined after this program in its source (GnuCOBOL; Enterprise COBOL takes a user-defined function only defined or prototyped before the program): it is invoked as that definition describes it", f.name)));
+                            match (&udf.found_in, udf.later) {
+                                (Some(file), _) => self.errors.push(syntax::messages::IWX0092.at(f.pos, format!("FUNCTION {}, defined in {file} (GnuCOBOL; Enterprise COBOL takes a user-defined function only defined or prototyped before the program): it is invoked as that definition describes it", f.name))),
+                                (None, true) => self.errors.push(syntax::messages::IWX0091.at(f.pos, format!("FUNCTION {}, defined after this program in its source (GnuCOBOL; Enterprise COBOL takes a user-defined function only defined or prototyped before the program): it is invoked as that definition describes it", f.name))),
+                                (None, false) => {}
                             }
                             function::check_invocation(udf, f, self.layout, self.alphabetic, self.program.environment.decimal_point_comma, self.errors)
                         }

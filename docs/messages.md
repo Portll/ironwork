@@ -901,6 +901,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0080 | W | `MOVE {name} of a procedure-pointer or function-pointer (GnuCOBOL and Micro Focus; Enterprise COBOL writes SET): it is read as SET ... TO {name}` |
 | IWX0090 | W | `EXIT FUNCTION (COBOL 2002 and GnuCOBOL; Enterprise COBOL ends a user-defined function with GOBACK): it ends the function as GOBACK does` |
 | IWX0091 | W | `FUNCTION {name}, defined after this program in its source (GnuCOBOL; Enterprise COBOL takes a user-defined function only defined or prototyped before the program): it is invoked as that definition describes it` |
+| IWX0092 | W | `FUNCTION {name}, defined in {file} (GnuCOBOL; Enterprise COBOL takes a user-defined function only defined or prototyped before the program): it is invoked as that definition describes it` |
 
 ## Run-time refusals
 

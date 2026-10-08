@@ -21,6 +21,8 @@ pub struct Udf {
     pub pos: Pos,
     /// Defined after the program in its source, which `--compliance extended` reads (IWX0091).
     pub later: bool,
+    /// Defined in another source, which `--compliance extended` reads (IWX0092): its file's name.
+    pub found_in: Option<String>,
 }
 
 /// A formal parameter or the RETURNING item: what an argument conforms to, and the shape of the
@@ -72,7 +74,7 @@ pub fn signature(p: &Prototype, qualify: Qualify) -> Result<Udf, Error> {
     };
     let returning = p.returning.as_deref().ok_or_else(|| syntax::messages::IWC0017.at(p.pos, format!("FUNCTION-ID {}: a user-defined function needs PROCEDURE DIVISION RETURNING", p.name)))?;
     let params = p.using.iter().map(|u| formal(&u.name, u.by_value)).collect::<Result<_, _>>()?;
-    Ok(Udf { name: p.name.clone(), external: p.external.clone(), params, result: formal(returning, false)?, pos: p.pos, later: false })
+    Ok(Udf { name: p.name.clone(), external: p.external.clone(), params, result: formal(returning, false)?, pos: p.pos, later: false, found_in: None })
 }
 
 /// The functions a program may invoke, each laid out once. A prototype that does not lay out is
@@ -95,6 +97,11 @@ pub fn functions(program: &Program, qualify: Qualify, errors: &mut Vec<Error>) -
     for p in &program.later_functions {
         if let Ok(udf) = signature(p, qualify) {
             out.push(Udf { later: true, ..udf });
+        }
+    }
+    for (p, file) in &program.elsewhere_functions {
+        if let Ok(udf) = signature(p, qualify) {
+            out.push(Udf { later: true, found_in: Some(file.clone()), ..udf });
         }
     }
     facilities(program, errors);

@@ -91,3 +91,38 @@ fn compile_writes_no_module_for_a_prototype_and_one_for_a_program_that_invokes_a
     assert_eq!((written.status.code(), modules), (Some(0), vec!["DOUBLE.iwm".to_owned()]), "{}", String::from_utf8_lossy(&written.stderr));
     assert_eq!((invoking.status.code(), written_too), (Some(0), true), "{}", String::from_utf8_lossy(&invoking.stderr));
 }
+
+const CALLER: &[&str] = &[
+    "IDENTIFICATION DIVISION.",
+    "PROGRAM-ID. CALLER.",
+    "ENVIRONMENT DIVISION.",
+    "CONFIGURATION SECTION.",
+    "REPOSITORY.",
+    "    FUNCTION DOUBLE.",
+    "DATA DIVISION.",
+    "WORKING-STORAGE SECTION.",
+    "01 K PIC 9(3) VALUE 21.",
+    "PROCEDURE DIVISION.",
+    "    DISPLAY 'DOUBLE ' FUNCTION DOUBLE(K)",
+    "    GOBACK.",
+    "END PROGRAM CALLER.",
+];
+
+#[test]
+fn under_extended_a_function_another_source_defines_is_read_from_the_libraries() {
+    let dir = temp("elsewhere");
+    let caller = dir.join("caller.cbl");
+    fs::write(&caller, source(CALLER)).unwrap();
+    fs::write(dir.join("arith.cbl"), source(DOUBLE)).unwrap();
+    let checked = ironwork(&["check", "--compliance", "extended", caller.to_str().unwrap()]);
+    let err = String::from_utf8_lossy(&checked.stderr).into_owned();
+    assert_eq!(checked.status.code(), Some(4), "{err}");
+    assert!(err.contains("IWX0092-W FUNCTION DOUBLE, defined in arith.cbl"), "{err}");
+    let strict = ironwork(&["check", caller.to_str().unwrap()]);
+    let strict_err = String::from_utf8_lossy(&strict.stderr).into_owned();
+    assert!(strict_err.contains("IWC0106-S FUNCTION DOUBLE: neither an intrinsic function nor a user-defined function"), "{strict_err}");
+    fs::rename(dir.join("arith.cbl"), dir.join("double.cbl")).unwrap();
+    let ran = ironwork(&["run", "--compliance", "extended", "-L", dir.to_str().unwrap(), caller.to_str().unwrap()]);
+    fs::remove_dir_all(&dir).unwrap();
+    assert_eq!((String::from_utf8_lossy(&ran.stdout).as_ref(), ran.status.code()), ("DOUBLE 0042\n", Some(0)), "{}", String::from_utf8_lossy(&ran.stderr));
+}

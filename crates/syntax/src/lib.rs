@@ -186,6 +186,31 @@ pub fn program_ids(text: &str, compliance: numeric::Compliance) -> Vec<String> {
 /// parse is read again with cobc's tab stops where it holds a tab, and in free form where that
 /// parses; so is one whose text fixed form cuts at column 72, in free form.
 pub fn parse_all_with(text: &str, libraries: &copy::Libraries) -> Result<Vec<ast::Program>, Error> {
+    let mut programs = parse_all_reading(text, libraries)?;
+    if libraries.compliance() == numeric::Compliance::Extended {
+        functions_elsewhere(&mut programs, libraries);
+    }
+    Ok(programs)
+}
+
+/// Under `--compliance extended`, each function a program's REPOSITORY paragraph names that its
+/// source neither defines nor prototypes, as the libraries' program sources define it (IWX0092).
+fn functions_elsewhere(programs: &mut [ast::Program], libraries: &copy::Libraries) {
+    for p in programs.iter_mut() {
+        for name in p.repository_functions.clone() {
+            let known = p.prototypes.iter().chain(&p.later_functions).any(|q| q.name.eq_ignore_ascii_case(&name));
+            if known || ast::is_intrinsic_name(&name) {
+                continue;
+            }
+            if let Some((prototype, path)) = libraries.function_definition(&name) {
+                let file = path.file_name().map_or_else(|| path.display().to_string(), |f| f.to_string_lossy().into_owned());
+                p.elsewhere_functions.push((prototype, file));
+            }
+        }
+    }
+}
+
+fn parse_all_reading(text: &str, libraries: &copy::Libraries) -> Result<Vec<ast::Program>, Error> {
     use numeric::{Compliance, SourceFormat};
     let start = match (libraries.compliance(), libraries.source_format()) {
         (Compliance::Extended, SourceFormat::Fixed) => source::Start::Fixed,

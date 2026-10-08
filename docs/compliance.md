@@ -1251,9 +1251,22 @@ takes a user-defined function only defined or prototyped before the program): it
 definition describes it`, at the invocation.
 
 A program whose REPOSITORY paragraph names a function the same source defines or prototypes after it
-invokes it as that definition gives its parameters and RETURNING item, which cobc allows. A function
-defined in no source the compile reads, and a function prototyped nowhere, stay refused with
-IWC0106-S: its RETURNING item's class and size are not known when the program is compiled.
+invokes it as that definition gives its parameters and RETURNING item, which cobc allows.
+
+### IWX0092-W A function defined in another source
+
+`IWX0092-W FUNCTION {name}, defined in {file} (GnuCOBOL; Enterprise COBOL takes a user-defined
+function only defined or prototyped before the program): it is invoked as that definition describes
+it`, at the invocation.
+
+GnuCOBOL compiles an invocation of a function its REPOSITORY paragraph names without its definition,
+and takes the function's result as the called module returns it. ironwork needs the RETURNING item's
+class and size when it compiles the program, so it reads the definition from the program sources
+(`.cbl`, `.cob`) of the directories the compile reads copybooks from: the program's own directory
+first, then each `-I` directory, each one's files in name order. The first definition or prototype of
+that name is the function's interface. A function no such source defines stays refused with
+IWC0106-S. A run finds the function's code as for any user-defined function: in the module, or by
+its name in a program library.
 
 ## Relaxed
 

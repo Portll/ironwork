@@ -69,6 +69,10 @@ pub struct Program {
     /// Under `--compliance extended`, the user-defined functions its source defines or prototypes
     /// after it that its REPOSITORY paragraph names, which GnuCOBOL lets it invoke.
     pub later_functions: Vec<Prototype>,
+    /// Under `--compliance extended`, the user-defined functions its REPOSITORY paragraph names that
+    /// its source does not define, as a program source of the compile's libraries defines them, with
+    /// that source's file name.
+    pub elsewhere_functions: Vec<(Prototype, String)>,
     /// The user-defined functions its REPOSITORY paragraph, or its outermost program's, names. One
     /// with an intrinsic function's name is invoked by that name only where it is named here.
     pub repository_functions: Vec<String>,

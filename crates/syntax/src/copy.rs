@@ -25,6 +25,8 @@ pub struct Libraries {
     /// A source with no IDENTIFICATION DIVISION is a program named after its file, as a retry under
     /// `--compliance loose`.
     assume_program_id: bool,
+    /// A source read for a function's definition does not look for its own functions' definitions.
+    no_function_search: bool,
 }
 
 const COPYBOOKS: &[&str] = &[".cpy", ".CPY", ".copy", ".COPY"];
@@ -34,7 +36,7 @@ const MAX_DEPTH: usize = 32;
 
 impl Libraries {
     pub fn new(dirs: Vec<PathBuf>) -> Self {
-        Self { dirs, program: None, compliance: numeric::Compliance::Strict, source_format: numeric::SourceFormat::Auto, relaxed: false, loose: false, empty_literal: numeric::EmptyLiteral::Space, member_tab_stops: false, assume_program_id: false }
+        Self { dirs, program: None, compliance: numeric::Compliance::Strict, source_format: numeric::SourceFormat::Auto, relaxed: false, loose: false, empty_literal: numeric::EmptyLiteral::Space, member_tab_stops: false, assume_program_id: false, no_function_search: false }
     }
 
     /// These libraries, for compiling the program in `program`.
@@ -103,6 +105,41 @@ impl Libraries {
     fn find(&self, name: &str, library: Option<&str>, literal: bool) -> Option<PathBuf> {
         let rounds = if literal { [BARE, COPYBOOKS, PROGRAM_SOURCES] } else { [COPYBOOKS, PROGRAM_SOURCES, BARE] };
         self.find_in_rounds(name, library, &rounds)
+    }
+
+    /// The definition or prototype of user-defined function `name` among the program sources of
+    /// these libraries' directories, the program's own directory first and each directory's files in
+    /// name order, read under these libraries without looking further: its prototype and its file.
+    pub fn function_definition(&self, name: &str) -> Option<(crate::ast::Prototype, PathBuf)> {
+        if self.no_function_search {
+            return None;
+        }
+        let nested = Self { no_function_search: true, ..self.clone() };
+        let wanted = name.to_ascii_uppercase();
+        for d in &self.dirs {
+            let Ok(entries) = std::fs::read_dir(d) else { continue };
+            let mut files: Vec<PathBuf> = entries
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.is_file() && p.extension().and_then(|e| e.to_str()).is_some_and(|e| PROGRAM_SOURCES.iter().any(|s| s[1..].eq_ignore_ascii_case(e))))
+                .collect();
+            files.sort();
+            for path in files {
+                if self.program.as_deref().is_some_and(|program| same_file(program, &path)) {
+                    continue;
+                }
+                let Ok(bytes) = std::fs::read(&path) else { continue };
+                let text = decode(&bytes);
+                let upper = text.to_ascii_uppercase();
+                if !(upper.contains("FUNCTION-ID") && upper.contains(&wanted)) {
+                    continue;
+                }
+                let Ok(programs) = crate::parse_all_with(&text, &nested.with_program(&path)) else { continue };
+                if let Some(p) = programs.iter().flat_map(|p| &p.prototypes).find(|q| q.name.eq_ignore_ascii_case(&wanted)) {
+                    return Some((p.clone(), path));
+                }
+            }
+        }
+        None
     }
 
     pub(crate) fn find_bms(&self, name: &str, library: Option<&str>) -> Option<PathBuf> {
