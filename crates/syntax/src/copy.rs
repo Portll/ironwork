@@ -18,6 +18,7 @@ pub struct Libraries {
     compliance: numeric::Compliance,
     source_format: numeric::SourceFormat,
     relaxed: bool,
+    empty_literal: numeric::EmptyLiteral,
 }
 
 const COPYBOOKS: &[&str] = &[".cpy", ".CPY", ".copy", ".COPY"];
@@ -27,7 +28,7 @@ const MAX_DEPTH: usize = 32;
 
 impl Libraries {
     pub fn new(dirs: Vec<PathBuf>) -> Self {
-        Self { dirs, program: None, compliance: numeric::Compliance::Strict, source_format: numeric::SourceFormat::Auto, relaxed: false }
+        Self { dirs, program: None, compliance: numeric::Compliance::Strict, source_format: numeric::SourceFormat::Auto, relaxed: false, empty_literal: numeric::EmptyLiteral::Space }
     }
 
     /// These libraries, for compiling the program in `program`.
@@ -46,12 +47,16 @@ impl Libraries {
 
     /// These libraries, read under the compliance level and source format `flags` give.
     pub fn with_flags(&self, flags: &[String]) -> Self {
-        Self { compliance: numeric::Compliance::of(flags), source_format: numeric::SourceFormat::of(flags), relaxed: numeric::Compliance::relaxed(flags), ..self.clone() }
+        Self { compliance: numeric::Compliance::of(flags), source_format: numeric::SourceFormat::of(flags), relaxed: numeric::Compliance::relaxed(flags), empty_literal: numeric::EmptyLiteral::of(flags), ..self.clone() }
     }
 
     /// Under `--compliance relaxed`.
     pub fn relaxed(&self) -> bool {
         self.relaxed
+    }
+
+    pub fn empty_literal(&self) -> numeric::EmptyLiteral {
+        self.empty_literal
     }
 
     /// These libraries, read in `format` under `--compliance extended`.

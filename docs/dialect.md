@@ -224,7 +224,7 @@ cobc option removes one, it is named.
 
 | Difference | ironwork, as IBM documents | cobc | Seen in |
 |---|---|---|---|
-| DISPLAY of a signed zoned item | the last digit overpunched: -12 in `S9(3)` shows `01K` (Programming Guide, DISPSIGN) | a separate trailing sign, `012-` (`display_numeric`, libcob/termio.c); `-fpretty-display` gives `-012`, which is ironwork under `CBL DISPSIGN(SEP)` | corpus, 4 of 20 differing programs; test programs |
+| DISPLAY of a signed zoned item | the last digit overpunched: -12 in `S9(3)` shows `01K` (Programming Guide, DISPSIGN). Under `gnucobol`, with no DISPSIGN card or `--numeric-display`, ironwork shows cobc's form (operator 2026-10-08) | a separate trailing sign, `012-` (`display_numeric`, libcob/termio.c); `-fpretty-display` gives `-012`, which is ironwork under `--numeric-display cobc` | corpus, 4 of 20 differing programs; test programs |
 | DISPLAY of a zoned item holding other characters than digits | the bytes as stored | each one rewritten as 0 (termio.c) | probe |
 | The RETURN-CODE special register | `S9(4) BINARY`: DISPLAY shows `+00007` under `gnucobol` | a fullword, `+000000007` | test programs |
 | A binary item larger than its PICTURE | cut to the PICTURE under TRUNC(STD), IBM's default: `MOVE 123456` to `9(4) COMP` keeps 3456 | keeps the halfword's value, 57920: `-std=ibm-strict` sets `binary-truncate: no`, which is TRUNC(BIN); `-fbinary-truncate` cuts. Give ironwork `CBL TRUNC(BIN)` to compare | CCVS85 NC105A; corpus; test programs |

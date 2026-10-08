@@ -815,6 +815,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWS0102 | S | `the Communication feature ({a COMMUNICATION SECTION item or statement}) is not part of Enterprise COBOL, which does not compile it` |
 | IWS0104 | E | `{terminator}: an explicit scope terminator with no verb open for it; it was discarded` |
 | IWS0105 | E | `a period was required before {word}: one was assumed` |
+| IWS0106 | E | `{literal}: Enterprise COBOL's alphanumeric literals hold at least one character; {how it is read}` |
 | IWX0001 | W | `free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}` |
 | IWX0002 | W | `constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry` |
 | IWX0003 | W | `<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =` |
@@ -876,6 +877,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0060 | W | `PICTURE {picture} (GnuCOBOL and Micro Focus; Enterprise COBOL's ARITH(COMPAT) allows 18 digits): the program is compiled with ARITH(EXTEND), which allows 31` |
 | IWX0061 | W | `{name}. in Area B (Micro Focus and GnuCOBOL; Enterprise COBOL puts a paragraph header in Area A): a name and a period after a separator period is read as a paragraph header` |
 | IWX0062 | W | `FUNCTION {name} (GnuCOBOL; Enterprise COBOL has no such function): each text found is replaced, the pairs tried in order at each position` |
+| IWX0063 | W | `{literal} (GnuCOBOL and Micro Focus; Enterprise COBOL's literals hold at least one character): {how it is read}` |
 
 ## Run-time refusals
 

@@ -97,6 +97,18 @@ flags:
              fixed reads fixed form unless a directive says otherwise; free reads every source in
              free form from its first line, as cobc -free does. IWX0001 names each file read in free
              form and why. --source-format=free works too
+  --numeric-display ibm|cobc-ibm-strict|cobc
+             how DISPLAY shows a zoned, packed or binary item: ibm as Enterprise COBOL stores it, the
+             sign overpunched; cobc-ibm-strict as cobc -std=ibm-strict, the sign after the digits;
+             cobc as cobc's default dialect and Micro Focus, a sign first, the decimal point and
+             PICTURE P positions shown. Without it, strict shows ibm, extended and relaxed cobc, and
+             --dialect gnucobol cobc-ibm-strict; a CBL or PROCESS card naming DISPSIGN outranks it.
+             --numeric-display=cobc works too
+  --empty-literal space|empty
+             how a zero-length alphanumeric literal, two quotes or two apostrophes, is read: space
+             (the default) reads one space, as cobc assumes it; empty reads no characters.
+             Enterprise COBOL's literals hold at least one character, so strict gives IWS0106-E and
+             extended IWX0063-W either way. --empty-literal=empty works too
   --optimize=0|1|2
              the compiler invocation's OPTIMIZE level; a CBL or PROCESS card's OPTIMIZE wins over it.
              Under NOINVDATA, 1 and 2 compare an unsigned zoned item with zero, or with one of its
@@ -890,6 +902,22 @@ fn driver() -> ExitCode {
                 }
             }
             f if f.starts_with("--compliance=") => refuse!("--compliance needs strict, extended or relaxed"),
+            "--numeric-display" => match args.next().as_deref().and_then(numeric::DispSign::display_named) {
+                Some(d) => flags.push(format!("--numeric-display={}", d.display_name())),
+                None => refuse!("--numeric-display needs ibm, cobc-ibm-strict or cobc"),
+            },
+            f if f.starts_with("--numeric-display=") => match numeric::DispSign::display_named(&f["--numeric-display=".len()..]) {
+                Some(_) => flags.push(a),
+                None => refuse!("--numeric-display needs ibm, cobc-ibm-strict or cobc"),
+            },
+            "--empty-literal" => match args.next().as_deref().and_then(numeric::EmptyLiteral::named) {
+                Some(e) => flags.push(format!("--empty-literal={}", e.name())),
+                None => refuse!("--empty-literal needs space or empty"),
+            },
+            f if f.starts_with("--empty-literal=") => match numeric::EmptyLiteral::named(&f["--empty-literal=".len()..]) {
+                Some(_) => flags.push(a),
+                None => refuse!("--empty-literal needs space or empty"),
+            },
             "--source-format" => match args.next().as_deref().and_then(numeric::SourceFormat::named) {
                 Some(f) => flags.push(format!("--source-format={}", f.name())),
                 None => refuse!("--source-format needs fixed, free or auto"),

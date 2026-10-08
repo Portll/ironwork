@@ -71,7 +71,7 @@ fn recorded_argv(command: &str, program: &str) -> Vec<String> {
     while let Some(a) = args.next() {
         if a.starts_with('-') {
             out.push(a.clone());
-            if a == "--compliance" || a == "--source-format" || a == "--dialect" || a == "--assume" {
+            if a == "--compliance" || a == "--source-format" || a == "--empty-literal" || a == "--numeric-display" || a == "--dialect" || a == "--assume" {
                 out.extend(args.next());
             } else if args.peek().is_some_and(|v| !v.starts_with('-')) && !matches!(a.as_str(), "-silent" | "-strict-sort-keys" | "--exit-code") {
                 let value = args.next().unwrap_or_default();

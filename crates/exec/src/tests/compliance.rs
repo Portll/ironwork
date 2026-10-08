@@ -34,7 +34,7 @@ const EXTENDED_PROGRAM: &str = concat!(
 #[test]
 fn an_extended_program_runs_alike_on_the_interpreter_and_the_vm() {
     let walked = Harness::source(EXTENDED_PROGRAM).flags(EXTENDED).run(Executor::Interpreter);
-    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("HELLO|AB\n000000000K|00002|00005\n", Some(&Ending::Goback)), "{}", walked.err);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("HELLO|AB\n-0000000002|00002|00005\n", Some(&Ending::Goback)), "{}", walked.err);
     let vm = Harness::source(EXTENDED_PROGRAM).flags(EXTENDED).run(Executor::Vm);
     assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
 }
@@ -90,7 +90,7 @@ const RETURNING_OMITTED: &str = concat!(
 #[test]
 fn a_program_returning_omitted_returns_its_return_code_and_no_item() {
     let walked = Harness::source(RETURNING_OMITTED).flags(EXTENDED).run(Executor::Interpreter);
-    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("0001\n0099 0002\n", Some(&Ending::Goback)), "{}", walked.err);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("+0001\n0099 +0002\n", Some(&Ending::Goback)), "{}", walked.err);
     let vm = Harness::source(RETURNING_OMITTED).flags(EXTENDED).run(Executor::Vm);
     assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
     let parsed = syntax::parse_all_with(RETURNING_OMITTED, &syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended)).unwrap();
@@ -375,7 +375,7 @@ fn binary_char_is_one_byte_alike_on_both_executors_and_shown_as_cobc_shows_it() 
         o.out
     };
     let ibm = run(Executor::Interpreter, EXTENDED);
-    assert_eq!(ibm, "00J 044 10O\n0034 000 002 065\n");
+    assert_eq!(ibm, "-001 044 -106\n0034 000 +002 065\n");
     assert_eq!(run(Executor::Vm, EXTENDED), ibm);
     let gnucobol = ["--compliance=extended", "--dialect=gnucobol"];
     let shown = run(Executor::Interpreter, &gnucobol);
@@ -926,7 +926,7 @@ const GNUCOBOL_FLOATS: &str = concat!(
 fn float_short_and_float_long_are_comp_1_and_comp_2_shown_as_ibm_shows_them_on_both_executors() {
     let walked = Harness::source(GNUCOBOL_FLOATS).flags(EXTENDED).run(Executor::Interpreter);
     assert!(walked.ending.is_ok(), "{:?}\n{}", walked.ending, walked.err);
-    assert_eq!(walked.out, " .15000000E 01 -.99999993E-03\n .33333333333333333E 00  .00000000000000000E 00\n123456H\n");
+    assert_eq!(walked.out, " .15000000E 01 -.99999993E-03\n .33333333333333333E 00  .00000000000000000E 00\n+12345.68\n");
     let vm = Harness::source(GNUCOBOL_FLOATS).flags(EXTENDED).run(Executor::Vm);
     assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
     let warned = diagnostics_under(GNUCOBOL_FLOATS, numeric::Compliance::Extended);
@@ -1981,7 +1981,7 @@ const WIDE_PICTURES: &str = concat!(
 #[test]
 fn a_picture_past_18_digits_compiles_the_program_with_arith_extend_under_extended() {
     let walked = Harness::source(WIDE_PICTURES).flags(EXTENDED).run(Executor::Interpreter);
-    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("12345678901234567891 001234567890123456789100050 000000000000000000\n", Some(&Ending::Goback)), "{}", walked.err);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("12345678901234567891 0012345678901234567891000.50 000000000000000000\n", Some(&Ending::Goback)), "{}", walked.err);
     let vm = Harness::source(WIDE_PICTURES).flags(EXTENDED).run(Executor::Vm);
     assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
     assert_eq!(diagnostics_under(WIDE_PICTURES, numeric::Compliance::Extended), [(5, 8, Some("IWX0060"), Severity::Warning)]);
@@ -2027,4 +2027,55 @@ fn substitute_replaces_the_first_pair_found_at_each_position_alike_on_both_execu
     assert_eq!(warned, [8, 9, 10, 11, 13, 14, 15, 16]);
     let refused = diagnostics_under(SUBSTITUTE, numeric::Compliance::Strict);
     assert_eq!(refused.iter().filter(|d| d.2 == Some("IWC0321")).count(), 8, "{refused:?}");
+}
+
+/// Zoned, packed and binary items of each sign and scale, a separate sign each side, PICTURE P
+/// each side and a zoned item holding letters.
+const NUMBERS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. NUMBERS.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 A PIC S9(3)V99 VALUE -12.5.\n",
+    "       01 B PIC S9(3) COMP-3 VALUE -12.\n",
+    "       01 C PIC 9(3)V9 COMP-3 VALUE 1.5.\n",
+    "       01 D PIC S9(4) COMP VALUE -7.\n",
+    "       01 E PIC S9(3)V99 SIGN LEADING SEPARATE VALUE -1.25.\n",
+    "       01 F PIC 9(3)PP VALUE 12300.\n",
+    "       01 G PIC PPP99 VALUE 0.00012.\n",
+    "       01 H PIC S9(3)V99 COMP-5 VALUE 3.5.\n",
+    "       01 K PIC SV99 VALUE -.5.\n",
+    "       01 L PIC S9(3)V99 SIGN TRAILING SEPARATE VALUE 1.25.\n",
+    "       01 M PIC S9(3) VALUE 12.\n",
+    "       01 N PIC 9V99 BINARY VALUE 1.5.\n",
+    "       01 Q PIC X(3) VALUE \"abc\".\n",
+    "       01 R REDEFINES Q PIC 9(3).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY A '|' B '|' C '|' D '|' E '|' F\n",
+    "           DISPLAY G '|' H '|' K '|' L '|' M '|' N '|' R\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn display_shows_numbers_as_the_compliance_level_or_the_flag_says_alike_on_both_executors() {
+    // cobc 3.2's default dialect and -std=ibm-strict.
+    let cobc = "-012.50|-012|001.5|-0007|-001.25|12300\n.00012|+0000000350|-.50|001.25+|+012|1.50|abc\n";
+    let ibm_strict = "01250-|-012|0015|-00007|-00125|123\n12|+0000000350|50-|00125+|012+|00150|abc\n";
+    let ibm = "0125}|01K|0015|000P|-00125|123\n12|0000000350|5}|00125+|01B|150|abc\n";
+    for (flags, shown) in [
+        (&["--compliance=extended"][..], cobc),
+        (&["--compliance=extended", "--relaxed"], cobc),
+        (&["--dialect=gnucobol"], ibm_strict),
+        (&["--compliance=extended", "--dialect=gnucobol"], ibm_strict),
+        (&[], ibm),
+        (&["--compliance=extended", "--numeric-display=ibm"], ibm),
+        (&["--numeric-display=cobc"], cobc),
+    ] {
+        let walked = Harness::source(NUMBERS).flags(flags).run(Executor::Interpreter);
+        assert_eq!(walked.out, shown, "{flags:?}: {}", walked.err);
+        let vm = Harness::source(NUMBERS).flags(flags).run(Executor::Vm);
+        assert_eq!(vm.out, walked.out, "{flags:?}");
+    }
+    let card = format!("       CBL DISPSIGN(COMPAT)\n{NUMBERS}");
+    assert_eq!(Harness::source(&card).flags(EXTENDED).run(Executor::Interpreter).out, ibm);
 }

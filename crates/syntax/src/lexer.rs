@@ -74,6 +74,8 @@ struct Lexer<'a> {
     warned: Vec<bool>,
     /// NSYMBOL(DBCS) is on the cards: N'...' is a DBCS literal.
     n_is_dbcs: bool,
+    /// How a zero-length alphanumeric literal is read.
+    empty: numeric::EmptyLiteral,
 }
 
 /// The most characters a DBCS literal holds (Language Reference SC27-8713-03, p. 42).
@@ -89,6 +91,11 @@ pub fn lex(source: &Source) -> Result<Vec<Token>, Error> {
 /// Lexes `source` under `compliance`: `--compliance extended` reads `<>` as NOT = and keeps `&`
 /// after a literal or a word for [`crate::extended`].
 pub fn lex_under(source: &Source, compliance: Compliance) -> Result<Vec<Token>, Error> {
+    lex_with(source, compliance, numeric::EmptyLiteral::Space)
+}
+
+/// Lexes as [`lex_under`] does, a zero-length alphanumeric literal read as `empty` says.
+pub fn lex_with(source: &Source, compliance: Compliance, empty: numeric::EmptyLiteral) -> Result<Vec<Token>, Error> {
     let mut options = numeric::Options::default();
     for card in &source.options {
         options.apply(card).ok();
@@ -108,6 +115,7 @@ pub fn lex_under(source: &Source, compliance: Compliance) -> Result<Vec<Token>, 
         free: &source.free,
         warned: vec![false; source.free.len()],
         n_is_dbcs,
+        empty,
     };
     while lx.at < lx.chars.len() {
         lx.next_token()?;
@@ -259,7 +267,20 @@ impl Lexer<'_> {
         let quote_next = matches!(next, Some('\'' | '"'));
         match c {
             '\'' | '"' => {
-                let text = self.quoted(pos)?;
+                let mut text = self.quoted(pos)?;
+                if text.is_empty() {
+                    let (read, how) = match self.empty {
+                        numeric::EmptyLiteral::Space => (" ", "a space is assumed, as cobc assumes it"),
+                        numeric::EmptyLiteral::Empty => ("", "it is read as no characters (--empty-literal empty)"),
+                    };
+                    let shown = format!("{c}{c}");
+                    self.pending.push(if self.extended {
+                        crate::messages::IWX0063.at(pos, format!("{shown} (GnuCOBOL and Micro Focus; Enterprise COBOL's literals hold at least one character): {how}"))
+                    } else {
+                        crate::messages::IWS0106.at(pos, format!("{shown}: Enterprise COBOL's alphanumeric literals hold at least one character; {how}"))
+                    });
+                    text = read.to_owned();
+                }
                 self.emit(Tok::Alnum(text), pos);
             }
             'X' | 'x' if quote_next => {
@@ -666,5 +687,19 @@ mod tests {
             "       PROGRAM-ID. C.\n           4,5\n",
         );
         assert_eq!(numbers(text), ["1.5", "2.5", "3.5", "4", "5"]);
+    }
+
+    #[test]
+    fn a_zero_length_literal_is_a_space_unless_the_flag_says_empty_and_strict_names_it_at_severity_e() {
+        let source = source::read("           MOVE '' TO X \"\" 'A'").unwrap();
+        let literals = |lexed: &[Token]| lexed.iter().filter_map(|t| if let Tok::Alnum(a) = &t.tok { Some(a.clone()) } else { None }).collect::<Vec<_>>();
+        let ids = |lexed: &[Token]| lexed.iter().flat_map(|t| t.messages.iter().map(|m| (m.id, m.severity))).collect::<Vec<_>>();
+        let strict = lex_with(&source, Compliance::Strict, numeric::EmptyLiteral::Space).unwrap();
+        assert_eq!(literals(&strict), [" ", " ", "A"]);
+        assert_eq!(ids(&strict), [(Some("IWS0106"), crate::Severity::Error); 2]);
+        let extended = lex_with(&source, Compliance::Extended, numeric::EmptyLiteral::Empty).unwrap();
+        assert_eq!(literals(&extended), ["", "", "A"]);
+        assert_eq!(ids(&extended), [(Some("IWX0063"), crate::Severity::Warning); 2]);
+        assert!(extended[1].messages[0].message.ends_with("it is read as no characters (--empty-literal empty)"));
     }
 }

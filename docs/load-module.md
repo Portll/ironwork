@@ -3,7 +3,7 @@
 The `.iwm` file format, and how a run unit loads it. It details §8 of
 [codegen-runtime.md](codegen-runtime.md) and serves invariants 6 and 7 of its §10.
 
-**Status:** format 1.2, frozen at major 1 (§8.1). The container, the encoding rules and every section's
+**Status:** format 1.3, frozen at major 1 (§8.1). The container, the encoding rules and every section's
 codec (§3 to §7, §9) are built in `rt::module`; `ironwork compile` writes modules, with the mapsets
 their programs name (§5.3) and the files their compile read (§9.2), and `ironwork dump` (§11)
 prints them. The loader (§8.2) is built: `ironwork run x.iwm` runs a module's first program on the
@@ -412,7 +412,7 @@ a byte past its switch's list.
 | `quote` | `Quote` (:234) | tag: `Quote` 0, `Apost` 1. The figurative constant QUOTE's character | `QUOTE`, `Q`, `APOST` |
 | `currency` | `Option<Currency>` (:261) | `None`, or `Some` then the tag: `Char` 0 followed by the `char`, `Hex` 1 followed by the byte. `Options::currency_symbol` (:822) reads a `Hex` byte in the program's code page | `CURRENCY(literal)`, `CURR(literal)`, and `NOCURRENCY`, `NOCURR` |
 | `nsymbol` | `Nsymbol` (:269) | tag: `National` 0, `Dbcs` 1 | `NSYMBOL`, `NS`, with `NATIONAL`, `NAT` or `DBCS` |
-| `dispsign` | `DispSign` (:279) | tag: `Compat` 0, `Sep` 1 | `DISPSIGN`, `DS`, with `COMPAT`, `C`, `SEP` or `S` |
+| `dispsign` | `DispSign` (:279) | tag: `Compat` 0, `Sep` 1, `CobcIbmStrict` 2, `Cobc` 3 | `DISPSIGN`, `DS`, with `COMPAT`, `C`, `SEP` or `S`; `--numeric-display ibm\|cobc-ibm-strict\|cobc`, and with neither `CobcIbmStrict` under `--dialect gnucobol` and `Cobc` under `--compliance extended` |
 | `intdate` | `IntDate` (:288) | tag: `Ansi` 0, `Lilian` 1 | `INTDATE(ANSI\|LILIAN)` |
 | `qualify` | `Qualify` (:297) | tag: `Compat` 0, `Extend` 1 | `QUALIFY`, `QUA`, with `COMPAT`, `C`, `EXTEND` or `E` |
 | `initial` | `bool` | 0 or 1 | `INITIAL`, `NOINITIAL` |
@@ -586,7 +586,7 @@ error if it meets one. `HostType::Zoned`'s sign is `rt::SignClause`.
 
 ### 8.1 Versions
 
-The format version is `major.minor`; this ironwork writes 1.2 and reads every 1.x minor, from
+The format version is `major.minor`; this ironwork writes 1.3 and reads every 1.x minor, from
 `Version::OLDEST_READABLE` in `rt::module`, which is 1.0. 1.0 is the first frozen format. It holds
 what the 0.x formats came to hold, the files that take their name from a data item and the places
 SSRANGE checks against their tables at the `LIR` section's end, and the `--assume` choices at the
@@ -598,7 +598,11 @@ the environment's `Environment` op and `AcceptFrom` 8
 (lir.md §9.1), and `InspectMode` 4, TRAILING. 1.1 adds the optional `FACTS` section (§5.4). 1.2 adds
 Micro Focus's split keys at the `LIR` section's end, after the table ranges, and `StartRel` 3 and 4,
 KEY < and NOT >, both under `--compliance extended`; a 1.1 reader refuses a module holding a split
-key as malformed, rather than read its keys wrong. A 0.x module is refused, and compiling the source again is the remedy (question 1).
+key as malformed, rather than read its keys wrong. Modules marked 1.2 by ironwork 0.9.0 can also
+hold the functions 87 to 89 and the `DisplayError` op, 40, which came after the bump; a 1.2 reader
+from before them refuses such a module as holding an unknown tag. 1.3 adds the functions 90 and 91,
+SUBSTITUTE and SUBSTITUTE-CASE, and `DispSign` 2 and 3, GnuCOBOL's two ways of showing a number
+(§5.1), all under `--compliance extended` or `--dialect gnucobol`. A 0.x module is refused, and compiling the source again is the remedy (question 1).
 
 | The reader finds | It does |
 |---|---|

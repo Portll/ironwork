@@ -22,6 +22,24 @@ module's first program was compiled with.
 Each warning is severity W, so a program that uses an extension and nothing else checks with
 return code 4 and runs; `-warnings-block` refuses it, as it refuses any program with warnings.
 
+## How DISPLAY shows numbers
+
+The compliance level also chooses how DISPLAY shows a zoned, packed or binary item (operator
+2026-10-08). `--numeric-display ibm|cobc-ibm-strict|cobc` chooses it outright, and a CBL or PROCESS
+card naming DISPSIGN outranks both. With neither:
+
+| Level and dialect | Form | `S9(3)V99` holding -12.5, `S9(3)` 12, `9(3)V9` 1.5, `9(3)PP` 12300 |
+|---|---|---|
+| strict | Enterprise COBOL's, the digits as stored, the last overpunched (Programming Guide, DISPSIGN) | `0125}` `01B` `0015` `123` |
+| extended or relaxed | cobc's default dialect's and Micro Focus's: a sign first, or where a separate one is declared; the program's decimal point at the item's scale; PICTURE P positions as zeros | `-012.50` `+012` `001.5` `12300` |
+| `--dialect gnucobol`, either level | cobc -std=ibm-strict's: an overpunched item's digits, then its sign | `01250-` `012+` `0015` `123` |
+
+Packed and binary items show their PICTURE's digits under cobc's default form, and COMP-5,
+BINARY-CHAR, COMP-X and PIC X(n) COMP-5 items every digit their bytes hold, with a sign first when
+signed, as cobc shows them (C14). A zoned item holding a byte other than a digit shows its bytes.
+Both executors and a load module (`DispSign` tags 2 and 3) give these forms, checked against cobc
+3.2.
+
 ## The extensions
 
 The first six are read before the parser sees the program, into constructs Enterprise COBOL has,
@@ -1073,6 +1091,17 @@ argument stands for its digits, unsigned, as in CONCATENATE. Both executors give
 One difference: cobc reads a zero-length literal `''` as a space, with a warning, where ironwork
 reads it as no characters, so `SUBSTITUTE(T 'x' '')` deletes each `x` where cobc puts a space. Strict
 refuses either function with IWC0321-S.
+
+### IWX0063-W A zero-length literal
+
+`IWX0063-W '' (GnuCOBOL and Micro Focus; Enterprise COBOL's literals hold at least one character):
+a space is assumed, as cobc assumes it`, at the literal.
+
+cobc reads `''` or `""` as one space, with a warning, in every dialect. Enterprise COBOL's
+alphanumeric literals are 1 to 160 bytes (Language Reference, Basic alphanumeric literals), so strict
+gives `IWS0106-E` and assumes the space too: the program compiles at return code 8, as Enterprise
+COBOL compiles past an E-level message. `--empty-literal empty` reads it as no characters instead,
+the reading ironwork gave before, under either level and with the same message.
 
 ## Relaxed
 

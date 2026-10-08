@@ -4,7 +4,7 @@ The lowered program the VM runs and a Rust emitter would read: its types, how ea
 interpreter runs lowers into it, and how lowering is checked.
 
 **Status:** built. Code generation (`compile::lower`) writes the LIR, the VM (`rt::vm`) runs it and
-`ironwork run` uses it by default, and load modules hold it at format 1.2. It details §7 of
+`ironwork run` uses it by default, and load modules hold it at format 1.3. It details §7 of
 [codegen-runtime.md](codegen-runtime.md).
 [semantics-library.md](semantics-library.md) gives the library the LIR calls, and
 [load-module.md](load-module.md) the file that holds it.

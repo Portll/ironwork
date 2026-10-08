@@ -19,14 +19,21 @@ type R<T> = Result<T, Abend>;
 /// sign overpunched on the last. Under DISPSIGN(SEP) a signed binary, packed or overpunched zoned
 /// item shows its sign, + or -, before its digits (Programming Guide SC27-8714-03, pp. 362-363,
 /// Table 48; assumption C213). Under --dialect gnucobol packed and binary items show as cobc's do
-/// (assumption C14). A national item is converted only `upon_console`, and is otherwise written as
-/// its bytes (Language Reference SC27-8713-03, p. 333; Programming Guide SC27-8714-03, p. 36).
+/// (assumption C14). GnuCOBOL's forms (`DispSign::CobcIbmStrict` and `DispSign::Cobc`) show items as
+/// cobc -std=ibm-strict and cobc's default dialect do. A national item is converted only
+/// `upon_console`, and is otherwise written as its bytes (Language Reference SC27-8713-03, p. 333;
+/// Programming Guide SC27-8714-03, p. 36).
 pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos, upon_console: bool) -> R<String> {
-    let separate = facts.options().dispsign == DispSign::Sep;
+    let dispsign = facts.options().dispsign;
+    let separate = dispsign == DispSign::Sep;
+    let whole_native = matches!(loc.kind, Kind::Binary { native, .. } if native.shows_whole(numeric::Trunc::Std) || native == Native::CompX);
     Ok(match loc.kind {
         Kind::National => national(facts.page(), store::bytes(mem, loc), upon_console),
         Kind::Dbcs { .. } => facts.page().decode_dbcs(store::bytes(mem, loc)),
-        Kind::Packed { digits, signed, .. } | Kind::Binary { digits, signed, .. } if facts.options().dialect_of(Switched::DisplayOfNondisplayNumeric) == Dialect::Gnucobol => {
+        Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } if dispsign == DispSign::Cobc && !whole_native => cobc(facts, mem, loc, pos)?,
+        Kind::Packed { digits, signed, .. } | Kind::Binary { digits, signed, .. }
+            if dispsign == DispSign::Cobc || facts.options().dialect_of(Switched::DisplayOfNondisplayNumeric) == Dialect::Gnucobol =>
+        {
             let Val::Num(f) = store::read_stored(facts, mem, loc, pos)? else { unreachable!() };
             let shown = match loc.kind {
                 Kind::Binary { native: Native::CompX, .. } => zoned_digits(f.magnitude.div_rem(pow10(digits)).1.to_u128().unwrap_or(0), digits as usize, decimal::UNSIGNED),
@@ -53,6 +60,19 @@ pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos, upon_cons
             };
             facts.page().decode(&if signed && separate { sign_first(f.negative, shown) } else { shown })
         }
+        Kind::Zoned { signed: true, sign, .. } if dispsign == DispSign::CobcIbmStrict && !sign.is_some_and(|s| s.separate) => {
+            let mut shown = store::bytes(mem, loc).to_vec();
+            let leading = sign.is_some_and(|s| s.position == SignPosition::Leading);
+            let at = if leading { 0 } else { shown.len() - 1 };
+            let mark = if matches!(shown[at] >> 4, 0xB | 0xD) { 0x60 } else { 0x4E };
+            shown[at] |= 0xF0;
+            if leading {
+                shown.insert(0, mark);
+            } else {
+                shown.push(mark);
+            }
+            facts.page().decode(&shown)
+        }
         Kind::Zoned { signed: true, sign, .. } if separate && !sign.is_some_and(|s| s.separate) => {
             let mut shown = store::bytes(mem, loc).to_vec();
             let at = if sign == Some(SignClause { position: SignPosition::Leading, separate: false }) { 0 } else { shown.len() - 1 };
@@ -65,6 +85,63 @@ pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos, upon_cons
             return Err(crate::refusal::IWR0067.abend("DISPLAY of a pointer, index or object reference is not supported", pos));
         }
         _ => facts.page().decode(store::bytes(mem, loc)),
+    })
+}
+
+/// cobc's default dialect's DISPLAY of a zoned, packed or binary item: a sign first, or where a
+/// separate one is declared, the digits with the program's decimal point at the item's scale, and
+/// PICTURE P positions as zeros. A zoned item holding a byte other than a digit shows its bytes.
+fn cobc(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> R<String> {
+    let Some((digits, scale)) = loc.kind.digits_scale() else { unreachable!() };
+    let (signed, separate) = match loc.kind {
+        Kind::Zoned { signed, sign, .. } => (signed, sign.filter(|s| s.separate).map(|s| s.position)),
+        Kind::Packed { signed, .. } | Kind::Binary { signed, .. } => (signed, None),
+        _ => unreachable!(),
+    };
+    let (negative, number) = match loc.kind {
+        Kind::Zoned { sign, .. } => {
+            let bytes = store::bytes(mem, loc);
+            let body = match separate {
+                Some(SignPosition::Leading) => &bytes[1..],
+                Some(SignPosition::Trailing) => &bytes[..bytes.len() - 1],
+                None => bytes,
+            };
+            let overpunched = match (signed, separate, sign.map(|s| s.position)) {
+                (false, ..) | (true, Some(_), _) => None,
+                (true, None, Some(SignPosition::Leading)) => Some(0),
+                (true, None, _) => Some(body.len() - 1),
+            };
+            let digit = |i: usize, b: u8| if Some(i) == overpunched { b | 0xF0 } else { b };
+            if body.iter().enumerate().any(|(i, &b)| !(0xF0..=0xF9).contains(&digit(i, b))) {
+                return Ok(facts.page().decode(bytes));
+            }
+            let negative = match separate {
+                Some(SignPosition::Leading) => bytes[0] == 0x60,
+                Some(SignPosition::Trailing) => bytes[bytes.len() - 1] == 0x60,
+                None => overpunched.is_some_and(|at| matches!(body[at] >> 4, 0xB | 0xD)),
+            };
+            (negative, body.iter().enumerate().map(|(i, &b)| char::from(b'0' + (digit(i, b) & 0x0F))).collect::<String>())
+        }
+        _ => {
+            let Val::Num(f) = store::read_stored(facts, mem, loc, pos)? else { unreachable!() };
+            let magnitude = f.magnitude.div_rem(pow10(digits)).1.to_u128().unwrap_or(0);
+            (f.negative, format!("{magnitude:0width$}", width = digits as usize))
+        }
+    };
+    let point = facts.decimal_point();
+    let shown = if scale > digits {
+        format!("{point}{}{number}", "0".repeat((scale - digits) as usize))
+    } else if scale > 0 {
+        let (whole, fraction) = number.split_at((digits - scale) as usize);
+        format!("{whole}{point}{fraction}")
+    } else {
+        format!("{number}{}", "0".repeat(store::scaling(facts, loc) as usize))
+    };
+    let mark = if negative { '-' } else { '+' };
+    Ok(match (signed, separate) {
+        (false, _) => shown,
+        (true, Some(SignPosition::Trailing)) => format!("{shown}{mark}"),
+        (true, _) => format!("{mark}{shown}"),
     })
 }
 

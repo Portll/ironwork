@@ -167,7 +167,7 @@ codec_enum!(CicsReturnWarning { Once = 0, Always = 1, Never = 2 });
 codec_enum!(Quote { Quote = 0, Apost = 1 });
 codec_enum!(Currency { Char(c) = 0, Hex(b) = 1 });
 codec_enum!(Nsymbol { National = 0, Dbcs = 1 });
-codec_enum!(DispSign { Compat = 0, Sep = 1 });
+codec_enum!(DispSign { Compat = 0, Sep = 1, CobcIbmStrict = 2, Cobc = 3 });
 codec_enum!(IntDate { Ansi = 0, Lilian = 1 });
 codec_enum!(Qualify { Compat = 0, Extend = 1 });
 codec_enum!(Vlr { Standard = 0, Compat = 1 });

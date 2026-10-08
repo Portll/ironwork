@@ -221,6 +221,13 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         native.quote = options.quote;
         native
     });
+    if numeric::DispSign::display_of(flags).is_none() && !program.options.iter().any(|o| names_dispsign(o)) {
+        options.dispsign = match (options.dialect, options.compliance) {
+            (numeric::Dialect::Gnucobol, _) => numeric::DispSign::CobcIbmStrict,
+            (_, numeric::Compliance::Extended) => numeric::DispSign::Cobc,
+            _ => options.dispsign,
+        };
+    }
     if options.compliance == numeric::Compliance::Extended && options.arith == numeric::options::Arith::Compat && !program.options.iter().any(|o| names_arith(o)) {
         let notation = crate::picture::Notation::of(&program.environment);
         let compat = numeric::options::Arith::Compat.max_picture_digits();
@@ -1091,6 +1098,12 @@ fn data_entries(program: &Program) -> impl Iterator<Item = &DataEntry> {
 fn picture_positions(e: &DataEntry, notation: crate::picture::Notation) -> Option<u32> {
     let pic = picture::analyse_with(e.picture.as_deref()?, notation).ok()?;
     matches!(pic.category, picture::Category::Numeric | picture::Category::NumericEdited).then(|| pic.digits + pic.scaling + pic.scale.saturating_sub(pic.digits))
+}
+
+/// Whether a CBL or PROCESS option is DISPSIGN, or its abbreviation DS.
+fn names_dispsign(option: &str) -> bool {
+    let upper = option.to_ascii_uppercase();
+    upper.starts_with("DISPSIGN(") || upper.starts_with("DS(")
 }
 
 /// Whether a CBL or PROCESS option is ARITH, or its abbreviation AR.

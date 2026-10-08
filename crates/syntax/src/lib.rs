@@ -224,7 +224,7 @@ fn parse_from(text: &str, libraries: &copy::Libraries, start: source::Start) -> 
     let mut files = vec![String::new()];
     let read = |debugging: bool, files: &mut Vec<String>| -> Result<(source::Source, Vec<lexer::Token>), Error> {
         let source = source::read_from(text, 0, debugging, compliance, start.clone()).and_then(|s| copy::expand(s, libraries, files)).and_then(copy::replace).map_err(|e| e.in_files(files))?;
-        let tokens = lexer::lex_under(&source, compliance).map_err(|e| e.in_files(files))?;
+        let tokens = lexer::lex_with(&source, compliance, libraries.empty_literal()).map_err(|e| e.in_files(files))?;
         Ok((source, tokens))
     };
     let (source, mut tokens) = match read(true, &mut files) {

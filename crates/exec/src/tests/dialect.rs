@@ -43,7 +43,7 @@ fn a_rounded_receiver_s_extra_place_reaches_intermediate_results_under_ibm_alone
     let last = "LAST 377 00377 0000067 0000002\n";
     assert_eq!(run(&source), format!("INNER 000051B 0003330 0000067\nINNER 387 37P\n{last}"));
     assert_eq!(under(&source, Dialect::Ibm), run(&source));
-    assert_eq!(under(&source, Dialect::Gnucobol), format!("INNER 000051A 0003300 0000066\nINNER 386 37O\n{last}"));
+    assert_eq!(under(&source, Dialect::Gnucobol), format!("INNER 0000511+ 0003300 0000066\nINNER 386 376-\n{last}"));
 }
 
 /// bench/packed.cbl for 300 turns of its loop: a quotient inside COMPUTE D ROUNDED = D + C / 3
@@ -63,9 +63,9 @@ fn display_shows_packed_and_binary_items_as_cobc_does_under_gnucobol() {
         &[line("DISPLAY P1 ' ' P2 ' ' P3"), line("DISPLAY B1 ' ' B2 ' ' B3 ' ' B4 ' ' B5 ' ' C5 ' ' Z1"), line("GOBACK.")].concat(),
     );
     assert_eq!(under(&source, Dialect::Ibm), "001234N 0012345 0012345\n001K 0012 00012345O 00000000000000000N 0012N 0000L 01K\n");
-    assert_eq!(under(&source, Dialect::Gnucobol), "-0012345 +0012345 0012345\n-00012 00012 -0000123456 -00000000000000000005 -0000000125 -00003 01K\n");
+    assert_eq!(under(&source, Dialect::Gnucobol), "-0012345 +0012345 0012345\n-00012 00012 -0000123456 -00000000000000000005 -0000000125 -00003 012-\n");
     let separate = source.replacen("       IDENTIFICATION", "       CBL DISPSIGN(SEP)\n       IDENTIFICATION", 1);
-    assert_eq!(under(&separate, Dialect::Gnucobol), under(&source, Dialect::Gnucobol).replace("01K", "-012"));
+    assert_eq!(under(&separate, Dialect::Gnucobol), under(&source, Dialect::Gnucobol).replace("012-", "-012"));
 }
 
 #[test]
@@ -208,14 +208,14 @@ fn assume_switches_one_assumption_whatever_the_dialect_says() {
         "       01  D PIC S9(5)V99 VALUE 1.\n       01  E PIC S9(5)V99 VALUE 12.35.\n       01  S PIC 99V9.\n       01  DIV2 PIC 99V9 VALUE 44.1.\n       01  P PIC S9(3)V99 COMP-3 VALUE -1.25.\n",
         &[line("COMPUTE D ROUNDED = D + E / 3"), line("COMPUTE S ROUNDED = 1661.7 / DIV2"), line("DISPLAY D ' ' S"), line("DISPLAY P ' ' 1.5"), line("GOBACK.")].concat(),
     );
-    let ibm_c14 = "000051A 377\n0012N 15\n";
+    let ibm_c14 = "0000511+ 377\n0012N 15\n";
     for (flags, shown) in [
         (&[][..], "000051B 377\n0012N 1.5\n"),
         (&["--assume=C14=gnucobol"], "000051B 377\n-00125 1.5\n"),
         (&["--dialect=gnucobol", "--assume=C14=ibm"], ibm_c14),
         (&["--assume=C14=ibm", "--dialect=gnucobol"], ibm_c14),
         (&["--assume=C101=off"], "000051A 376\n0012N 1.5\n"),
-        (&["--dialect=gnucobol", "--assume=C101=off"], "000051A 376\n-00125 15\n"),
+        (&["--dialect=gnucobol", "--assume=C101=off"], "0000511+ 376\n-00125 15\n"),
         (&["--assume=C101=off", "--assume=C101=gnucobol"], "000051A 377\n0012N 1.5\n"),
     ] {
         assert_eq!(with_flags(&source, flags), shown, "{flags:?}");

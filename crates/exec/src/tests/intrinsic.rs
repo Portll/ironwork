@@ -509,7 +509,11 @@ fn a_numeric_function_moves_under_extended_alone_alike_on_both_executors() {
         let walker = Harness::source(&source).flags(&flags).run(Executor::Interpreter);
         let vm = Harness::source(&source).flags(&flags).run(Executor::Vm);
         assert_eq!((&walker.out, &walker.ending), (&vm.out, &vm.ending), "{flags:?}");
-        let expected = ["00005 |+00000000", "00005 |+00001500", "0008  |+00001500", "0008  |+00012500", "0008  |+00007000", "0008  |+00005500", "B     |+00005500"];
+        // A separate sign stays where it is; extended under ibm shows cobc's decimal point, gnucobol cobc -std=ibm-strict's digits alone.
+        let expected = match dialect {
+            "--dialect=ibm" => ["00005 |+00000.000", "00005 |+00001.500", "0008  |+00001.500", "0008  |+00012.500", "0008  |+00007.000", "0008  |+00005.500", "B     |+00005.500"],
+            _ => ["00005 |+00000000", "00005 |+00001500", "0008  |+00001500", "0008  |+00012500", "0008  |+00007000", "0008  |+00005500", "B     |+00005500"],
+        };
         assert_eq!(walker.out, expected.map(|s| format!("{s}\n")).concat(), "{flags:?}");
         let extended = compile(syntax::parse(&source).unwrap(), &flags.map(str::to_owned)).unwrap();
         let warned: Vec<&str> = extended.diagnostics.iter().filter(|e| e.severity == Severity::Warning).map(|e| e.message.as_str()).collect();

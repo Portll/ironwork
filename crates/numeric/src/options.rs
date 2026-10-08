@@ -275,12 +275,38 @@ pub enum Nsymbol {
 
 /// How DISPLAY shows a signed binary, packed or overpunched zoned item: as releases before 6 did,
 /// with an overpunched digit (`Compat`), or with a separate leading sign (`Sep`) (Programming
-/// Guide SC27-8714-03, pp. 362-363).
+/// Guide SC27-8714-03, pp. 362-363). GnuCOBOL's two forms are ironwork's, set by
+/// `--numeric-display`: cobc -std=ibm-strict's, an overpunched item's digits and then its sign
+/// (`CobcIbmStrict`), and cobc's default and Micro Focus's, a sign first or where a separate one is
+/// declared, the decimal point and PICTURE P positions shown (`Cobc`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DispSign {
     #[default]
     Compat,
     Sep,
+    CobcIbmStrict,
+    Cobc,
+}
+
+impl DispSign {
+    /// The value `--numeric-display` takes for a form, for those it can set.
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::Compat | Self::Sep => "ibm",
+            Self::CobcIbmStrict => "cobc-ibm-strict",
+            Self::Cobc => "cobc",
+        }
+    }
+
+    /// The form `--numeric-display` names.
+    pub fn display_named(value: &str) -> Option<Self> {
+        [Self::Compat, Self::CobcIbmStrict, Self::Cobc].into_iter().find(|d| d.display_name() == value)
+    }
+
+    /// The form the last `--numeric-display=` flag among `flags` gives, None without one.
+    pub fn display_of(flags: &[String]) -> Option<Self> {
+        flags.iter().rev().find_map(|f| f.strip_prefix("--numeric-display=").and_then(Self::display_named))
+    }
 }
 
 /// Day 1 of the date intrinsic functions' integer dates: 1 January 1601 (`Ansi`), or Language
@@ -602,6 +628,35 @@ impl SourceFormat {
     /// The format the last `--source-format=` flag among `flags` gives, auto without one.
     pub fn of(flags: &[String]) -> Self {
         flags.iter().rev().find_map(|f| f.strip_prefix("--source-format=").and_then(Self::named)).unwrap_or_default()
+    }
+}
+
+/// How a zero-length alphanumeric literal, `''` or `""`, is read: as one space, as cobc assumes it
+/// and the default (`Space`), or as no characters (`Empty`, `--empty-literal empty`). Enterprise
+/// COBOL's literals hold at least one character, so strict names it at severity E either way.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EmptyLiteral {
+    #[default]
+    Space,
+    Empty,
+}
+
+impl EmptyLiteral {
+    /// The value `--empty-literal` takes for it.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Space => "space",
+            Self::Empty => "empty",
+        }
+    }
+
+    pub fn named(value: &str) -> Option<Self> {
+        [Self::Space, Self::Empty].into_iter().find(|e| e.name() == value)
+    }
+
+    /// The reading the last `--empty-literal=` flag among `flags` gives, a space without one.
+    pub fn of(flags: &[String]) -> Self {
+        flags.iter().rev().find_map(|f| f.strip_prefix("--empty-literal=").and_then(Self::named)).unwrap_or_default()
     }
 }
 
@@ -1101,6 +1156,15 @@ impl Options {
             // How the source was read and its holes made, which the syntax crate and the compiler's
             // checks have done before options apply.
             RELAXED => {}
+            f if f.starts_with("--numeric-display=") => match DispSign::display_named(&f["--numeric-display=".len()..]) {
+                Some(d) => self.dispsign = d,
+                None => return Err(OptionError::UnknownFlag(flag.to_owned())),
+            },
+            f if f.starts_with("--empty-literal=") => {
+                if EmptyLiteral::named(&f["--empty-literal=".len()..]).is_none() {
+                    return Err(OptionError::UnknownFlag(flag.to_owned()));
+                }
+            }
             f if f.starts_with("--source-format=") => {
                 if SourceFormat::named(&f["--source-format=".len()..]).is_none() {
                     return Err(OptionError::UnknownFlag(flag.to_owned()));
