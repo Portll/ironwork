@@ -918,6 +918,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0104 | W | `ASSIGN {name}: a constant defined after the ASSIGN (GnuCOBOL; Enterprise COBOL has no constant entry): the file's name is its value` |
 | IWX0105 | W | `{clause} {name} names an item in the records of {file} and another outside them (GnuCOBOL; Enterprise COBOL requires the name qualified): it is read as {name} OF {record}` |
 | IWX0106 | W | `ACCEPT OMITTED (GnuCOBOL; Enterprise COBOL has no screen ACCEPT): a screen ACCEPT with no field, which waits for the next key` |
+| IWX0107 | W | `{name} is not in the records of {file} (GnuCOBOL; Enterprise COBOL takes a {verb} key from the file's records): each record is keyed on bytes {from} to {to}, where {name} lies in its own record` |
 
 ## Run-time refusals
 

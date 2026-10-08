@@ -944,6 +944,7 @@ catalogue! {
     IWX0104 Warning "ASSIGN {name}: a constant defined after the ASSIGN (GnuCOBOL; Enterprise COBOL has no constant entry): the file's name is its value";
     IWX0105 Warning "{clause} {name} names an item in the records of {file} and another outside them (GnuCOBOL; Enterprise COBOL requires the name qualified): it is read as {name} OF {record}";
     IWX0106 Warning "ACCEPT OMITTED (GnuCOBOL; Enterprise COBOL has no screen ACCEPT): a screen ACCEPT with no field, which waits for the next key";
+    IWX0107 Warning "{name} is not in the records of {file} (GnuCOBOL; Enterprise COBOL takes a {verb} key from the file's records): each record is keyed on bytes {from} to {to}, where {name} lies in its own record";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

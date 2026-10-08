@@ -107,7 +107,9 @@ impl Check<'_> {
             self.reference(key);
             let Some(i) = self.item(key) else { continue };
             let item = &layout.items[i];
-            if item.file != Some(sd as u16) {
+            let elsewhere = item.file != Some(sd as u16);
+            let from = layout.offset_in_record(i);
+            if elsewhere && !(self.extended && from + item.size <= layout.file_areas[sd].1) {
                 fail(self, key.pos, syntax::messages::IWC0211, format!("{}: a key of {verb} {name} must be in its records", key.name));
             } else if !item.dims.is_empty() {
                 fail(self, key.pos, syntax::messages::IWC0212, format!("{}: a sort key cannot be in a table", key.name));
@@ -115,6 +117,9 @@ impl Check<'_> {
                 fail(self, key.pos, syntax::messages::IWC0213, format!("{}: a sort key cannot follow an OCCURS DEPENDING ON table in its record", key.name));
             } else if matches!(item.kind, Kind::Pointer | Kind::Index | Kind::ObjectReference | Kind::ProgramPointer) {
                 fail(self, key.pos, syntax::messages::IWC0214, format!("{}: a POINTER, INDEX, object reference or function-pointer item cannot be a sort key", key.name));
+            } else if elsewhere {
+                let (key_name, to) = (&key.name, from + item.size);
+                fail(self, key.pos, syntax::messages::IWX0107, format!("{key_name} is not in the records of {name} (GnuCOBOL; Enterprise COBOL takes a {verb} key from the file's records): each record is keyed on bytes {} to {to}, where {key_name} lies in its own record", from + 1));
             }
         }
         self.collating_sequence(st);

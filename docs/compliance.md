@@ -1406,6 +1406,17 @@ screen ACCEPT (IWX0020) with no field would: the `--screens` script plays to its
 typed before it goes nowhere, and COB-CRT-STATUS (IWX0057) takes the key. Strict refuses it, as
 OMITTED names no data item (IWC0001-S).
 
+### IWX0107-W A sort key outside the sort file's records
+
+`IWX0107-W {name} is not in the records of {file} (GnuCOBOL; Enterprise COBOL takes a {verb} key
+from the file's records): each record is keyed on bytes {from} to {to}, where {name} lies in its own
+record`, at the key.
+
+Enterprise COBOL's SORT and MERGE keys are items of the SD's records (IWC0211-S). cobc 3.2 takes a
+key from another record, a WORKING-STORAGE record or another file's, at the offset and length it has
+in its own record, applied to each record sorted, under every dialect; extended does the same where
+those bytes fall within the SD's record area, the key read as its own item's class and usage.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

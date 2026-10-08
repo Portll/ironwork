@@ -151,7 +151,7 @@ impl Lower<'_> {
         for (ascending, r) in &st.keys {
             let Ok(Resolved::Item(i)) = layout.resolve(&r.name, &r.qualifiers, r.pos) else { return unsupported("a SORT key that is not a data item", r.pos) };
             let item = &layout.items[i];
-            let Some(offset) = item.offset.checked_sub(area) else { return unsupported("a SORT key outside the sort file's records", r.pos) };
+            let offset = if item.file == Some(sd as u16) { item.offset - area } else { layout.offset_in_record(i) };
             keys.push(SortKey { ascending: *ascending, offset, len: item.size, kind: item.kind, item: i as u32, collated: collates(item.kind) });
         }
         Ok(SortKeys { keys, collating })

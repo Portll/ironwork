@@ -929,6 +929,15 @@ impl Item {
 }
 
 impl Layout {
+    /// Item `i`'s offset within the level-01 or level-77 record holding it.
+    pub fn offset_in_record(&self, i: usize) -> u32 {
+        let mut root = i;
+        while let Some(p) = self.items[root].parent {
+            root = p;
+        }
+        self.items[i].offset - self.items[root].offset
+    }
+
     /// Where item `index`, at its first occurrence, lies within its outermost table, and that
     /// table's bytes with every OCCURS at its maximum: the region SSRANGE checks a reference's
     /// address against (Programming Guide SC27-8714-03, p. 411). None for an item in no table.

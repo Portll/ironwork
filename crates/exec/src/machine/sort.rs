@@ -42,7 +42,7 @@ impl<'p> Machine<'p, '_, '_> {
                 return Err(Abend::ironwork(format!("{} is not a data item", r.name), pos));
             };
             let item = &self.layout.items[i];
-            let offset = (item.offset as usize).checked_sub(area).ok_or_else(|| Abend::ironwork(format!("{} is not in the sort file's records", r.name), pos))?;
+            let offset = if item.file == Some(sd as u16) { item.offset as usize - area } else { self.layout.offset_in_record(i) as usize };
             let collating = if crate::sort::collates(item.kind) { collating.clone() } else { Collating::Ebcdic };
             out.push(ItemKey { ascending: *ascending, offset, len: item.size as usize, kind: item.kind, item: i, collating });
         }

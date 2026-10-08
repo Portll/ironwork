@@ -2555,3 +2555,53 @@ fn under_extended_accept_omitted_waits_for_a_key_alike_on_both_executors() {
     let strict = diagnostics_under(ACCEPT_OMITTED, numeric::Compliance::Strict);
     assert!(strict.iter().any(|d| (d.0, d.2) == (5, Some("IWC0001"))), "{strict:?}");
 }
+
+/// A SORT keyed on a WORKING-STORAGE item, which marks bytes 3 and 4 of its own record.
+const SORT_KEY_ELSEWHERE: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. KEYED.\n",
+    "       ENVIRONMENT DIVISION.\n",
+    "       INPUT-OUTPUT SECTION.\n",
+    "       FILE-CONTROL.\n",
+    "           SELECT SF ASSIGN TO SORTWK.\n",
+    "       DATA DIVISION.\n",
+    "       FILE SECTION.\n",
+    "       SD SF.\n",
+    "       01 SREC PIC X(6).\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 WREC.\n",
+    "          05 W-A PIC XX.\n",
+    "          05 W-K PIC XX.\n",
+    "          05 W-B PIC XX.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           SORT SF ON ASCENDING KEY W-K\n",
+    "               INPUT PROCEDURE FEED\n",
+    "               OUTPUT PROCEDURE DRAIN THRU DRAIN-X\n",
+    "           STOP RUN.\n",
+    "       FEED.\n",
+    "           MOVE 'a1z9c3' TO SREC  RELEASE SREC\n",
+    "           MOVE 'b2y8d4' TO SREC  RELEASE SREC\n",
+    "           MOVE 'c3x7e5' TO SREC  RELEASE SREC.\n",
+    "       DRAIN.\n",
+    "           RETURN SF AT END GO TO DRAIN-X.\n",
+    "           DISPLAY SREC\n",
+    "           GO TO DRAIN.\n",
+    "       DRAIN-X.\n",
+    "           EXIT.\n",
+);
+
+#[test]
+fn under_extended_a_sort_key_outside_the_records_keys_its_own_bytes() {
+    // cobc 3.2's output, under -std=default, mf and ibm alike.
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let ran = Harness::source(SORT_KEY_ELSEWHERE).flags(EXTENDED).run(executor);
+        assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), ("c3x7e5\nb2y8d4\na1z9c3\n", Some(&Ending::StopRun)), "{}", ran.err);
+    }
+    let warned: Vec<_> = diagnostics_under(SORT_KEY_ELSEWHERE, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0107")).map(|d| d.0).collect();
+    assert_eq!(warned, [17]);
+    let strict = diagnostics_under(SORT_KEY_ELSEWHERE, numeric::Compliance::Strict);
+    assert!(strict.iter().any(|d| (d.0, d.2) == (17, Some("IWC0211"))), "{strict:?}");
+    let past = SORT_KEY_ELSEWHERE.replace("       01 SREC PIC X(6).\n", "       01 SREC PIC X(3).\n");
+    let refused = diagnostics_under(&past, numeric::Compliance::Extended);
+    assert!(refused.iter().any(|d| (d.0, d.2) == (17, Some("IWC0211"))), "{refused:?}");
+}
