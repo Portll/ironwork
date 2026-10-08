@@ -282,3 +282,15 @@ fn a_missing_period_before_procedure_division_is_assumed_at_return_code_8() {
     let out = ironwork(&["check", source.path()]);
     assert_eq!((out.status.code(), stderr(&out)), (Some(8), format!("{}:6:8: IWS0105-E a period was required before PROCEDURE DIVISION: one was assumed\n", source.path())));
 }
+
+#[test]
+fn check_compiles_every_program_the_source_holds_and_run_compiles_one_when_it_is_called() {
+    let text = "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. OUTER.\n       PROCEDURE DIVISION.\n           DISPLAY 'OUTER'\n           CALL 'INNER'\n           STOP RUN.\n       IDENTIFICATION DIVISION.\n       PROGRAM-ID. INNER.\n       PROCEDURE DIVISION.\n           MOVE NOPE TO NADA\n           GOBACK.\n       END PROGRAM INNER.\n       END PROGRAM OUTER.\n";
+    let source = Source::new("contained", text);
+    let checked = ironwork(&["check", source.path()]);
+    assert_eq!(checked.status.code(), Some(12), "{}", stderr(&checked));
+    assert!(stderr(&checked).contains(":10:17: IWC0001-S NOPE is not defined"), "{}", stderr(&checked));
+    let ran = ironwork(&["run", source.path()]);
+    assert_eq!(String::from_utf8_lossy(&ran.stdout), "OUTER\n", "{}", stderr(&ran));
+    assert!(stderr(&ran).contains("CALL INNER: INNER does not compile"), "{}", stderr(&ran));
+}

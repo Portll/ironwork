@@ -59,6 +59,9 @@ source, then in the program's directory and each `-L` library, by name, and fail
 such a member, never a path. A user-defined function's definition is found the same way, by its
 external name as PGMNAME forms it, eight characters under the default COMPAT (C270). `run` and `check` compile a source's functions and function prototypes with its first
 program, which is the one a run enters even when functions come before it (assumption C270).
+`check` also compiles the source's other programs, contained or not, and gives the highest return
+code of them all, as IBM's compile does for the whole compilation group; `run` compiles each one
+when it is first called.
 `ASSIGN` names a DD, and a program reaches only the files its DDs are given, by `--dd` or `DD_NAME`
 in the environment, as JCL gives them on z/OS; DD SYSIN is what ACCEPT reads, standard input
 otherwise. An indexed or relative file's DD holds its records in key order, as an IDCAMS REPRO

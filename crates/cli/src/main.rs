@@ -1372,6 +1372,16 @@ fn driver() -> ExitCode {
         }
     }
     if command == "check" {
+        // Check compiles the source's other programs too, as IBM compiles the whole compilation
+        // group; a run compiles each when it is first called.
+        let (mut return_code, mut noted) = (return_code, compiled.diagnostics.iter().any(|m| m.id == Some("IWP0002")));
+        for other in library.programs.iter().filter(|p| p.function.is_none()) {
+            let mut messages = exec::compile(other.clone(), &flags).map_or_else(|m| m, |c| c.diagnostics);
+            // The CICS translator's note is given once for the source, as a run gives it once.
+            messages.retain(|m| !(noted && m.id == Some("IWP0002")));
+            noted |= messages.iter().any(|m| m.id == Some("IWP0002"));
+            return_code = return_code.max(report(&messages, path));
+        }
         evidence::finish(journal, i64::from(return_code));
         return ExitCode::from(return_code);
     }

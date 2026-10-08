@@ -100,13 +100,15 @@ pub fn repair(path: &str, text: &str, dirs: &[PathBuf], flags: &[String], out: &
     Ok(Repaired { text, fixes })
 }
 
-/// The messages compiling `text` gives: a refusal the parser stops at, or each program's.
+/// The messages compiling `text` gives: a refusal the parser stops at, or each program's, in the
+/// order check gives them.
 fn compile(text: &str, libraries: &syntax::copy::Libraries, flags: &[String]) -> Vec<syntax::Error> {
     match syntax::parse_all_with(text, libraries) {
         Err(e) => vec![e],
         Ok(mut programs) => {
             let first = programs.remove(0);
-            programs.into_iter().filter(|p| p.function.is_some()).chain([first]).flat_map(|p| exec::compile(p, flags).map_or_else(|m| m, |c| c.diagnostics)).collect()
+            let (functions, others): (Vec<_>, Vec<_>) = programs.into_iter().partition(|p| p.function.is_some());
+            functions.into_iter().chain([first]).chain(others).flat_map(|p| exec::compile(p, flags).map_or_else(|m| m, |c| c.diagnostics)).collect()
         }
     }
 }
