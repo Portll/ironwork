@@ -24,7 +24,9 @@ pub(crate) fn expand(program: &mut Program, extended: bool, errors: &mut Vec<Err
         return;
     }
     let notation = Notation::of(&program.environment);
-    let laid = layout(&program.screens, notation, &mut program.working_storage, errors);
+    let records = program.files.iter().flat_map(|f| &f.records);
+    let declared: Vec<String> = program.working_storage.iter().chain(&program.local_storage).chain(&program.linkage).chain(records).filter_map(|e| e.name.clone()).collect();
+    let laid = layout(&program.screens, notation, &declared, &mut program.working_storage, errors);
     let screens = std::mem::take(&mut program.screens);
     let context = Context { screens: &screens, laid: &laid };
     for p in &mut program.paragraphs {
@@ -36,8 +38,10 @@ pub(crate) fn expand(program: &mut Program, extended: bool, errors: &mut Vec<Err
 /// Each entry's line and column: LINE and COLUMN as written, PLUS and MINUS from the entry before,
 /// the line before when LINE is not written, column 1 when LINE is and COLUMN is not, and the
 /// column after the entry before when neither is. A field's length is its VALUE's or its
-/// PICTURE's characters.
-fn layout(entries: &[ScreenEntry], notation: Notation, storage: &mut Vec<DataEntry>, errors: &mut Vec<Error>) -> Vec<Laid> {
+/// PICTURE's characters. A field's item takes the field's name where no data item or other entry
+/// has it, so that a statement can name the field.
+fn layout(entries: &[ScreenEntry], notation: Notation, declared: &[String], storage: &mut Vec<DataEntry>, errors: &mut Vec<Error>) -> Vec<Laid> {
+    let unique = |n: &String| n != "FILLER" && !declared.contains(n) && entries.iter().filter(|o| o.name.as_ref() == Some(n)).count() == 1;
     let (mut line, mut end) = (1u32, 0u32);
     let mut laid = Vec::with_capacity(entries.len());
     for (k, e) in entries.iter().enumerate() {
@@ -66,7 +70,7 @@ fn layout(entries: &[ScreenEntry], notation: Notation, storage: &mut Vec<DataEnt
             (None, None) => 0,
         };
         let item = e.picture.as_ref().filter(|_| e.value.is_none()).map(|p| {
-            let name = format!("SCREEN%{k}");
+            let name = e.name.clone().filter(unique).unwrap_or_else(|| format!("SCREEN%{k}"));
             let mut entry = crate::report::entry(1, Some(name.clone()), Some(p.clone()), None, e.pos);
             let numeric = picture::analyse_with(p, notation).is_ok_and(|pic| matches!(pic.category, picture::Category::Numeric));
             entry.value = Some(Literal::Figurative(if numeric { Figurative::Zero } else { Figurative::Space }));

@@ -148,10 +148,10 @@ fn non_cobol(c: char) -> bool {
     u32::from(c) <= 0xFF && !c.is_ascii_alphanumeric() && !" \n+-*/=$,;.\"'()><:_&".contains(c)
 }
 
-/// A letter beyond Latin-1, such as a kanji or kana, which `--compliance extended` reads in a
+/// A letter beyond ASCII, such as ñ, é, a kanji or kana, which `--compliance extended` reads in a
 /// user-defined word (IWX0094).
 fn wide_letter(c: char) -> bool {
-    u32::from(c) > 0xFF && c.is_alphabetic()
+    !c.is_ascii() && c.is_alphabetic()
 }
 
 impl Lexer<'_> {
@@ -479,13 +479,13 @@ impl Lexer<'_> {
     fn number_or_word(&mut self, pos: Pos) -> Result<Tok, Error> {
         let start = self.at;
         while let Some(c) = self.peek(0).filter(|&c| is_word_char(c) || non_cobol(c) || (self.extended && wide_letter(c))) {
-            if non_cobol(c) {
+            if non_cobol(c) && !(self.extended && wide_letter(c)) {
                 self.pending.push(crate::messages::IWS0025.at(self.pos(), format!("non-COBOL character {c:?}: the character was accepted")).graded(crate::Severity::Error));
             }
             self.at += 1;
         }
         let run: String = self.chars[start..self.at].iter().collect();
-        if run.chars().any(wide_letter) && !self.wide_words.contains(&run) {
+        if self.extended && run.chars().any(wide_letter) && !self.wide_words.contains(&run) {
             self.pending.push(crate::messages::IWX0094.at(pos, format!("the word {run} has letters outside COBOL's character set (GnuCOBOL reads a user-defined word's letters as UTF-8; Enterprise COBOL writes such a word in DBCS characters): it is read as a user-defined word")));
             self.wide_words.push(run.clone());
         }

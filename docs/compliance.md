@@ -569,8 +569,10 @@ An entry is at the LINE and COLUMN it gives, PLUS and MINUS counting from the en
 LINE it is on the line of the entry before, and without COLUMN at column 1 when LINE is given, else in
 the column after the entry before. A field is as long as its VALUE or its PICTURE, and a group entry
 places what follows it. `DISPLAY name` writes each entry the screen holds, in order, at its place: a
-VALUE as written, a FROM or USING field as its PICTURE edits the item (the compiler gives each such
-field an item of its PICTURE in WORKING-STORAGE and MOVEs to it), a TO field as spaces or zeros.
+VALUE as written, a FROM or USING field as its PICTURE edits the item (the compiler gives each field
+with a PICTURE an item of that PICTURE in WORKING-STORAGE and MOVEs to it), a TO field as spaces or
+zeros. The item has the field's name where no data item or other entry has it, so a field with no
+FROM, TO or USING shows what the program last moved to it by name, as cobc 3.2 shows it.
 `ACCEPT name` displays the screen and reads its TO and USING fields in one turn of the operator, `tab`
 moving to the next field, each target taking its field as a positioned ACCEPT's does; a USING field
 starts holding the item's value. `DISPLAY name AT LLCC` or `LINE n COL n` moves the whole screen from
@@ -1283,10 +1285,12 @@ IWS0105-E; cobc 3.2 warns ("optional period used") and compiles on, as extended 
 word's letters as UTF-8; Enterprise COBOL writes such a word in DBCS characters): it is read as a
 user-defined word`, at the word's first use.
 
-A word may hold letters beyond Latin-1, such as kanji and kana, as a UTF-8 source of GnuCOBOL's holds
-them in paragraph and data names. Such a letter has no case, and a word matches only a word spelled
-with the same letters. Enterprise COBOL's DBCS user-defined words are written between shift-out and
-shift-in in a DBCS source, which ironwork does not read; strict refuses the letter with IWS0021-S.
+A word may hold letters beyond ASCII, such as ñ and é from a Latin-1 or UTF-8 source, or kanji and
+kana, as GnuCOBOL's sources hold them in paragraph and data names. Such a letter is not folded to a
+capital, as cobc 3.2 does not fold it, and a word matches only a word spelled with the same letters.
+Enterprise COBOL's DBCS user-defined words are written between shift-out and shift-in in a DBCS
+source, which ironwork does not read; strict refuses a letter beyond Latin-1 with IWS0021-S, and
+takes a Latin-1 letter with IWS0025-E.
 
 ### IWX0095-W A period missing before a level number
 

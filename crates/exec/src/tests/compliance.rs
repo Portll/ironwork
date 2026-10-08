@@ -2605,3 +2605,62 @@ fn under_extended_a_sort_key_outside_the_records_keys_its_own_bytes() {
     let refused = diagnostics_under(&past, numeric::Compliance::Extended);
     assert!(refused.iter().any(|d| (d.0, d.2) == (17, Some("IWC0211"))), "{refused:?}");
 }
+
+/// A SCREEN SECTION field with no FROM, TO or USING, which the program sets by its name.
+const SCREEN_FIELD_BY_NAME: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. SCRNAME.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 WS-NAME PIC X(5) VALUE SPACES.\n",
+    "       SCREEN SECTION.\n",
+    "       01 ENTRY-SCREEN.\n",
+    "          05 LINE 1 COLUMN 1 VALUE 'NAME:'.\n",
+    "          05 NAME-IN PIC X(5) LINE 1 COLUMN 7 USING WS-NAME.\n",
+    "          05 LINE 2 COLUMN 1 VALUE 'WAS:'.\n",
+    "          05 NAME-OUT PIC X(5) LINE 2 COLUMN 7.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           ACCEPT ENTRY-SCREEN\n",
+    "           MOVE WS-NAME TO NAME-OUT\n",
+    "           ACCEPT ENTRY-SCREEN\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn under_extended_a_screen_field_is_set_by_its_name_alike_on_both_executors() {
+    let script = "string ALICE\nENTER\nENTER\n";
+    let walked = Harness::source(SCREEN_FIELD_BY_NAME).flags(EXTENDED).screens(script).run(Executor::Interpreter);
+    let expected = "--- screen 1 ---\nNAME:\nWAS:\n--- screen 2 ---\nNAME: ALICE\nWAS:  ALICE\n--- screen 3 ---\nNAME: ALICE\nWAS:  ALICE\n";
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (expected, Some(&Ending::Goback)), "{}", walked.err);
+    let vm = Harness::source(SCREEN_FIELD_BY_NAME).flags(EXTENDED).screens(script).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+}
+
+/// Spanish data and paragraph names, as a GnuCOBOL source in Latin-1 or UTF-8 writes them.
+const LATIN_WORDS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. LATIN.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  AÑO PIC 9(4) VALUE 2025.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           PERFORM AÑADIR\n",
+    "           DISPLAY 'AÑO ' AÑO\n",
+    "           GOBACK.\n",
+    "       AÑADIR.\n",
+    "           ADD 1 TO AÑO.\n",
+);
+
+#[test]
+fn under_extended_a_word_may_hold_latin_1_letters() {
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let o = Harness::source(LATIN_WORDS).flags(&["--compliance=extended"]).run(executor);
+        assert_eq!((o.out.as_str(), o.ending), ("AÑO 2026\n", Ok(Ending::Goback)), "{}", o.err);
+    }
+    let extended = diagnostics_under(LATIN_WORDS, numeric::Compliance::Extended);
+    let warned: Vec<_> = extended.iter().filter(|d| d.2 == Some("IWX0094")).map(|d| d.0).collect();
+    assert_eq!(warned, [5, 7], "{extended:?}");
+    assert!(extended.iter().all(|d| d.3 == Severity::Warning), "{extended:?}");
+    let strict = diagnostics_under(LATIN_WORDS, numeric::Compliance::Strict);
+    assert!(strict.iter().any(|d| (d.0, d.2, d.3) == (5, Some("IWS0025"), Severity::Error)), "{strict:?}");
+}

@@ -96,6 +96,7 @@ pub fn accept<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
         if input.field.offset != input.target.offset || input.field.item != input.target.item {
             let moved = store::read_stored(facts, &unit.mem, input.target, pos)?;
             store::assign(facts, unit, input.field, moved, Some(input.target), pos)?;
+            unit.mark_input(input.field.offset, input.field.len, true);
         }
         let stored = crate::display::place(facts, &unit.mem, input.field, pos, false)?;
         crt.borrow_mut().show(*field, &stored);
