@@ -68,7 +68,7 @@ def main():
     called = {target for _, text in sources for target in nist.call_targets(text) - {nist.program_id(text)}}
     compiled = [name for name, text in sources if only is None or name in only or nist.program_id(text) in called]
     started = time.time()
-    build = subprocess.run([binary, "compile", *(f"{n}.CBL" for n in compiled), "-I", library, "-o", workdir, "--native-harness", "--runtime", a.runtime], cwd=workdir, env=env, capture_output=True)
+    build = subprocess.run([binary, "compile", *(f"{n}.CBL" for n in compiled), "-I", library, "-o", workdir, "--native-harness", "--runtime", os.path.abspath(a.runtime)], cwd=workdir, env=env, capture_output=True)
     harness = os.path.join(workdir, "harness")
     if not os.path.exists(harness):
         sys.stderr.write(build.stderr.decode("utf-8", "replace")[-4000:])
