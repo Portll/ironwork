@@ -10,7 +10,7 @@ usage:
                [-debug] [--cics-return-warning=once|always|never] [--optimize=0|1|2] [-I <dir>]... [-L <dir>]... [--vm | --interpret]
                [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT | --argument path|OMITTED... [--arguments-out DIR]]
                [--exit-code] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
-               [--compliance strict|extended|relaxed] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
+               [--compliance strict|extended|relaxed|loose] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
                [--source-format auto|fixed|free] [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind] [--screens path]
                [--env NAME=VALUE]... [--autofix <dir>]
                                                        compile and run; CBL and PROCESS cards set the options
@@ -21,7 +21,7 @@ usage:
                                                        run a load module's first program on the VM, with the options
                                                        it was compiled with
   ironwork check <program.cbl> [-warnings-block] [--cics-return-warning=once|always|never] [-I <dir>]... [--autofix <dir>]
-               [--compliance strict|extended|relaxed] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
+               [--compliance strict|extended|relaxed|loose] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
                [--source-format auto|fixed|free] [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
                                                        compile only
   ironwork cics <program.cbl> [run flags] [--transid T] [--termid T] [--userid U] [--applid A] [--sysid S]
@@ -37,7 +37,7 @@ usage:
   ironwork compile <program.cbl>... [-o <dir>] [--bundle NAME] [--source-prefix DIR] [--native [--runtime DIR]] [-silent] [-strict-sort-keys]
                [-warnings-block] [--fastsrt-adv-print=exclude|include] [-debug] [--cics-return-warning=once|always|never]
                [--optimize=0|1|2] [--diagnostics text|json]
-               [--compliance strict|extended|relaxed] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [-I <dir>]... [-L <dir>]...
+               [--compliance strict|extended|relaxed|loose] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [-I <dir>]... [-L <dir>]...
                [--source-format auto|fixed|free] [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
                                                        compile and lower each source's programs to a load module
   ironwork dump [--section NAME]... [--strings] [--no-check] <module.iwm>
@@ -49,7 +49,7 @@ usage:
                [--timeout SECONDS] [--hang-limit N]
                [--root DIR] [--clock <time>]
                [-I <dir>]... [-L <dir>]... [-silent] [-strict-sort-keys] [-debug] [--optimize=0|1|2]
-               [--compliance strict|extended|relaxed] [--dialect ibm|gnucobol] [--assume ID=VALUE]...
+               [--compliance strict|extended|relaxed|loose] [--dialect ibm|gnucobol] [--assume ID=VALUE]...
                [--source-format auto|fixed|free] [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
                [--datasets DIR] [--proclib DIR]... [--user ID]
                                                        run a batch program, or with --job a job, on generated input
@@ -88,7 +88,9 @@ flags:
              Focus and GnuCOBOL forms docs/compliance.md lists, each with an IWX warning naming it
              and where it is: check's return code is 4, and run runs the program. relaxed is
              extended, and compiles what extended still refuses in a PROCEDURE DIVISION sentence
-             or statement as a hole (IWX0059): a run that reaches a hole ends with IWR0078. For
+             or statement as a hole (IWX0059): a run that reaches a hole ends with IWR0078. loose is
+             relaxed, and leaves out a data record extended refuses (IWX0064), a statement naming one
+             of its items compiling as a hole, and gives messages of severity E as warnings. For
              run, check, cics, compile, job, fuzz and compare. --compliance=extended works too
   --source-format auto|fixed|free
              how --compliance extended reads a source: auto (the default) reads fixed form, and free
@@ -900,21 +902,22 @@ fn driver() -> ExitCode {
                 Some(dir) => libraries.push(std::path::PathBuf::from(dir)),
                 None => refuse!("-I needs a directory"),
             },
-            "--compliance" | "--compliance=strict" | "--compliance=extended" | "--compliance=relaxed" => {
+            "--compliance" | "--compliance=strict" | "--compliance=extended" | "--compliance=relaxed" | "--compliance=loose" => {
                 let value = match a.strip_prefix("--compliance=") {
                     Some(v) => Some(v.to_owned()),
                     None => args.next(),
                 };
                 match value.as_deref() {
                     Some("relaxed") => flags.extend([numeric::Compliance::Extended.flag().to_owned(), numeric::RELAXED.to_owned()]),
+                    Some("loose") => flags.extend([numeric::Compliance::Extended.flag().to_owned(), numeric::RELAXED.to_owned(), numeric::LOOSE.to_owned()]),
                     Some(v) => match numeric::Compliance::named(v) {
                         Some(c) => flags.push(c.flag().to_owned()),
-                        None => refuse!("--compliance needs strict, extended or relaxed"),
+                        None => refuse!("--compliance needs strict, extended, relaxed or loose"),
                     },
-                    None => refuse!("--compliance needs strict, extended or relaxed"),
+                    None => refuse!("--compliance needs strict, extended, relaxed or loose"),
                 }
             }
-            f if f.starts_with("--compliance=") => refuse!("--compliance needs strict, extended or relaxed"),
+            f if f.starts_with("--compliance=") => refuse!("--compliance needs strict, extended, relaxed or loose"),
             "--numeric-display" => match args.next().as_deref().and_then(numeric::DispSign::display_named) {
                 Some(d) => flags.push(format!("--numeric-display={}", d.display_name())),
                 None => refuse!("--numeric-display needs ibm, cobc-ibm-strict or cobc"),

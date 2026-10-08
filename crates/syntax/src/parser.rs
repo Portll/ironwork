@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::lexer::{Tok, Token};
-use crate::messages::{IWS0097, IWS0098, IWS0100, IWS0104, IWX0013, IWX0014, IWX0017, IWX0059, IWX0061};
+use crate::messages::{IWS0097, IWS0098, IWS0100, IWS0104, IWX0013, IWX0014, IWX0017, IWX0059, IWX0061, IWX0064};
 use crate::{Error, Pos};
 
 mod communication;
@@ -63,10 +63,11 @@ fn scope(programs: &mut [Program]) {
 /// Every program in the source, first to last, with nested programs after the one containing them,
 /// except that the first program comes ahead of the user-defined functions and prototypes before
 /// it, as the binder's ENTRY statement makes it the one a run enters (assumption C270).
-pub fn parse(tokens: &[Token], options: Vec<String>, compliance: numeric::Compliance, relaxed: bool) -> Result<Vec<Program>, Error> {
+pub fn parse(tokens: &[Token], options: Vec<String>, compliance: numeric::Compliance, relaxed: bool, loose: bool) -> Result<Vec<Program>, Error> {
     let mut parser = Parser::new(tokens);
     parser.extended = compliance == numeric::Compliance::Extended;
     parser.relaxed = parser.extended && relaxed;
+    parser.loose = parser.relaxed && loose;
     let mut programs = Vec::new();
     parser.program(&options, &mut programs)?;
     while parser.peek().is_some() {
@@ -415,6 +416,8 @@ struct Parser<'a> {
     extended: bool,
     /// `--compliance relaxed` is: a sentence that does not parse becomes a hole.
     relaxed: bool,
+    /// `--compliance loose` is: a data record whose entries do not parse is left out.
+    loose: bool,
     /// The CD names of the program being parsed.
     cds: Vec<String>,
     /// The 01 and 77 items of the program being parsed that have no storage of their own: its
@@ -458,6 +461,7 @@ impl<'a> Parser<'a> {
             in_prototype: false,
             extended: false,
             relaxed: false,
+            loose: false,
             cds: Vec::new(),
             unstored: Vec::new(),
         }
@@ -1516,9 +1520,33 @@ impl Parser<'_> {
                 continue;
             }
             let Some((level, pos)) = self.level_number()? else { break };
-            entries.push(self.data_entry(level, pos)?);
+            match self.data_entry(level, pos) {
+                Ok(entry) => entries.push(entry),
+                Err(e) if self.loose => self.data_hole(level, pos, e, &mut entries),
+                Err(e) => return Err(e),
+            }
         }
         Ok(entries)
+    }
+
+    /// Under `--compliance loose`, the record holding the entry at `pos` that gave `error` left out:
+    /// the entries of its level-01 or level-77 entry before it dropped, the tokens up to the next
+    /// record, file description or header passed over, with IWX0064-W.
+    fn data_hole(&mut self, level: u8, pos: Pos, error: Error, entries: &mut Vec<DataEntry>) {
+        let start = if matches!(level, 1 | 77) { entries.len() } else { entries.iter().rposition(|e| matches!(e.level, 1 | 77)).unwrap_or(0) };
+        let (record, at) = entries.get(start).map_or((None, pos), |e| (e.name.clone(), e.pos));
+        entries.truncate(start);
+        let next_record = |p: &Self| {
+            let after_period = p.at > 0 && p.tokens[p.at - 1].tok == Tok::Period;
+            let number = matches!(p.peek(), Some(Tok::Number(n)) if matches!(n.parse::<u8>(), Ok(1 | 77)));
+            let header = matches!(p.word_at(1), Some("SECTION" | "DIVISION")) || matches!(p.word(), Some("FD" | "SD" | "RD" | "CD"));
+            after_period && (number || header) || p.at_end_program()
+        };
+        while self.peek().is_some() && !next_record(self) {
+            self.at += 1;
+        }
+        let shown = record.map_or_else(|| format!("the record at line {}", at.line), |name| format!("the record {name}"));
+        self.messages.push(IWX0064.at(at, format!("{shown} (--compliance loose): {}; it is left out, and a statement naming one of its items compiles as a hole", error.labelled())));
     }
 
     fn level_number(&mut self) -> R<Option<(u8, Pos)>> {

@@ -878,6 +878,8 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0061 | W | `{name}. in Area B (Micro Focus and GnuCOBOL; Enterprise COBOL puts a paragraph header in Area A): a name and a period after a separator period is read as a paragraph header` |
 | IWX0062 | W | `FUNCTION {name} (GnuCOBOL; Enterprise COBOL has no such function): each text found is replaced, the pairs tried in order at each position` |
 | IWX0063 | W | `{literal} (GnuCOBOL and Micro Focus; Enterprise COBOL's literals hold at least one character): {how it is read}` |
+| IWX0064 | W | `{record} (--compliance loose): {why ironwork refuses it}; it is left out, and a statement naming one of its items compiles as a hole` |
+| IWX0065 | W | `{message} (--compliance loose): {what is left out}` |
 
 ## Run-time refusals
 

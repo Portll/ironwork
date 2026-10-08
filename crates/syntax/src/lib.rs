@@ -193,10 +193,60 @@ pub fn parse_all_with(text: &str, libraries: &copy::Libraries) -> Result<Vec<ast
         _ => source::Start::Detect,
     };
     let detect = libraries.compliance() == Compliance::Extended && libraries.source_format() == SourceFormat::Auto;
-    let fixed = parse_from(text, libraries, start);
-    if !detect {
-        return fixed.map(|(programs, _)| programs);
+    if libraries.loose() {
+        return parse_loose(text, libraries, start, detect);
     }
+    if !detect {
+        return parse_from(text, libraries, start).map(|(programs, _)| programs);
+    }
+    parse_detecting(text, libraries, start)
+}
+
+/// Under `--compliance loose`, the source parsed as [`parse_all_with`] parses it, and again after
+/// each directive ironwork does not read, character outside COBOL's set or stray period in the
+/// program's own file that stops it is left out, with IWX0065-W; up to 50 times.
+fn parse_loose(text: &str, libraries: &copy::Libraries, start: source::Start, detect: bool) -> Result<Vec<ast::Program>, Error> {
+    let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
+    let mut notes = Vec::new();
+    for round in 0..=50 {
+        let current = lines.join("\n") + "\n";
+        let parsed = if detect { parse_detecting(&current, libraries, start.clone()) } else { parse_from(&current, libraries, start.clone()).map(|(p, _)| p) };
+        let e = match parsed {
+            Ok(mut programs) => {
+                if let Some(first) = programs.first_mut() {
+                    first.messages.splice(0..0, notes);
+                }
+                return Ok(programs);
+            }
+            Err(e) => e,
+        };
+        let at = (e.pos.line as usize).checked_sub(1).filter(|&l| round < 50 && e.file.is_none() && l < lines.len());
+        let Some(line) = at else { return Err(e) };
+        let col = (e.pos.col as usize).saturating_sub(1);
+        let what = match e.id {
+            Some("IWS0094") => {
+                lines[line] = String::new();
+                "the directive's line is left out"
+            }
+            Some("IWS0021" | "IWS0026") => {
+                let mut chars: Vec<char> = lines[line].chars().collect();
+                if col >= chars.len() {
+                    return Err(e);
+                }
+                chars[col] = ' ';
+                lines[line] = chars.into_iter().collect();
+                "the character is left out"
+            }
+            _ => return Err(e),
+        };
+        notes.push(messages::IWX0065.at(e.pos, format!("{} (--compliance loose): {what}", e.labelled())));
+    }
+    unreachable!("the last round returns")
+}
+
+/// [`parse_all_with`]'s reading under `--source-format auto`, given its first reading.
+fn parse_detecting(text: &str, libraries: &copy::Libraries, start: source::Start) -> Result<Vec<ast::Program>, Error> {
+    let fixed = parse_from(text, libraries, start);
     let (at, why) = match &fixed {
         Ok((_, None)) => return fixed.map(|(programs, _)| programs),
         Ok((_, Some(cut))) => (*cut, format!("line {} runs on past column 72, where fixed form ends, in the middle of a word or literal", cut.line)),
@@ -245,7 +295,7 @@ fn parse_from(text: &str, libraries: &copy::Libraries, start: source::Start) -> 
     if compliance == numeric::Compliance::Extended {
         tokens = extended::rewrite(tokens, &source.options).map_err(|e| e.in_files(&files))?;
     }
-    let mut programs = parser::parse(&tokens, source.options, compliance, libraries.relaxed()).map_err(|e| e.in_files(&files))?;
+    let mut programs = parser::parse(&tokens, source.options, compliance, libraries.relaxed(), libraries.loose()).map_err(|e| e.in_files(&files))?;
     for p in &mut programs {
         p.sources = files.clone();
     }

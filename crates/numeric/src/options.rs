@@ -595,10 +595,18 @@ impl Compliance {
     pub fn relaxed(flags: &[String]) -> bool {
         Self::of(flags) == Self::Extended && flags.iter().any(|f| f == RELAXED)
     }
+
+    /// Whether `flags` ask for `--compliance loose`: relaxed, with a refused data record left out
+    /// and its items' statements holes, and messages of severity E given as warnings.
+    pub fn loose(flags: &[String]) -> bool {
+        Self::relaxed(flags) && flags.iter().any(|f| f == LOOSE)
+    }
 }
 
 /// The flag `--compliance relaxed` adds to `--compliance=extended`.
 pub const RELAXED: &str = "--relaxed";
+/// The flag `--compliance loose` adds to relaxed's.
+pub const LOOSE: &str = "--loose";
 
 /// How a source file is read under `--compliance extended`: in fixed form unless the file shows it
 /// is free form (`Auto`), in fixed form unless a directive in it says otherwise (`Fixed`), or in free
@@ -1155,7 +1163,7 @@ impl Options {
             },
             // How the source was read and its holes made, which the syntax crate and the compiler's
             // checks have done before options apply.
-            RELAXED => {}
+            RELAXED | LOOSE => {}
             f if f.starts_with("--numeric-display=") => match DispSign::display_named(&f["--numeric-display=".len()..]) {
                 Some(d) => self.dispsign = d,
                 None => return Err(OptionError::UnknownFlag(flag.to_owned())),

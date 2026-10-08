@@ -18,6 +18,7 @@ pub struct Libraries {
     compliance: numeric::Compliance,
     source_format: numeric::SourceFormat,
     relaxed: bool,
+    loose: bool,
     empty_literal: numeric::EmptyLiteral,
 }
 
@@ -28,7 +29,7 @@ const MAX_DEPTH: usize = 32;
 
 impl Libraries {
     pub fn new(dirs: Vec<PathBuf>) -> Self {
-        Self { dirs, program: None, compliance: numeric::Compliance::Strict, source_format: numeric::SourceFormat::Auto, relaxed: false, empty_literal: numeric::EmptyLiteral::Space }
+        Self { dirs, program: None, compliance: numeric::Compliance::Strict, source_format: numeric::SourceFormat::Auto, relaxed: false, loose: false, empty_literal: numeric::EmptyLiteral::Space }
     }
 
     /// These libraries, for compiling the program in `program`.
@@ -47,12 +48,17 @@ impl Libraries {
 
     /// These libraries, read under the compliance level and source format `flags` give.
     pub fn with_flags(&self, flags: &[String]) -> Self {
-        Self { compliance: numeric::Compliance::of(flags), source_format: numeric::SourceFormat::of(flags), relaxed: numeric::Compliance::relaxed(flags), empty_literal: numeric::EmptyLiteral::of(flags), ..self.clone() }
+        Self { compliance: numeric::Compliance::of(flags), source_format: numeric::SourceFormat::of(flags), relaxed: numeric::Compliance::relaxed(flags), loose: numeric::Compliance::loose(flags), empty_literal: numeric::EmptyLiteral::of(flags), ..self.clone() }
     }
 
     /// Under `--compliance relaxed`.
     pub fn relaxed(&self) -> bool {
         self.relaxed
+    }
+
+    /// Under `--compliance loose`.
+    pub fn loose(&self) -> bool {
+        self.loose
     }
 
     pub fn empty_literal(&self) -> numeric::EmptyLiteral {

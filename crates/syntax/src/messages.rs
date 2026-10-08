@@ -904,6 +904,8 @@ catalogue! {
     IWX0061 Warning "{name}. in Area B (Micro Focus and GnuCOBOL; Enterprise COBOL puts a paragraph header in Area A): a name and a period after a separator period is read as a paragraph header";
     IWX0062 Warning "FUNCTION {name} (GnuCOBOL; Enterprise COBOL has no such function): each text found is replaced, the pairs tried in order at each position";
     IWX0063 Warning "{literal} (GnuCOBOL and Micro Focus; Enterprise COBOL's literals hold at least one character): {how it is read}";
+    IWX0064 Warning "{record} (--compliance loose): {why ironwork refuses it}; it is left out, and a statement naming one of its items compiles as a hole";
+    IWX0065 Warning "{message} (--compliance loose): {what is left out}";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

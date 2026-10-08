@@ -1,4 +1,4 @@
-# Compliance level: `--compliance strict|extended|relaxed`
+# Compliance level: `--compliance strict|extended|relaxed|loose`
 
 ironwork's target is IBM Enterprise COBOL for z/OS, and by default it refuses what Enterprise
 COBOL refuses. Real programs are also written for Micro Focus and GnuCOBOL. `--compliance
@@ -10,6 +10,7 @@ compiles and runs them; anything else stays refused with the message strict give
 | `strict` (the default) | A construct Enterprise COBOL does not have is refused, and a form IBM's compiler flags gets IBM's message at IBM's severity |
 | `extended` | The extensions below are read as Micro Focus and GnuCOBOL read them, each with a warning |
 | `relaxed` | `extended`, and a PROCEDURE DIVISION sentence or statement extended refuses compiles as a hole that ends a run reaching it ([below](#relaxed)) |
+| `loose` | `relaxed`, and a data record extended refuses is left out, its items' statements holes; an unread directive or a character outside COBOL's set is left out; severity E is a warning ([below](#loose)) |
 
 The flag is `--compliance strict|extended` (or `--compliance=extended`) on `run`, `check`, `cics`,
 `compile`, `job`, `fuzz` and `compare`. It is a compile option: `numeric::Options::compliance`,
@@ -1128,6 +1129,30 @@ message extended gives), the PROCEDURE DIVISION header, and messages of severity
 they do under every level (return code 8). The flag is kept with its value in an evidence journal's
 `argv`; a load module records `extended`, so a source a module CALLs when it runs is read under
 extended.
+
+## Loose
+
+`--compliance loose` (or `--compliance=loose`) is `relaxed`, and goes on where relaxed stops:
+
+- A data record extended refuses, a level-01 or level-77 entry with its subordinates, is left out,
+  with `IWX0064-W {record} (--compliance loose): {why}; it is left out, and a statement naming one
+  of its items compiles as a hole`. That covers an entry that does not parse (TYPEDEF, a clause
+  ironwork does not read) and one the compile refuses (a PICTURE of more than 31 digits, a reserved
+  word as its name). A record of a file, or a refusal naming the file (`FD F: ...`), leaves the file
+  out. Only the whole record goes: an item left out of a group would move the items after it.
+- A statement naming an item that was left out then compiles as a hole, as relaxed compiles any
+  statement that names no item (IWX0059-W), and a run that reaches it ends with IWR0078.
+- In the program's own file, a directive ironwork does not read (`>>CALL-CONVENTION`,
+  `>>COBOL-WORDS`), a character outside COBOL's set, or a stray period that stops the parse is left
+  out, the directive's line or the one character, with `IWX0065-W`, and the source is read again.
+- Messages of severity E are given as warnings, so a program whose worst message is an E-level
+  recovery checks with return code 4.
+
+What loose still refuses: the IDENTIFICATION DIVISION and PROCEDURE DIVISION headers, a conditional
+compilation directive it cannot evaluate (leaving `>>IF` out would choose a branch), the
+COMMUNICATION SECTION, and rules checked across the program rather than on one statement (PERFORM
+THRU into the declaratives, a key named in a SELECT that names no item). A load module records
+`extended`.
 
 ## How the six were chosen
 

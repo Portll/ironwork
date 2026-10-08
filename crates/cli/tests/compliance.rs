@@ -79,7 +79,7 @@ fn a_level_that_is_not_strict_or_extended_is_a_usage_error_and_dump_takes_none()
     for args in [&["check", "FREEPGM.cbl", "--compliance", "mf"][..], &["check", "FREEPGM.cbl", "--compliance=EXTENDED"], &["check", "FREEPGM.cbl", "--compliance"]] {
         let o = ironwork(&dir, args);
         assert_eq!(o.status.code(), Some(2), "{args:?}");
-        assert!(text(&o.stderr).starts_with("ironwork: --compliance needs strict, extended or relaxed\n"), "{}", text(&o.stderr));
+        assert!(text(&o.stderr).starts_with("ironwork: --compliance needs strict, extended, relaxed or loose\n"), "{}", text(&o.stderr));
     }
     let dumped = ironwork(&dir, &["dump", "X.iwm", "--compliance", "extended"]);
     assert_eq!(dumped.status.code(), Some(2));

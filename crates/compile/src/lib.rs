@@ -138,10 +138,64 @@ pub fn compile(program: Program, flags: &[String]) -> Result<Compiled, Vec<Error
 
 /// Compiles as [`compile`] does, WHEN-COMPILED giving `at`.
 pub fn compile_at(program: Program, flags: &[String], at: CompileTime) -> Result<Compiled, Vec<Error>> {
+    if numeric::Compliance::loose(flags) {
+        return loose(program, flags, at);
+    }
+    compile_once(program, flags, at)
+}
+
+fn compile_once(program: Program, flags: &[String], at: CompileTime) -> Result<Compiled, Vec<Error>> {
     if program.oo.as_ref().is_some_and(|o| o.class().is_some()) {
         return oo::compile_class_definition(program, flags, at);
     }
     compile_program(program, flags, true, at)
+}
+
+/// Under `--compliance loose`: compiled again without each data record a severe message names an
+/// entry of, a file's record taking its file with it, until the compile succeeds or no such record
+/// is left; then messages of severity E are given as warnings.
+fn loose(mut program: Program, flags: &[String], at: CompileTime) -> Result<Compiled, Vec<Error>> {
+    let mut notes = Vec::new();
+    loop {
+        match compile_once(program.clone(), flags, at) {
+            Ok(mut compiled) => {
+                compiled.diagnostics.splice(0..0, notes);
+                for d in compiled.diagnostics.iter_mut().filter(|d| d.severity == Severity::Error) {
+                    d.severity = Severity::Warning;
+                }
+                return Ok(compiled);
+            }
+            Err(errors) => match leave_out(&mut program, &errors) {
+                Some(note) => notes.push(note),
+                None => return Err(notes.into_iter().chain(errors).collect()),
+            },
+        }
+    }
+}
+
+/// The first data record a severe message in `errors` is placed at an entry of, taken out of
+/// `program`, and the note saying so.
+fn leave_out(program: &mut Program, errors: &[Error]) -> Option<Error> {
+    let note = |name: Option<&str>, at: Pos, why: &Error| {
+        let shown = name.map_or_else(|| format!("the record at line {}", at.line), |n| format!("the record {n}"));
+        syntax::messages::IWX0064.at(at, format!("{shown} (--compliance loose): {}; it is left out, and a statement naming one of its items compiles as a hole", why.labelled()))
+    };
+    for e in errors.iter().filter(|e| e.severity >= Severity::Severe) {
+        for entries in [&mut program.working_storage, &mut program.local_storage, &mut program.linkage] {
+            let Some(i) = entries.iter().position(|d| d.pos == e.pos) else { continue };
+            let start = entries[..=i].iter().rposition(|d| matches!(d.level, 1 | 77)).unwrap_or(0);
+            let end = entries[start + 1..].iter().position(|d| matches!(d.level, 1 | 77)).map_or(entries.len(), |k| start + 1 + k);
+            let made = note(entries[start].name.as_deref(), entries[start].pos, e);
+            entries.drain(start..end);
+            return Some(made);
+        }
+        let names_file = |f: &FileDecl| ["FD", "SD", "RD", "ASSIGN", "SELECT"].iter().any(|w| e.message.starts_with(&format!("{w} {}:", f.name)));
+        if let Some(k) = program.files.iter().position(|f| f.records.iter().any(|d| d.pos == e.pos) || names_file(f)) {
+            let file = program.files.remove(k);
+            return Some(note(Some(&format!("of {}", file.name)), file.pos, e));
+        }
+    }
+    None
 }
 
 /// When a compile happens: SOURCE_DATE_EPOCH's seconds when the build sets it, the
