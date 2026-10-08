@@ -109,20 +109,21 @@ impl Parser<'_> {
             }
             self.accept_word("ON");
             let mut procedures = Vec::new();
-            if self.accept_word("ALL") {
-                if !self.accept_word("PROCEDURES") {
-                    return Err(crate::messages::IWS0067.at(pos, "USE FOR DEBUGGING ON ALL: Enterprise COBOL debugs procedures, by name or as ALL PROCEDURES, and no other items"));
-                }
+            if self.is_word("ALL") && self.word_at(1) == Some("PROCEDURES") {
+                self.at += 2;
             } else {
-                let mut cds = false;
+                let mut left_out = false;
                 while self.peek().is_some_and(|t| *t != Tok::Period) {
-                    if self.debugging_on_cd() {
-                        cds = true;
+                    if self.debugging_on_cd() || self.debugging_on_all_references(pos)? {
+                        left_out = true;
                         continue;
+                    }
+                    if self.is_word("ALL") {
+                        return Err(crate::messages::IWS0067.at(pos, ON_ALL));
                     }
                     procedures.push(self.proc_name()?);
                 }
-                if procedures.is_empty() && cds {
+                if procedures.is_empty() && left_out {
                     self.expect(&Tok::Period, "a period after the USE statement")?;
                     return Ok(Use::Comment);
                 }
@@ -135,7 +136,24 @@ impl Parser<'_> {
         }
         Err(self.error("AFTER, FOR DEBUGGING or BEFORE REPORTING after USE"))
     }
+
+    /// Under `--compliance loose`, ALL [REFERENCES] [OF] identifier in the USE FOR DEBUGGING
+    /// statement at `pos`, left out with IWX0065-W: whether one was.
+    fn debugging_on_all_references(&mut self, pos: Pos) -> R<bool> {
+        if !self.loose || !self.is_word("ALL") || self.word_at(1) == Some("PROCEDURES") {
+            return Ok(false);
+        }
+        self.at += 1;
+        self.accept_word("REFERENCES");
+        self.accept_word("OF");
+        let item = self.reference()?;
+        let refusal = crate::messages::IWS0067.at(pos, ON_ALL);
+        self.messages.push(crate::messages::IWX0065.at(item.pos, format!("{} (--compliance loose): ALL REFERENCES OF {} is left out of the USE statement, and the section does not run for references to it", refusal.labelled(), item.name)));
+        Ok(true)
+    }
 }
+
+const ON_ALL: &str = "USE FOR DEBUGGING ON ALL: Enterprise COBOL debugs procedures, by name or as ALL PROCEDURES, and no other items";
 
 /// Debugging sections are not allowed in a method or a RECURSIVE program (p. 715).
 pub(super) fn debugging_sections_allowed(declaratives: &Declaratives, recursive: bool, method: bool) -> R<()> {

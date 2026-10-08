@@ -12,7 +12,7 @@ usage:
                [--exit-code] [--sql-db URL [--sql-record path] | --sql-replay path [--sql-replay-mode strict|keyed]]
                [--compliance strict|extended|relaxed|loose] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
                [--source-format auto|fixed|free] [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind] [--screens path]
-               [--env NAME=VALUE]... [--autofix <dir>]
+               [--env NAME=VALUE]... [--autofix <dir> | --remediate <dir>]
                                                        compile and run; CBL and PROCESS cards set the options
   ironwork run <module.iwm> [-L <dir>]... [-I <dir>]... [--dd NAME=path[:format][:mod]]... [--clock <time>] [--parm TEXT]
                [--statement-limit N] [--time-limit SECONDS] [--storage-limit BYTES]
@@ -20,7 +20,7 @@ usage:
                [--exit-code] [--coverage FILE] [--evidence DIR [--trace-marker TEXT] [--trace-input] [--trace-statements FILE]]
                                                        run a load module's first program on the VM, with the options
                                                        it was compiled with
-  ironwork check <program.cbl> [-warnings-block] [--cics-return-warning=once|always|never] [-I <dir>]... [--autofix <dir>]
+  ironwork check <program.cbl> [-warnings-block] [--cics-return-warning=once|always|never] [-I <dir>]... [--autofix <dir> | --remediate <dir>]
                [--compliance strict|extended|relaxed|loose] [--dialect ibm|gnucobol] [--assume ID=VALUE]... [--diagnostics text|json]
                [--source-format auto|fixed|free] [--program-scope strict|flexible] [--unresolved-calls run|fail] [--le-services programs|bind]
                                                        compile only
@@ -104,8 +104,11 @@ flags:
              verb takes, a paragraph header in Area B, a zero-length literal, tab stops, free form
              the file was detected in), compiling again until none is left, then check or run the
              repaired source. DIR receives each repaired file and COPY member under its own name,
-             autofix.diff and autofix.json, which lists each fix and what is left. Each fix is
-             written to standard error. docs/autofix.md lists the fixes
+             autofix.diff and autofix.json, which lists each fix, each hole and left-out construct,
+             and what is left. Each fix is written to standard error. docs/autofix.md lists the fixes
+  --remediate DIR
+             check and run: --autofix DIR under --compliance loose, so that what autofix cannot
+             repair compiles as a hole or is left out; autofix.json lists each
   --numeric-display ibm|cobc-ibm-strict|cobc
              how DISPLAY shows a zoned, packed or binary item: ibm as Enterprise COBOL stores it, the
              sign overpunched; cobc-ibm-strict as cobc -std=ibm-strict, the sign after the digits;
@@ -661,6 +664,7 @@ fn driver() -> ExitCode {
     let mut trace_input = false;
     let mut provenance_file: Option<std::path::PathBuf> = None;
     let mut autofix_dir: Option<std::path::PathBuf> = None;
+    let (mut remediate, mut autofix, mut compliance_named) = (false, false, None);
     let (mut compare_base, mut compare_head, mut declare, mut statement) = (None, None, None, None);
     let mut expected: Vec<(String, std::path::PathBuf)> = Vec::new();
     let mut datasets: Option<String> = None;
@@ -772,8 +776,15 @@ fn driver() -> ExitCode {
                 None => refuse!("--coverage needs a file"),
             },
             "--autofix" => match args.next() {
-                Some(dir) => autofix_dir = Some(std::path::PathBuf::from(dir)),
+                Some(dir) => (autofix, autofix_dir) = (true, Some(std::path::PathBuf::from(dir))),
                 None => refuse!("--autofix needs a directory"),
+            },
+            "--remediate" => match args.next() {
+                Some(dir) => {
+                    (remediate, autofix_dir) = (true, Some(std::path::PathBuf::from(dir)));
+                    flags.extend([numeric::Compliance::Extended.flag().to_owned(), numeric::RELAXED.to_owned(), numeric::LOOSE.to_owned()]);
+                }
+                None => refuse!("--remediate needs a directory"),
             },
             "--provenance" => match args.next() {
                 Some(file) => provenance_file = Some(std::path::PathBuf::from(file)),
@@ -907,6 +918,7 @@ fn driver() -> ExitCode {
                     Some(v) => Some(v.to_owned()),
                     None => args.next(),
                 };
+                compliance_named.clone_from(&value);
                 match value.as_deref() {
                     Some("relaxed") => flags.extend([numeric::Compliance::Extended.flag().to_owned(), numeric::RELAXED.to_owned()]),
                     Some("loose") => flags.extend([numeric::Compliance::Extended.flag().to_owned(), numeric::RELAXED.to_owned(), numeric::LOOSE.to_owned()]),
@@ -1003,7 +1015,13 @@ fn driver() -> ExitCode {
         return usage_error("--exit-code is for run, cics and job, and not with --expected");
     }
     if autofix_dir.is_some() && !matches!(rest.first().map(String::as_str), Some("check" | "run")) {
-        return usage_error("--autofix is for check and run");
+        return usage_error(if remediate { "--remediate is for check and run" } else { "--autofix is for check and run" });
+    }
+    if remediate && autofix {
+        return usage_error("--remediate repairs as --autofix does, into its own directory: give one of them");
+    }
+    if remediate && compliance_named.as_deref().is_some_and(|c| c != "loose") {
+        return usage_error("--remediate compiles under --compliance loose");
     }
     if numeric::SourceFormat::of(&flags) != numeric::SourceFormat::Auto && numeric::Compliance::of(&flags) == numeric::Compliance::Strict {
         return usage_error("--source-format is for --compliance extended: Enterprise COBOL reads fixed form alone");

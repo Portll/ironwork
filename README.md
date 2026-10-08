@@ -392,7 +392,8 @@ dialect does, `-012.50`, and under `--dialect gnucobol` as cobc -std=ibm-strict 
 space (IWX0063-W; IWS0106-E under strict), or as no characters with `--empty-literal empty`. `--autofix DIR`, for check and run, repairs what has exactly one fix and writes the repaired
 sources, a diff and a report to DIR ([docs/autofix.md](docs/autofix.md)). `--compliance relaxed` compiles what extended still refuses in a
 PROCEDURE DIVISION sentence or statement as a hole (IWX0059-W), which ends a run that reaches it
-with IWR0078.
+with IWR0078. `--compliance loose` also leaves out a data record, file or report extended refuses,
+and `--remediate DIR` is `--autofix DIR` under loose, listing each hole and left-out construct.
 [docs/compliance.md](docs/compliance.md) gives each one's meaning, the census that chose them, and
 what stays refused and why.
 

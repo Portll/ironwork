@@ -906,7 +906,7 @@ impl Lower<'_> {
     }
 }
 
-fn stmt_pos(s: &Stmt) -> Option<Pos> {
+pub(crate) fn stmt_pos(s: &Stmt) -> Option<Pos> {
     use syntax::report::ReportStmt;
     Some(match s {
         Stmt::Move { pos, .. }

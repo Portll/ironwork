@@ -204,15 +204,29 @@ pub fn parse_all_with(text: &str, libraries: &copy::Libraries) -> Result<Vec<ast
 
 /// Under `--compliance loose`, the source parsed as [`parse_all_with`] parses it, and again after
 /// each directive ironwork does not read, character outside COBOL's set or stray period in the
-/// program's own file that stops it is left out, with IWX0065-W; up to 50 times.
+/// program's own file that stops it is left out, with IWX0065-W; up to 50 times. A source no reading
+/// finds IDENTIFICATION DIVISION in is read again as a program named after its file.
 fn parse_loose(text: &str, libraries: &copy::Libraries, start: source::Start, detect: bool) -> Result<Vec<ast::Program>, Error> {
     let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
     let mut notes = Vec::new();
+    let assumed = libraries.assuming_program_id();
     for round in 0..=50 {
         let current = lines.join("\n") + "\n";
-        let parsed = if detect { parse_detecting(&current, libraries, start.clone()) } else { parse_from(&current, libraries, start.clone()).map(|(p, _)| p) };
+        let read = |libraries: &copy::Libraries| if detect { parse_detecting(&current, libraries, start.clone()) } else { parse_from(&current, libraries, start.clone()).map(|(p, _)| p) };
+        let (parsed, libraries) = match read(libraries) {
+            Err(e) if e.file.is_none() && e.message.starts_with("expected ID,") => (read(&assumed), &assumed),
+            parsed => (parsed, libraries),
+        };
         let e = match parsed {
             Ok(mut programs) => {
+                // A record left out of a COPY member may be one cobc's tab stops read whole.
+                let member_holes = |ps: &[ast::Program]| ps.iter().flat_map(|p| &p.messages).filter(|m| m.id == Some("IWX0064") && m.pos.file != 0).count();
+                if member_holes(&programs) > 0
+                    && let Ok((stopped, _)) = parse_from(&current, &libraries.with_member_tab_stops(), start.clone())
+                    && member_holes(&stopped) < member_holes(&programs)
+                {
+                    programs = stopped;
+                }
                 if let Some(first) = programs.first_mut() {
                     first.messages.splice(0..0, notes);
                 }
@@ -246,7 +260,7 @@ fn parse_loose(text: &str, libraries: &copy::Libraries, start: source::Start, de
 
 /// [`parse_all_with`]'s reading under `--source-format auto`, given its first reading.
 fn parse_detecting(text: &str, libraries: &copy::Libraries, start: source::Start) -> Result<Vec<ast::Program>, Error> {
-    let fixed = parse_from(text, libraries, start);
+    let fixed = parse_from(text, libraries, start.clone());
     let (at, why) = match &fixed {
         Ok((_, None)) => return fixed.map(|(programs, _)| programs),
         Ok((_, Some(cut))) => (*cut, format!("line {} runs on past column 72, where fixed form ends, in the middle of a word or literal", cut.line)),
@@ -256,6 +270,14 @@ fn parse_detecting(text: &str, libraries: &copy::Libraries, start: source::Start
                 let warning = messages::IWX0058.at(Pos { file: 0, line, col }, format!("tab stops (GnuCOBOL and Micro Focus; Enterprise COBOL source holds no tab): read with each tab one column {stops}, and with each reaching the next column after a multiple of 8, as cobc places it, the file parses"));
                 if let Ok((programs, None)) = parse_from(text, libraries, source::Start::TabStops(warning)) {
                     return Ok(programs);
+                }
+            }
+            if e.file.is_some() {
+                // Read with cobc's tab stops, the members get further or no further.
+                match parse_from(text, &libraries.with_member_tab_stops(), start.clone()) {
+                    Ok((programs, _)) => return Ok(programs),
+                    Err(further) if (further.file.as_ref(), further.pos) != (e.file.as_ref(), e.pos) => return Err(further),
+                    Err(_) => {}
                 }
             }
             (Pos { file: 0, line: 1, col: 1 }, format!("read in fixed form {stops}"))
@@ -293,9 +315,9 @@ fn parse_from(text: &str, libraries: &copy::Libraries, start: source::Start) -> 
     };
     let cut = source::cut_at_the_margin(text, &source);
     if compliance == numeric::Compliance::Extended {
-        tokens = extended::rewrite(tokens, &source.options).map_err(|e| e.in_files(&files))?;
+        tokens = extended::rewrite(tokens, &source.options, &source.constants).map_err(|e| e.in_files(&files))?;
     }
-    let mut programs = parser::parse(&tokens, source.options, compliance, libraries.relaxed(), libraries.loose()).map_err(|e| e.in_files(&files))?;
+    let mut programs = parser::parse(&tokens, source.options, compliance, libraries.relaxed(), libraries.loose(), libraries.program_stem()).map_err(|e| e.in_files(&files))?;
     for p in &mut programs {
         p.sources = files.clone();
     }

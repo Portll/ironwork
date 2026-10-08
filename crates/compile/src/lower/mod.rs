@@ -18,6 +18,7 @@ mod cond;
 mod data;
 mod file;
 mod flow;
+pub(crate) use flow::stmt_pos;
 mod function;
 mod markup;
 mod plans;

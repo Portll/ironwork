@@ -1,7 +1,7 @@
-//! `--autofix DIR`: the source and its COPY members repaired where a message has exactly one
-//! sensible fix, compiled again until none is left. DIR receives each repaired file under its own
-//! name, `autofix.diff` and `autofix.json`; a fix that would guess at meaning is listed, not made
-//! (docs/autofix.md).
+//! `--autofix DIR`, and `--remediate DIR` under `--compliance loose`: the source and its COPY members
+//! repaired where a message has exactly one sensible fix, compiled again until none is left. DIR
+//! receives each repaired file under its own name, `autofix.diff` and `autofix.json`; a fix that
+//! would guess at meaning is listed, not made (docs/autofix.md).
 
 use exec::evidence::{Value, canonical, fields};
 use std::collections::BTreeMap;
@@ -192,13 +192,12 @@ fn apply(edit: &Edit, lines: &mut Vec<String>) -> bool {
     true
 }
 
-/// The fixes made and the messages left at severity E or above, as JSON.
+/// The fixes made, the holes and left-out constructs relaxed and loose compiled around, and the
+/// messages left at severity E or above, as JSON.
 fn report(path: &str, fixes: &[Fix], left: &[syntax::Error]) -> String {
     let fixed = fixes.iter().map(|f| Value::Obj(fields([("file", f.file.as_str().into()), ("line", Value::Int(f.line.into())), ("col", Value::Int(f.col.into())), ("id", f.id.into()), ("fix", f.what.as_str().into())]))).collect();
-    let remaining = left
-        .iter()
-        .filter(|m| m.severity >= syntax::Severity::Error)
-        .map(|m| {
+    let listed = |keep: &dyn Fn(&syntax::Error) -> bool| {
+        let entry = |m: &syntax::Error| {
             Value::Obj(fields([
                 ("file", m.file.clone().unwrap_or_else(|| path.to_owned()).into()),
                 ("line", Value::Int(m.pos.line.into())),
@@ -206,9 +205,13 @@ fn report(path: &str, fixes: &[Fix], left: &[syntax::Error]) -> String {
                 ("id", m.id.map_or(Value::Null, Value::from)),
                 ("message", m.message.as_str().into()),
             ]))
-        })
-        .collect();
-    canonical(&Value::Obj(fields([("fixes", Value::Arr(fixed)), ("remaining", Value::Arr(remaining))])))
+        };
+        Value::Arr(left.iter().filter(|m| keep(m)).map(entry).collect())
+    };
+    let holes = listed(&|m| m.id == Some("IWX0059"));
+    let left_out = listed(&|m| matches!(m.id, Some("IWX0064" | "IWX0065" | "IWX0075")));
+    let remaining = listed(&|m| m.severity >= syntax::Severity::Error);
+    canonical(&Value::Obj(fields([("fixes", Value::Arr(fixed)), ("holes", holes), ("left_out", left_out), ("remaining", remaining)])))
 }
 
 /// A unified diff of `before` and `after`, three lines of context, empty when they are the same.

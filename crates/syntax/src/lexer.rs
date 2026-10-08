@@ -154,6 +154,14 @@ impl Lexer<'_> {
         self.positions.get(self.at).copied().unwrap_or_default()
     }
 
+    /// Whether the last division header read is PROCEDURE DIVISION's.
+    fn in_procedure_division(&self) -> bool {
+        self.tokens.windows(2).rev().find_map(|w| match (&w[0].tok, &w[1].tok) {
+            (Tok::Word(division), Tok::Word(word)) if word == "DIVISION" => Some(division == "PROCEDURE"),
+            _ => None,
+        }) == Some(true)
+    }
+
     fn separator_follows(&self, ahead: usize) -> bool {
         self.peek(ahead).is_none_or(|c| c == ' ' || c == '\n')
     }
@@ -312,7 +320,12 @@ impl Lexer<'_> {
             }
             '.' if self.separator_follows(1) => {
                 self.at += 1;
-                self.emit(Tok::Period, pos);
+                // A period alone in the PROCEDURE DIVISION is an empty sentence, which strict reads too.
+                if self.extended && self.tokens.last().is_some_and(|t| t.tok == Tok::Period) && !self.in_procedure_division() {
+                    self.pending.push(crate::messages::IWX0041.at(pos, "periods after a period (GnuCOBOL and Micro Focus; Enterprise COBOL ends a sentence with one): the periods after the first are ignored"));
+                } else {
+                    self.emit(Tok::Period, pos);
+                }
             }
             '.' if self.extended && next == Some('.') && self.separator_follows(self.periods()) => {
                 self.pending.push(crate::messages::IWX0041.at(pos, "periods after a period (GnuCOBOL and Micro Focus; Enterprise COBOL ends a sentence with one): the periods after the first are ignored"));

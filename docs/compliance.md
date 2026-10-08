@@ -10,7 +10,7 @@ compiles and runs them; anything else stays refused with the message strict give
 | `strict` (the default) | A construct Enterprise COBOL does not have is refused, and a form IBM's compiler flags gets IBM's message at IBM's severity |
 | `extended` | The extensions below are read as Micro Focus and GnuCOBOL read them, each with a warning |
 | `relaxed` | `extended`, and a PROCEDURE DIVISION sentence or statement extended refuses compiles as a hole that ends a run reaching it ([below](#relaxed)) |
-| `loose` | `relaxed`, and a data record extended refuses is left out, its items' statements holes; an unread directive or a character outside COBOL's set is left out; severity E is a warning ([below](#loose)) |
+| `loose` | `relaxed`, and a data record, file or report extended refuses is left out, its items' statements holes; a statement a later check refuses is a hole; an unread directive, a character outside COBOL's set and other forms are left out; severity E is a warning ([below](#loose)) |
 
 The flag is `--compliance strict|extended` (or `--compliance=extended`) on `run`, `check`, `cics`,
 `compile`, `job`, `fuzz` and `compare`. It is a compile option: `numeric::Options::compliance`,
@@ -958,14 +958,15 @@ compiled and the others are not`, at each >>DEFINE and >>IF on a compiled line.
     >>IF condition ... [>>ELIF condition ...] [>>ELSE ...] >>END-IF
 
 The lines an >>IF, >>ELIF or >>ELSE chooses are read and the others are not, nested as written. A
-condition is `name [IS] [NOT] DEFINED`, or a defined name compared with a literal or another
+condition is `name [IS] [NOT] DEFINED` (or `SET`, which cobc reads the same way; no name is
+predefined, P64 included), or a defined name compared with a literal or another
 defined name by =, <, >, <=, >= or their words, as numbers where both are numbers, and terms may
 be joined by AND and OR, read left to right; a comparison of a name not defined is false.
 PARAMETER, a value from the compiler's options, leaves the name undefined, as ironwork takes no
 such option. cobc 3.2 gives the same lines on the probes checked. An >>IF with no >>END-IF, an
 >>ELSE, >>ELIF or >>END-IF with no >>IF, and a condition of another form are refused (IWC0318).
-GnuCOBOL's >>DEFINE CONSTANT, a constant for the program text, stays refused, as do >>EVALUATE and
-the directives no section here names (IWS0094). Enterprise COBOL 6.3 has >>DEFINE, >>IF, >>ELSE and
+GnuCOBOL's >>DEFINE CONSTANT, a constant for the program text, is IWX0067. >>EVALUATE and the
+directives no section here names stay refused (IWS0094). Enterprise COBOL 6.3 has >>DEFINE, >>IF, >>ELSE and
 >>END-IF (Language Reference, Conditional compilation), and strict reads them the same way with no
 message; >>ELIF, which IBM has not, is read under extended alone. IBM's arithmetic expressions in
 >>DEFINE, its predefined compilation variables and its DEFINE compiler option are not read yet.
@@ -1114,6 +1115,79 @@ gives `IWS0106-E` and assumes the space too: the program compiles at return code
 COBOL compiles past an E-level message. `--empty-literal empty` reads it as no characters instead,
 the reading ironwork gave before, under either level and with the same message.
 
+### IWX0067-W A directive's constant
+
+`IWX0067-W {directive} (GnuCOBOL and Micro Focus; Enterprise COBOL has no compile-time constant):
+{name} stands for {literal} in the program, as a level-78 constant does`, at the directive.
+
+    >>DEFINE CONSTANT name [AS] literal [OVERRIDE]
+    $SET CONSTANT name literal
+
+From the line after the directive, the name in the program text stands for the literal, as a
+level-78 constant's name does: a quoted literal's characters, or a number as written. A second
+definition of the name is ignored, as cobc ignores it, unless it says OVERRIDE. `$SET` starts in
+column 1 or 7, or wherever it begins a line, and `>>` anywhere first on a line, including after a
+sequence number in fixed form, as cobc reads `000100 >>DEFINE ...`. A directive with no name or no
+literal is refused (IWC0318).
+
+### IWX0068-W ALPHABET IS ASCII
+
+`IWX0068-W ALPHABET {name} IS ASCII (GnuCOBOL and Micro Focus; Enterprise COBOL writes STANDARD-1):
+it is read as STANDARD-1, the ASCII collating sequence`, at ASCII.
+
+### IWX0069-W REPOSITORY PROGRAM
+
+`IWX0069-W REPOSITORY PROGRAM {name} (COBOL 2014 and GnuCOBOL; Enterprise COBOL names classes and
+functions there): CALL {name}, unquoted, calls the program so named`, at PROGRAM.
+
+A REPOSITORY entry `PROGRAM name [AS literal]` lets the program write `CALL name` with the name
+unquoted; that CALL calls the program the literal names, or `NAME` with no AS phrase, as a quoted
+name does. The entry outranks a data item of the same name. An empty REPOSITORY paragraph is read
+too.
+
+### IWX0070-W The header's last parameter in Area A
+
+`IWX0070-W {name} in Area A (Micro Focus and GnuCOBOL; Enterprise COBOL puts the header's parameters
+in Area B): it is read as the PROCEDURE DIVISION header's last parameter`, at the name.
+
+A PROCEDURE DIVISION USING list continued on lines of its own may put its last name in Area A,
+followed by the header's period. Under strict that reads as a paragraph header and the header has
+no period; under extended, after at least one parameter, it is the last parameter.
+
+### IWX0071-W A DATA DIVISION section with no division header
+
+`IWX0071-W {section} SECTION with no DATA DIVISION header (Micro Focus and GnuCOBOL; Enterprise COBOL
+writes DATA DIVISION first): it is read as though DATA DIVISION came first`, at the section header.
+
+WORKING-STORAGE, LOCAL-STORAGE, LINKAGE or FILE SECTION after the IDENTIFICATION or ENVIRONMENT
+DIVISION with no DATA DIVISION header begins the DATA DIVISION.
+
+### IWX0072-W OPTIONAL parameters
+
+`IWX0072-W OPTIONAL (GnuCOBOL and Micro Focus; Enterprise COBOL has no optional parameter): it is
+read and has no effect, an argument the caller leaves out reading as OMITTED, as one does under
+Enterprise COBOL`, at OPTIONAL.
+
+`PROCEDURE DIVISION USING a OPTIONAL b` reads `b` as any parameter. A CALL that passes fewer
+arguments leaves `b` with no storage, and `IF b OMITTED` is true for it (IWX0034).
+
+### IWX0073-W FUNCTION-ID with no IDENTIFICATION DIVISION header
+
+`IWX0073-W FUNCTION-ID with no IDENTIFICATION DIVISION header before it (COBOL 2002 and GnuCOBOL;
+Enterprise COBOL requires the header): the function reads as though IDENTIFICATION DIVISION. came
+before it`, at FUNCTION-ID. The same as IWX0006 for PROGRAM-ID.
+
+### IWX0074-W A constant entry AS an arithmetic expression
+
+`IWX0074-W constant {name} AS an arithmetic expression (COBOL 2002, Micro Focus and GnuCOBOL;
+Enterprise COBOL has no constant entry): it stands for {value}, the expression's value truncated to
+an integer, as the standard gives it`, at the level number.
+
+`01 name CONSTANT AS expression` or `78 name VALUE expression`, where the expression joins numeric
+literals and numeric constants defined before it with +, -, *, / and parentheses: ironwork works it
+exactly, as fractions, and truncates the result toward zero (ISO 2002 7.3.6.3). Any other operand is
+refused, naming what the expression may hold.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and
@@ -1155,14 +1229,32 @@ extended.
 - In the program's own file, a directive ironwork does not read (`>>CALL-CONVENTION`,
   `>>COBOL-WORDS`), a character outside COBOL's set, or a stray period that stops the parse is left
   out, the directive's line or the one character, with `IWX0065-W`, and the source is read again.
+- A statement a check across the program refuses, such as PERFORM ... THRU from a declarative
+  procedure into the rest of the program (IWC0015), compiles as a hole, with IWX0059-W.
+- A report whose description the compile refuses, such as a subscripted CONTROL (IWR0026), is left
+  out with its name in the file's REPORT clause, with `IWX0065-W`; INITIATE, GENERATE and TERMINATE
+  naming it or its groups then compile as holes.
+- A PROCEDURE DIVISION USING name whose record was left out (ANY NUMERIC, say) keeps its
+  parameter's place, so the arguments after it still reach their parameters, with `IWX0065-W`; a
+  statement naming it compiles as a hole.
+- The Communication feature: the COMMUNICATION SECTION's CD areas are declared as data, as under
+  every level, and ENABLE, DISABLE, RECEIVE, SEND, PURGE and ACCEPT MESSAGE COUNT compile as holes,
+  each refusal given as `IWX0065-W` or IWX0059-W.
+- `USE FOR DEBUGGING ON ALL [REFERENCES OF] item`: the item is left out of the USE statement, with
+  `IWX0065-W`, and the section runs for the procedures it names. ALPHABET name FOR NATIONAL, which
+  ironwork has no collating sequence for, is left out the same way.
+- A source with no IDENTIFICATION DIVISION or PROGRAM-ID is a program named after its file, as cobc
+  names it under -std=mf and -std=ibm, with `IWX0075-W no IDENTIFICATION DIVISION or PROGRAM-ID
+  (GnuCOBOL under -std=mf or -std=ibm assumes them; Enterprise COBOL requires them): the program is
+  named {name}, after its file`. When it begins with statements, they are its PROCEDURE DIVISION.
 - Messages of severity E are given as warnings, so a program whose worst message is an E-level
   recovery checks with return code 4.
 
-What loose still refuses: the IDENTIFICATION DIVISION and PROCEDURE DIVISION headers, a conditional
-compilation directive it cannot evaluate (leaving `>>IF` out would choose a branch), the
-COMMUNICATION SECTION, and rules checked across the program rather than on one statement (PERFORM
-THRU into the declaratives, a key named in a SELECT that names no item). A load module records
-`extended`.
+What loose still refuses: a conditional compilation directive it cannot evaluate (leaving `>>IF`
+out would choose a branch), a refusal inside a COPY member that is no data record, and a severe
+message placed in none of the constructs above. A load module records `extended`.
+`--remediate DIR` repairs with `--autofix DIR` and compiles under loose
+([docs/autofix.md](autofix.md)).
 
 ## How the six were chosen
 

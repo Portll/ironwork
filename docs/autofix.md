@@ -1,4 +1,4 @@
-# Autofix: `--autofix DIR`
+# Autofix: `--autofix DIR` and `--remediate DIR`
 
 `ironwork check` and `ironwork run` take `--autofix DIR`: ironwork repairs what a message says has
 exactly one fix, compiles the result again, and repeats until nothing fixable is left (25 rounds at
@@ -6,8 +6,8 @@ most). Then the command checks or runs the repaired source as it would the origi
 would have to guess at what the author meant is not made; the message stays, and `autofix.json`
 lists it.
 
-**Status:** built 2026-10-08 (ironwork-roadmap 5.17.20), on the operator's request for a mode that
-repairs sources.
+**Status:** built 2026-10-08 (ironwork-roadmap 5.17.20, `--remediate` 5.17.21), on the operator's
+request for a mode that repairs sources.
 
 ## What DIR receives
 
@@ -16,7 +16,7 @@ repairs sources.
 | The program's file name | The repaired program, every line, whether or not a fix touched it |
 | Each COPY member a fix touched, under its own file name | The repaired member. DIR comes first in the copy libraries, so the repaired program reads it |
 | `autofix.diff` | A unified diff, three lines of context, of each repaired file against the original |
-| `autofix.json` | `fixes`: each fix's `file`, `line`, `col`, the message `id` it answers and `fix`, what it did. `remaining`: each message of severity E or above the repaired source still gives |
+| `autofix.json` | `fixes`: each fix's `file`, `line`, `col`, the message `id` it answers and `fix`, what it did. `holes`: each IWX0059 hole relaxed and loose compiled, and `left_out`: each IWX0064, IWX0065 or IWX0075 construct loose left out or assumed, by `file`, `line`, `col`, `id` and `message`. `remaining`: each message of severity E or above the repaired source still gives |
 
 Each fix is also written to standard error, `file:line:col: fixed ID: what it did`. A position is
 the one the message gave in the round that made the fix, so a fix after a line inserted above it
@@ -39,9 +39,23 @@ behaves as the original did, under the level that read the original. Most of the
 the source closer to Enterprise COBOL: a program needing only the first five compiles under strict
 afterwards. `>>SOURCE FORMAT FREE` keeps a free-form program for `--compliance extended`.
 
+## `--remediate DIR`
+
+`--remediate DIR` is `--autofix DIR` under `--compliance loose`
+([compliance.md](compliance.md#loose)): the source is repaired as above, and what has no one fix
+then compiles as a hole or is left out instead of stopping the compile. `autofix.json` lists each
+hole and left-out construct, so the report is the list of what a person still has to look at. A run
+that reaches a hole ends with IWR0078. It takes no `--autofix`, and no `--compliance` but `loose`.
+
+Of the 364 programs cobc 3.2 compiles that ironwork 0.7.0 refused under extended (the census of
+2026-10-07, without cobc's spurious acceptances), `--autofix` under extended compiles 263 and
+`--remediate` all 364,
+with 101 fixes in 84 programs, 508 holes in 92 and 98 constructs left out or assumed in 42
+(2026-10-08).
+
 ## What it does not fix
 
 Anything with more than one reading: an undefined name, a function or a usage ironwork does not
 have, `GO TO` a paragraph that does not exist (in the bug datasets, a deleted `-EXIT` suffix), a
 PICTURE out of range. These stay in `remaining` for a person, or for `--compliance relaxed`, which
-compiles a refused statement as a hole.
+compiles a refused statement as a hole, or `--remediate`.

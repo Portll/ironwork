@@ -129,8 +129,29 @@ impl Parser<'_> {
         self.accept(&Tok::Period);
         let mut entries: Vec<ClassEntry> = Vec::new();
         loop {
-            if self.accept(&Tok::Period) || self.peek().is_none() || self.section_header() || self.at_division(&["DATA", "PROCEDURE", "IDENTIFICATION", "ID"]) {
+            let next_paragraph = self.word().is_some_and(|w| matches!(w, "SPECIAL-NAMES" | "SOURCE-COMPUTER" | "OBJECT-COMPUTER" | "INPUT-OUTPUT" | "FILE-CONTROL" | "I-O-CONTROL")) && self.peek_at(1) == Some(&Tok::Period);
+            if self.accept(&Tok::Period) || self.peek().is_none() || next_paragraph || self.section_header() || self.at_division(&["DATA", "PROCEDURE", "IDENTIFICATION", "ID"]) {
                 return Ok(entries);
+            }
+            if self.extended && self.is_word("PROGRAM") {
+                let pos = self.pos();
+                self.at += 1;
+                let name = self.name("a program name")?;
+                let called = if self.accept_word("AS") {
+                    match self.peek() {
+                        Some(Tok::Alnum(s)) => {
+                            let s = s.clone();
+                            self.at += 1;
+                            s
+                        }
+                        _ => return Err(self.error("a literal after AS")),
+                    }
+                } else {
+                    name.clone()
+                };
+                self.messages.push(crate::messages::IWX0069.at(pos, format!("REPOSITORY PROGRAM {name} (COBOL 2014 and GnuCOBOL; Enterprise COBOL names classes and functions there): CALL {name}, unquoted, calls the program so named")));
+                self.repository_programs.push((name, called));
+                continue;
             }
             if self.accept_word("CLASS") {
                 let pos = self.pos();

@@ -18,6 +18,8 @@ pub struct Source {
     pub free: Vec<FreeSpan>,
     /// The warnings of the compiler directives read, which the first token carries.
     pub notes: Vec<Error>,
+    /// The constants `>>DEFINE CONSTANT` and `$SET CONSTANT` give, in order.
+    pub constants: Vec<crate::directives::Constant>,
 }
 
 /// Lines `first` to `last` of file `file`, read in free form, and the warning that says so; a
@@ -113,9 +115,18 @@ pub fn read_from(input: &str, file: u16, debugging: bool, compliance: Compliance
 
 /// Reads a COPY member's text as [`read_under`] does, starting in free form when the line that
 /// copies it is free form, as GnuCOBOL and Micro Focus carry the source format into a member;
-/// without `detect` only its directives make it free form.
-pub fn read_copied(input: &str, file: u16, debugging: bool, compliance: Compliance, copied_free: bool, detect: bool) -> Result<Source, Error> {
+/// without `detect` only its directives make it free form. With `tab_stops`, under extended, each
+/// tab reaches the next column after a multiple of 8, with IWX0058-W at the first.
+pub fn read_copied(input: &str, file: u16, debugging: bool, compliance: Compliance, copied_free: bool, detect: bool, tab_stops: bool) -> Result<Source, Error> {
     let extended = compliance == Compliance::Extended;
+    if extended && tab_stops && let Some((index, line)) = input.lines().enumerate().find(|(_, l)| l.contains('\t')) {
+        let col = line[..line.find('\t').unwrap_or(0)].chars().count() as u32 + 1;
+        let expanded: Vec<String> = input.lines().map(|l| expand_tabs(l.trim_end_matches('\r')).into_iter().collect()).collect();
+        let mut source = read_copied(&expanded.join("\n"), file, debugging, compliance, copied_free, detect, false)?;
+        let why = "tab stops (GnuCOBOL and Micro Focus; Enterprise COBOL source holds no tab): the program does not read with each tab one column, and with each reaching the next column after a multiple of 8 in its COPY members, as cobc places it, it reads";
+        source.notes.insert(0, crate::messages::IWX0058.at(Pos { file, line: index as u32 + 1, col }, why));
+        return Ok(source);
+    }
     if !detect && !copied_free {
         return read_lines(input, file, debugging, extended, false, false);
     }
@@ -183,7 +194,7 @@ fn read_with_margin(input: &str, file: u16, debugging: bool, extended: bool, cop
 /// Reads the lines, a tab as one column; under extended a file is free form from its first line
 /// where `copied_free` says so, or where `detect` lets [`free_from_the_start`] find it is.
 fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_free: bool, detect: bool) -> Result<Source, Error> {
-    let mut out = Source { text: String::new(), positions: Vec::new(), options: Vec::new(), debugging: debugging.then(Vec::new), free: Vec::new(), notes: Vec::new() };
+    let mut out = Source { text: String::new(), positions: Vec::new(), options: Vec::new(), debugging: debugging.then(Vec::new), free: Vec::new(), notes: Vec::new(), constants: Vec::new() };
     let mut conditions = crate::directives::Conditions::default();
     let mut seen_program = false;
     let mut open_quote: Option<char> = None;
@@ -199,7 +210,7 @@ fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_fr
         let line = index as u32 + 1;
         let debugging_text;
         let mut chars = chars.as_slice();
-        if let Some(found) = crate::directives::read(chars, Pos { file, line, col: 1 }) {
+        if let Some(found) = crate::directives::read(chars, Pos { file, line, col: 1 }, free.is_none()) {
             use crate::directives::Directive;
             match found? {
                 // Enterprise COBOL 6.3 has DEFINE and IF; the rest are read under extended alone.
@@ -212,6 +223,13 @@ fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_fr
                 crate::directives::Directive::Ignored(note) => {
                     if conditions.active() {
                         out.notes.push(note);
+                    }
+                    continue;
+                }
+                crate::directives::Directive::Constant(constant, note) => {
+                    if conditions.active() {
+                        out.notes.push(note);
+                        out.constants.push(constant);
                     }
                     continue;
                 }
@@ -235,7 +253,7 @@ fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_fr
         if !conditions.active() {
             continue;
         }
-        if extended && let Some(found) = directive(chars, Pos { file, line, col: 1 }) {
+        if extended && let Some(found) = directive(chars, Pos { file, line, col: 1 }, free.is_none()) {
             let (format, pos) = found?;
             match format {
                 Format::Free if free.is_none() => free = Some((line + 1, Some(crate::messages::IWX0001.at(pos, format!("{FREE_FORM}: this directive makes the lines after it free form"))))),
@@ -388,7 +406,7 @@ fn free_from_the_start(input: &str, file: u16) -> Option<(u32, Error)> {
     for (index, raw) in input.lines().enumerate() {
         let line = index as u32 + 1;
         let chars = expand_tabs(raw.trim_end_matches('\r'));
-        if directive(&chars, Pos { file, line, col: 1 }).is_some() {
+        if directive(&chars, Pos { file, line, col: 1 }, true).is_some() {
             return None;
         }
         let (Some(start), Some(&c)) = (chars.iter().position(|c| *c != ' '), chars.get(TEXT_START - 1)) else { continue };
@@ -422,16 +440,10 @@ enum Format {
 /// first in column 1 or 7, Micro Focus's directive indicator. Err for any but a source-format
 /// directive: `>>SOURCE [FORMAT] [IS] FREE|FIXED`, or `$SET` or `>>SET` with `SOURCEFORMAT"FREE"`,
 /// `SOURCEFORMAT"FIXED"` or `SOURCEFORMAT(FREE)`.
-fn directive(chars: &[char], pos: Pos) -> Option<Result<(Format, Pos), Error>> {
-    let start = chars.iter().position(|c| *c != ' ')?;
+fn directive(chars: &[char], pos: Pos, fixed: bool) -> Option<Result<(Format, Pos), Error>> {
+    let start = crate::directives::start(chars, fixed)?;
     let text: String = chars[start..].iter().collect();
-    let words = if let Some(rest) = text.strip_prefix(">>") {
-        rest
-    } else if text.starts_with('$') && (start == 0 || start == TEXT_START - 1) {
-        &text[1..]
-    } else {
-        return None;
-    };
+    let words = text.strip_prefix(">>").or_else(|| text.strip_prefix('$'))?;
     let upper = words.trim().to_ascii_uppercase();
     let words: Vec<&str> = upper.split_whitespace().filter(|w| !matches!(*w, "FORMAT" | "IS")).collect();
     let format = |value: &str| match value.trim_matches(|c| matches!(c, '"' | '\'' | '(' | ')')) {
@@ -812,12 +824,12 @@ mod tests {
     #[test]
     fn a_member_copied_from_a_free_form_line_starts_free_with_no_warning_of_its_own() {
         let member = "    *> a member indented as free form\n    02 B PIC X(80) VALUE 'past column seventy-two, which free form keeps whole as it reads it'.\n";
-        let copied = read_copied(member, 2, false, Compliance::Extended, true, true).unwrap();
+        let copied = read_copied(member, 2, false, Compliance::Extended, true, true, false).unwrap();
         assert!(copied.text.contains("02 B PIC X(80)") && copied.text.trim_end().ends_with("whole as it reads it'."), "{}", copied.text);
         assert_eq!((copied.free.len(), copied.free[0].first, copied.free[0].warning.clone()), (1, 1, None));
-        let fixed_copied = read_copied(member, 2, false, Compliance::Extended, false, true).unwrap();
+        let fixed_copied = read_copied(member, 2, false, Compliance::Extended, false, true, false).unwrap();
         assert_eq!(fixed_copied.free[0].warning.as_ref().and_then(|w| w.id), Some("IWX0001"));
-        assert!(read_copied(member, 2, false, Compliance::Strict, true, true).is_err());
+        assert!(read_copied(member, 2, false, Compliance::Strict, true, true, false).is_err());
     }
 
     #[test]

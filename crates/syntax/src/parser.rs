@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::lexer::{Tok, Token};
-use crate::messages::{IWS0097, IWS0098, IWS0100, IWS0104, IWX0013, IWX0014, IWX0017, IWX0059, IWX0061, IWX0064};
+use crate::messages::{IWS0097, IWS0098, IWS0100, IWS0104, IWX0013, IWX0014, IWX0017, IWX0059, IWX0061, IWX0064, IWX0070, IWX0071, IWX0072};
 use crate::{Error, Pos};
 
 mod communication;
@@ -63,11 +63,12 @@ fn scope(programs: &mut [Program]) {
 /// Every program in the source, first to last, with nested programs after the one containing them,
 /// except that the first program comes ahead of the user-defined functions and prototypes before
 /// it, as the binder's ENTRY statement makes it the one a run enters (assumption C270).
-pub fn parse(tokens: &[Token], options: Vec<String>, compliance: numeric::Compliance, relaxed: bool, loose: bool) -> Result<Vec<Program>, Error> {
+pub fn parse(tokens: &[Token], options: Vec<String>, compliance: numeric::Compliance, relaxed: bool, loose: bool, file_stem: Option<String>) -> Result<Vec<Program>, Error> {
     let mut parser = Parser::new(tokens);
     parser.extended = compliance == numeric::Compliance::Extended;
     parser.relaxed = parser.extended && relaxed;
     parser.loose = parser.relaxed && loose;
+    parser.assumed_id = file_stem.filter(|_| parser.loose);
     let mut programs = Vec::new();
     parser.program(&options, &mut programs)?;
     while parser.peek().is_some() {
@@ -387,6 +388,9 @@ struct Parser<'a> {
     /// The user-defined functions the REPOSITORY paragraph names, kept apart from the intrinsic
     /// ones so that one may take an intrinsic function's name.
     repository_functions: Vec<String>,
+    /// The programs the REPOSITORY paragraph names, under `--compliance extended`, each with the
+    /// name CALL of it unquoted calls: its AS literal's, or its own.
+    repository_programs: Vec<(String, String)>,
     /// The SPECIAL-NAMES mnemonic-names in scope, for WRITE ADVANCING and DISPLAY UPON: the
     /// program's own, then those of the programs containing it, whose configuration section applies
     /// to it too.
@@ -421,6 +425,11 @@ struct Parser<'a> {
     relaxed: bool,
     /// `--compliance loose` is: a data record whose entries do not parse is left out.
     loose: bool,
+    /// Under `--compliance loose`, the name a source with no IDENTIFICATION DIVISION gives its
+    /// program: its file's.
+    assumed_id: Option<String>,
+    /// The program whose body is next read has no PROCEDURE DIVISION header before its statements.
+    procedure_assumed: bool,
     /// The CD names of the program being parsed.
     cds: Vec<String>,
     /// The 01 and 77 items of the program being parsed that have no storage of their own: its
@@ -450,6 +459,7 @@ impl<'a> Parser<'a> {
             dli: false,
             intrinsics: Vec::new(),
             repository_functions: Vec::new(),
+            repository_programs: Vec::new(),
             sql: SqlState::default(),
             mnemonics: Vec::new(),
             switches: Vec::new(),
@@ -465,6 +475,8 @@ impl<'a> Parser<'a> {
             extended: false,
             relaxed: false,
             loose: false,
+            assumed_id: None,
+            procedure_assumed: false,
             cds: Vec::new(),
             unstored: Vec::new(),
         }
@@ -568,8 +580,10 @@ impl Parser<'_> {
         let outer_messages = std::mem::take(&mut self.messages);
         let outer_registers = std::mem::take(&mut self.registers);
         let (outer_intrinsics, outer_functions, outer_switches, outer_classes) = (self.intrinsics.clone(), self.repository_functions.clone(), self.switches.clone(), self.classes.clone());
+        let outer_programs = self.repository_programs.clone();
         let parsed = self.one_program(options, out);
         (self.intrinsics, self.repository_functions, self.switches, self.classes) = (outer_intrinsics, outer_functions, outer_switches, outer_classes);
+        self.repository_programs = outer_programs;
         (self.exec_declarations, self.cics, self.dli, self.sql.blocks, self.mnemonics, self.debugging) = outer;
         let own = std::mem::replace(&mut self.messages, outer_messages);
         self.registers = outer_registers;
@@ -588,6 +602,9 @@ impl Parser<'_> {
     }
 
     fn one_program(&mut self, options: &[String], out: &mut Vec<Program>) -> R<()> {
+        if let Some(id) = self.assumed_id.take().filter(|_| self.at == 0 && !self.at_division(&["IDENTIFICATION", "ID"]) && !self.is_word("PROGRAM-ID")) {
+            return self.headerless_program(id, options, out);
+        }
         if !self.accept_word("IDENTIFICATION") {
             self.expect_word("ID")?;
         }
@@ -627,10 +644,27 @@ impl Parser<'_> {
         Ok(())
     }
 
+    /// Under `--compliance loose`, a source that begins with no IDENTIFICATION DIVISION as a program
+    /// named `id`, as cobc -std=mf names it, with IWX0075-W; statements before any
+    /// division or section header are its PROCEDURE DIVISION.
+    fn headerless_program(&mut self, id: String, options: &[String], out: &mut Vec<Program>) -> R<()> {
+        let pos = self.pos();
+        let sections = ["CONFIGURATION", "INPUT-OUTPUT", "FILE", "WORKING-STORAGE", "LOCAL-STORAGE", "LINKAGE", "REPORT", "SCREEN", "COMMUNICATION"];
+        let header = |w: &str| ["ENVIRONMENT", "DATA", "PROCEDURE"].contains(&w) && self.word_at(1) == Some("DIVISION") || sections.contains(&w) && self.word_at(1) == Some("SECTION");
+        self.procedure_assumed = self.word().is_none_or(|w| !header(w)) && self.peek().is_some();
+        let statements = if self.procedure_assumed { ", and the statements it begins with are read as its PROCEDURE DIVISION" } else { "" };
+        self.messages.push(crate::messages::IWX0075.at(pos, format!("no IDENTIFICATION DIVISION or PROGRAM-ID (GnuCOBOL under -std=mf or -std=ibm assumes them; Enterprise COBOL requires them): the program is named {id}, after its file{statements}")));
+        let first = out.len();
+        self.program_body(id, false, false, options, out, false)?;
+        out[first].pos = pos;
+        Ok(())
+    }
+
     /// The rest of a program, or of a method after its METHOD-ID paragraph; a method's END METHOD
     /// is left for its class to read.
     fn program_body(&mut self, id: String, initial: bool, recursive: bool, options: &[String], out: &mut Vec<Program>, method: bool) -> R<()> {
-        while self.peek().is_some() && !self.at_division(&["ENVIRONMENT", "DATA", "PROCEDURE", "IDENTIFICATION", "ID"]) && !self.at_end_program() {
+        let procedure_assumed = std::mem::take(&mut self.procedure_assumed);
+        while !procedure_assumed && self.peek().is_some() && !self.at_division(&["ENVIRONMENT", "DATA", "PROCEDURE", "IDENTIFICATION", "ID"]) && !self.at_end_program() && !self.at_headless_data_section() {
             self.at += 1;
         }
         let (mut files, mut repository, mut environment) = (Vec::new(), Vec::new(), Environment::default());
@@ -647,9 +681,16 @@ impl Parser<'_> {
         let mut report_writer = crate::report::ReportWriter::default();
         let mut declaratives = Declaratives::default();
         let mut communication = Vec::new();
-        if self.at_division(&["DATA"]) {
-            self.at += 2;
-            self.expect(&Tok::Period, "a period")?;
+        let headless = self.at_headless_data_section();
+        if headless {
+            let section = self.word().unwrap_or_default().to_owned();
+            self.messages.push(IWX0071.at(self.pos(), format!("{section} SECTION with no DATA DIVISION header (Micro Focus and GnuCOBOL; Enterprise COBOL writes DATA DIVISION first): it is read as though DATA DIVISION came first")));
+        }
+        if headless || self.at_division(&["DATA"]) {
+            if !headless {
+                self.at += 2;
+                self.expect(&Tok::Period, "a period")?;
+            }
             self.cds.clear();
             while !self.at_division(&["PROCEDURE", "IDENTIFICATION", "ID"]) && !self.at_end_program() && self.peek().is_some() {
                 if self.data_exec()? {
@@ -699,6 +740,8 @@ impl Parser<'_> {
                 first.statements.splice(0..0, chaining);
             }
             paragraphs
+        } else if procedure_assumed {
+            self.procedure_paragraphs(&mut report_writer, &mut declaratives)?
         } else {
             Vec::new()
         };
@@ -857,18 +900,39 @@ impl Parser<'_> {
     }
 
     /// The LINKAGE items of a PROCEDURE DIVISION or ENTRY USING list, each BY REFERENCE or BY VALUE.
+    /// The USING phrase's parameters, BY optional before REFERENCE and VALUE.
     fn parameters(&mut self) -> R<Vec<Param>> {
         let (mut using, mut by_value) = (Vec::new(), false);
         loop {
-            if self.accept_word("BY") {
-                by_value = self.accept_any(&["REFERENCE", "VALUE"]).as_deref() == Some("VALUE");
+            let by = self.accept_word("BY");
+            if let Some(mode) = self.accept_any(&["REFERENCE", "VALUE"]) {
+                by_value = mode == "VALUE";
                 continue;
             }
-            if !self.starts_ref() {
+            if by {
+                return Err(self.error("REFERENCE or VALUE after BY"));
+            }
+            if self.extended && self.is_word("OPTIONAL") {
+                self.messages.push(IWX0072.at(self.pos(), "OPTIONAL (GnuCOBOL and Micro Focus; Enterprise COBOL has no optional parameter): it is read and has no effect, an argument the caller leaves out reading as OMITTED, as one does under Enterprise COBOL"));
+                self.at += 1;
+                continue;
+            }
+            // A last parameter in Area A, followed by the header's period, is no paragraph header.
+            let last_in_area_a = self.extended && self.paragraph_header() && !using.is_empty();
+            if last_in_area_a {
+                let word = self.word().unwrap_or_default().to_owned();
+                self.messages.push(IWX0070.at(self.pos(), format!("{word} in Area A (Micro Focus and GnuCOBOL; Enterprise COBOL puts the header's parameters in Area B): it is read as the PROCEDURE DIVISION header's last parameter")));
+            } else if !self.starts_ref() {
                 return Ok(using);
             }
             using.push(Param { by_value, name: self.name("a LINKAGE item")? });
         }
+    }
+
+    /// Under `--compliance extended`, a DATA DIVISION section header, which may begin the division
+    /// with no division header (IWX0071).
+    fn at_headless_data_section(&self) -> bool {
+        self.extended && matches!(self.word(), Some("WORKING-STORAGE" | "LOCAL-STORAGE" | "LINKAGE" | "FILE")) && self.word_at(1) == Some("SECTION")
     }
 
     fn at_end_program(&self) -> bool {
@@ -880,7 +944,7 @@ impl Parser<'_> {
     fn environment(&mut self, clauses: &mut Environment) -> R<(Vec<FileDecl>, Vec<ClassEntry>)> {
         let (mut files, mut repository) = (Vec::new(), Vec::new());
         let mut special_names = false;
-        while self.peek().is_some() && !self.at_division(&["DATA", "PROCEDURE"]) {
+        while self.peek().is_some() && !self.at_division(&["DATA", "PROCEDURE"]) && !self.at_headless_data_section() {
             if let Some(paragraph) = self.word().filter(|w| matches!(*w, "SPECIAL-NAMES" | "REPOSITORY" | "SOURCE-COMPUTER" | "OBJECT-COMPUTER" | "INPUT-OUTPUT" | "FILE-CONTROL" | "I-O-CONTROL")) {
                 special_names = paragraph == "SPECIAL-NAMES";
             }
@@ -3363,7 +3427,13 @@ impl Parser<'_> {
     }
 
     fn call(&mut self, pos: Pos) -> R<Call> {
-        let target = self.operand()?;
+        let target = match self.operand()? {
+            Operand::Ref(r) if r.qualifiers.is_empty() && r.subscripts.is_empty() && r.refmod.is_none() => match self.repository_programs.iter().find(|(name, _)| *name == r.name) {
+                Some((_, called)) => Operand::Literal(Literal::Alnum(called.clone())),
+                None => Operand::Ref(r),
+            },
+            target => target,
+        };
         let mut using = Vec::new();
         if self.accept_word("USING") {
             let mut mode = ArgMode::Reference;
@@ -4498,7 +4568,7 @@ fn cics_options(body: &str) -> Vec<(String, Option<ExecArg>)> {
 /// An argument as the COBOL operand it names, through ironwork's own lexer and parser, which
 /// read a name as the program's own declarations are read.
 fn operand_of(text: &str, pos: Pos, extended: bool) -> Option<Operand> {
-    let source = crate::source::Source { text: text.to_owned(), positions: vec![pos; text.chars().count()], options: Vec::new(), debugging: None, free: Vec::new(), notes: Vec::new() };
+    let source = crate::source::Source { text: text.to_owned(), positions: vec![pos; text.chars().count()], options: Vec::new(), debugging: None, free: Vec::new(), notes: Vec::new(), constants: Vec::new() };
     let compliance = if extended { numeric::Compliance::Extended } else { numeric::Compliance::Strict };
     let tokens = crate::lexer::lex_under(&source, compliance).ok()?;
     let mut p = Parser::new(&tokens);

@@ -6,7 +6,7 @@
 //! PROCEDURE DIVISION header (docs/compliance.md).
 
 use crate::lexer::{Tok, Token};
-use crate::messages::{IWX0002, IWX0004, IWX0005, IWX0006, IWX0009, IWX0027, IWX0044, IWX0066};
+use crate::messages::{IWX0002, IWX0004, IWX0005, IWX0006, IWX0009, IWX0027, IWX0044, IWX0066, IWX0073, IWX0074};
 use crate::{Error, Pos};
 use std::collections::HashMap;
 
@@ -48,26 +48,41 @@ const FIGURATIVES: &[&str] = &["ZERO", "ZEROS", "ZEROES", "SPACE", "SPACES", "HI
 /// concatenations joined, the binary usages rewritten and RETURNING OMITTED taken out of a
 /// program's PROCEDURE DIVISION header. `cards` are the CBL and PROCESS options, whose code page
 /// reads a hexadecimal literal joined to an alphanumeric one.
-pub fn rewrite(tokens: Vec<Token>, cards: &[String]) -> Result<Vec<Token>, Error> {
+pub fn rewrite(tokens: Vec<Token>, cards: &[String], directed: &[crate::directives::Constant]) -> Result<Vec<Token>, Error> {
     let mut options = numeric::Options::default();
     for card in cards {
         options.apply(card).ok();
     }
     let mut r = Rewrite { tokens, at: 0, out: Vec::new(), constants: HashMap::new(), pending: Vec::new(), options };
+    let mut directed: Vec<&crate::directives::Constant> = directed.iter().collect();
     // `program`: the last ID paragraph was a PROGRAM-ID, not a function's, class's or method's.
     let (mut data, mut program, mut header) = (false, false, false);
     while r.at < r.tokens.len() {
+        // A directive's constant holds from the first token of its file after its line.
+        let at = r.tokens[r.at].pos;
+        directed.retain(|c| {
+            if c.pos.file != at.file || c.pos.line >= at.line {
+                return true;
+            }
+            if c.replaces || !r.constants.contains_key(&c.name) {
+                r.constants.insert(c.name.clone(), directed_value(&c.literal));
+            }
+            false
+        });
         let division = r.tokens.get(r.at + 1).is_some_and(|t| matches!(&t.tok, Tok::Word(w) if w == "DIVISION"));
         if let Tok::Word(w) = &r.tokens[r.at].tok
             && matches!(w.as_str(), "PROGRAM-ID" | "FUNCTION-ID" | "METHOD-ID" | "CLASS-ID" | "INTERFACE-ID")
         {
             program = w == "PROGRAM-ID";
         }
+        let data_section = r.tokens.get(r.at + 1).is_some_and(|t| matches!(&t.tok, Tok::Word(w) if w == "SECTION"));
         match &r.tokens[r.at].tok {
             Tok::Word(w) if division => {
                 data = w == "DATA";
                 header = program && w == "PROCEDURE";
             }
+            // A DATA DIVISION section with no division header begins the division (IWX0071).
+            Tok::Word(w) if data_section && matches!(w.as_str(), "WORKING-STORAGE" | "LOCAL-STORAGE" | "LINKAGE" | "FILE") => data = true,
             Tok::Period => header = false,
             Tok::Word(w) if header && w == "RETURNING" && r.word_at(1) == Some("OMITTED") && r.tokens.get(r.at + 2).is_some_and(|t| t.tok == Tok::Period) => {
                 r.returning_omitted();
@@ -89,7 +104,7 @@ pub fn rewrite(tokens: Vec<Token>, cards: &[String]) -> Result<Vec<Token>, Error
                 r.program_pointer();
                 continue;
             }
-            Tok::Word(w) if w == "PROGRAM-ID" && !ends_with_header(&r.out) => r.identification_header(),
+            Tok::Word(w) if (w == "PROGRAM-ID" || w == "FUNCTION-ID") && !ends_with_header(&r.out) => r.identification_header(),
             _ => {}
         }
         let value = r.value()?;
@@ -194,6 +209,18 @@ impl Rewrite {
         if self.at >= self.tokens.len() {
             return Err(refused(here, "VALUE with no value"));
         }
+        let end = (self.at..self.tokens.len()).find(|&k| self.tokens[k].tok == Tok::Period);
+        if let Some(end) = end
+            && end - self.at > 1
+            && self.tokens[self.at..end].iter().any(|t| matches!(t.tok, Tok::Plus | Tok::Minus | Tok::Star | Tok::Slash | Tok::LParen))
+        {
+            let value = arithmetic(&self.tokens[self.at..end], &self.constants).ok_or_else(|| refused(here, "an arithmetic expression of numeric literals and numeric constants defined before, with +, -, *, / and parentheses"))?;
+            self.pending.extend(self.tokens[self.at..=end].iter().flat_map(|t| t.messages.iter().cloned()));
+            self.at = end + 1;
+            self.pending.push(IWX0074.at(level.pos, format!("constant {name} AS an arithmetic expression (COBOL 2002, Micro Focus and GnuCOBOL; Enterprise COBOL has no constant entry): it stands for {value}, the expression's value truncated to an integer, as the standard gives it")));
+            self.constants.insert(name, Tok::Number(value.to_string()));
+            return Ok(());
+        }
         let value = self.value()?;
         let literal = match &value.tok {
             Tok::Alnum(_) | Tok::Hex(_) | Tok::National(_) | Tok::Number(_) => true,
@@ -217,7 +244,11 @@ impl Rewrite {
     fn identification_header(&mut self) {
         let at = self.tokens[self.at].clone();
         let made = |tok: Tok, messages: Vec<Error>| Token { tok, pos: at.pos, area_a: at.area_a, spelled: None, after_comma: false, messages };
-        let warning = IWX0006.at(at.pos, format!("{NO_IDENTIFICATION_HEADER}: the program reads as though IDENTIFICATION DIVISION. came before it"));
+        let warning = if at.tok == Tok::Word("FUNCTION-ID".into()) {
+            IWX0073.at(at.pos, "FUNCTION-ID with no IDENTIFICATION DIVISION header before it (COBOL 2002 and GnuCOBOL; Enterprise COBOL requires the header): the function reads as though IDENTIFICATION DIVISION. came before it")
+        } else {
+            IWX0006.at(at.pos, format!("{NO_IDENTIFICATION_HEADER}: the program reads as though IDENTIFICATION DIVISION. came before it"))
+        };
         self.push(made(Tok::Word("IDENTIFICATION".into()), vec![warning]));
         self.push(made(Tok::Word("DIVISION".into()), Vec::new()));
         self.push(made(Tok::Period, Vec::new()));
@@ -302,6 +333,91 @@ fn ends_with_header(tokens: &[Token]) -> bool {
     matches!(tokens, [.., a, b, c] if matches!(&a.tok, Tok::Word(w) if w == "IDENTIFICATION" || w == "ID") && b.tok == Tok::Word("DIVISION".into()) && c.tok == Tok::Period)
 }
 
+/// A constant entry's arithmetic expression, worked exactly and truncated toward zero (ISO 2002
+/// 7.3.6.3): numeric literals and numeric constants, + and - of either arity, *, / and parentheses.
+fn arithmetic(tokens: &[Token], constants: &HashMap<String, Tok>) -> Option<i128> {
+    let mut at = 0;
+    let (num, den) = sum(tokens, &mut at, constants)?;
+    (at == tokens.len() && den != 0).then(|| num / den)
+}
+
+type Ratio = (i128, i128);
+
+fn reduced((num, den): Ratio) -> Option<Ratio> {
+    let gcd = |mut a: i128, mut b: i128| {
+        while b != 0 {
+            (a, b) = (b, a % b);
+        }
+        a.abs().max(1)
+    };
+    let g = gcd(num, den);
+    let sign = if den < 0 { -1 } else { 1 };
+    Some((num / g * sign, (den / g * sign)))
+}
+
+fn sum(tokens: &[Token], at: &mut usize, constants: &HashMap<String, Tok>) -> Option<Ratio> {
+    let mut left = product(tokens, at, constants)?;
+    while let Some(op) = tokens.get(*at).map(|t| &t.tok).filter(|t| matches!(t, Tok::Plus | Tok::Minus)) {
+        let minus = *op == Tok::Minus;
+        *at += 1;
+        let (n, d) = product(tokens, at, constants)?;
+        let n = if minus { n.checked_neg()? } else { n };
+        left = reduced((left.0.checked_mul(d)?.checked_add(n.checked_mul(left.1)?)?, left.1.checked_mul(d)?))?;
+    }
+    Some(left)
+}
+
+fn product(tokens: &[Token], at: &mut usize, constants: &HashMap<String, Tok>) -> Option<Ratio> {
+    let mut left = factor(tokens, at, constants)?;
+    while let Some(op) = tokens.get(*at).map(|t| &t.tok).filter(|t| matches!(t, Tok::Star | Tok::Slash)) {
+        let divide = *op == Tok::Slash;
+        *at += 1;
+        let (n, d) = factor(tokens, at, constants)?;
+        left = if divide { (left.0.checked_mul(d)?, left.1.checked_mul(n)?) } else { (left.0.checked_mul(n)?, left.1.checked_mul(d)?) };
+        if left.1 == 0 {
+            return None;
+        }
+        left = reduced(left)?;
+    }
+    Some(left)
+}
+
+fn factor(tokens: &[Token], at: &mut usize, constants: &HashMap<String, Tok>) -> Option<Ratio> {
+    let tok = &tokens.get(*at)?.tok;
+    *at += 1;
+    match tok {
+        Tok::Plus => factor(tokens, at, constants),
+        Tok::Minus => factor(tokens, at, constants).and_then(|(n, d)| Some((n.checked_neg()?, d))),
+        Tok::LParen => {
+            let inner = sum(tokens, at, constants)?;
+            (tokens.get(*at)?.tok == Tok::RParen).then(|| *at += 1)?;
+            Some(inner)
+        }
+        Tok::Number(text) => decimal(text),
+        Tok::Word(name) => match constants.get(name)? {
+            Tok::Number(text) => decimal(text),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A numeric literal as written, as a fraction over a power of ten.
+fn decimal(text: &str) -> Option<Ratio> {
+    let (whole, fraction) = text.split_once(['.', ',']).unwrap_or((text, ""));
+    let digits: String = format!("{whole}{fraction}").chars().filter(|c| *c != '+').collect();
+    reduced((digits.parse().ok()?, 10i128.checked_pow(fraction.len() as u32)?))
+}
+
+/// A directive constant's literal as the token it stands for: a quoted literal's characters, its
+/// doubled quotes single, or a number as written.
+fn directed_value(literal: &str) -> Tok {
+    match literal.chars().next() {
+        Some(q @ ('"' | '\'')) => Tok::Alnum(literal[1..literal.len().saturating_sub(1).max(1)].replace(&format!("{q}{q}"), &q.to_string())),
+        _ => Tok::Number(literal.to_owned()),
+    }
+}
+
 /// `(name)` in a PICTURE, where `name` is a constant whose value is an unsigned integer, with the
 /// integer in its place.
 fn picture(text: &str, constants: &HashMap<String, Tok>) -> Option<String> {
@@ -382,12 +498,51 @@ mod tests {
     }
 
     #[test]
-    fn a_constant_whose_value_is_an_expression_or_missing_is_refused_by_name() {
+    fn a_constant_whose_value_is_missing_or_an_expression_of_other_operands_is_refused_by_name() {
         let refused = |data: &str| extended(&source(data, "")).unwrap_err().message;
-        assert_eq!(refused("       78  N VALUE 1 + 2.\n"), "constant N: the value is a literal, a figurative constant, a constant defined before, or literals joined by &; ironwork computes no expression there");
+        assert_eq!(refused("       78  N VALUE 1 + B.\n"), "constant N: an arithmetic expression of numeric literals and numeric constants defined before, with +, -, *, / and parentheses");
         assert_eq!(refused("       78  N PIC 9 VALUE 1.\n"), "constant N: a level-78 entry is VALUE and its value, then a period");
         assert!(refused("       01  N PIC X VALUE 'A' & B.\n").starts_with("& joins two alphanumeric or hexadecimal literals"));
         assert!(refused("       01  N PIC X VALUE 'A' & N'B'.\n").starts_with("& joins two alphanumeric or hexadecimal literals"));
+    }
+
+    #[test]
+    fn directive_constants_expressions_ascii_repository_programs_and_header_forms_are_read() {
+        let text = concat!(
+            "       IDENTIFICATION DIVISION.\n",
+            "       PROGRAM-ID. T.\n",
+            "       ENVIRONMENT DIVISION.\n",
+            "       CONFIGURATION SECTION.\n",
+            "       SPECIAL-NAMES.\n",
+            "           ALPHABET A-SEQ IS ASCII.\n",
+            "       REPOSITORY.\n",
+            "           PROGRAM SUB AS 'subprog'.\n",
+            "       >>DEFINE CONSTANT LIM AS 3\n",
+            "      $SET CONSTANT GREET \"HI\"\n",
+            "       >>DEFINE CONSTANT LIM AS 4\n",
+            "       LINKAGE SECTION.\n",
+            "       01 A PIC X(LIM).\n",
+            "       01 B PIC X.\n",
+            "       78 N VALUE 7 * (2 + 1) / 2.\n",
+            "       PROCEDURE DIVISION USING A\n",
+            "           OPTIONAL\n",
+            "       B.\n",
+            "           MOVE GREET TO A\n",
+            "           CALL SUB\n",
+            "           DISPLAY N.\n",
+        );
+        let p = extended(text).unwrap();
+        let mut ids: Vec<&str> = p.messages.iter().filter_map(|m| m.id).filter(|id| id.starts_with("IWX006") || id.starts_with("IWX007")).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, ["IWX0067", "IWX0067", "IWX0067", "IWX0068", "IWX0069", "IWX0070", "IWX0071", "IWX0072", "IWX0074"]);
+        assert_eq!(p.linkage[0].picture.as_deref(), Some("X(3)"), "a constant defined again without OVERRIDE keeps its first value");
+        assert_eq!(p.using.iter().map(|u| u.name.as_str()).collect::<Vec<_>>(), ["A", "B"]);
+        let statements = format!("{:?}", p.paragraphs[0].statements);
+        assert!(statements.contains("Alnum(\"HI\")") && statements.contains("Alnum(\"subprog\")") && statements.contains("Number(\"10\")"), "{statements}");
+        assert!(crate::parse(text).is_err());
+        let function = "       FUNCTION-ID. TWICE.\n       DATA DIVISION.\n       LINKAGE SECTION.\n       01 R PIC 9.\n       PROCEDURE DIVISION RETURNING R.\n           MOVE 2 TO R\n           GOBACK.\n       END FUNCTION TWICE.\n";
+        let f = crate::parse_all_with(function, &Libraries::default().with_compliance(Compliance::Extended)).unwrap();
+        assert!(f[0].messages.iter().any(|m| m.id == Some("IWX0073")), "{:?}", f[0].messages);
     }
 
     #[test]

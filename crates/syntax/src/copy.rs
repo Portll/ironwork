@@ -20,6 +20,11 @@ pub struct Libraries {
     relaxed: bool,
     loose: bool,
     empty_literal: numeric::EmptyLiteral,
+    /// Members are read with cobc's tab stops, as a retry after a member did not read.
+    member_tab_stops: bool,
+    /// A source with no IDENTIFICATION DIVISION is a program named after its file, as a retry under
+    /// `--compliance loose`.
+    assume_program_id: bool,
 }
 
 const COPYBOOKS: &[&str] = &[".cpy", ".CPY", ".copy", ".COPY"];
@@ -29,7 +34,7 @@ const MAX_DEPTH: usize = 32;
 
 impl Libraries {
     pub fn new(dirs: Vec<PathBuf>) -> Self {
-        Self { dirs, program: None, compliance: numeric::Compliance::Strict, source_format: numeric::SourceFormat::Auto, relaxed: false, loose: false, empty_literal: numeric::EmptyLiteral::Space }
+        Self { dirs, program: None, compliance: numeric::Compliance::Strict, source_format: numeric::SourceFormat::Auto, relaxed: false, loose: false, empty_literal: numeric::EmptyLiteral::Space, member_tab_stops: false, assume_program_id: false }
     }
 
     /// These libraries, for compiling the program in `program`.
@@ -59,6 +64,25 @@ impl Libraries {
     /// Under `--compliance loose`.
     pub fn loose(&self) -> bool {
         self.loose
+    }
+
+    /// These libraries, a source with no IDENTIFICATION DIVISION read as a program named after its
+    /// file.
+    pub(crate) fn assuming_program_id(&self) -> Self {
+        Self { assume_program_id: true, ..self.clone() }
+    }
+
+    /// The program file's name without its extension, which a program with no PROGRAM-ID takes
+    /// under `--compliance loose`, on the retry that assumes one.
+    pub fn program_stem(&self) -> Option<String> {
+        let stem = self.program.as_deref()?.file_stem()?;
+        (self.loose && self.assume_program_id).then(|| stem.to_string_lossy().into_owned())
+    }
+
+    /// These libraries, their members read with each tab reaching the next column after a multiple
+    /// of 8.
+    pub(crate) fn with_member_tab_stops(&self) -> Self {
+        Self { member_tab_stops: true, ..self.clone() }
     }
 
     pub fn empty_literal(&self) -> numeric::EmptyLiteral {
@@ -331,11 +355,11 @@ fn copy_span(out: &mut Source, chars: &[char], positions: &[Pos], range: std::op
 
 fn apply(src: &Source, replacing: &[Replacing]) -> Source {
     if replacing.is_empty() {
-        return Source { text: src.text.clone(), positions: src.positions.clone(), options: Vec::new(), debugging: None, free: Vec::new(), notes: Vec::new() };
+        return Source { text: src.text.clone(), positions: src.positions.clone(), options: Vec::new(), debugging: None, free: Vec::new(), notes: Vec::new(), constants: Vec::new() };
     }
     let chars: Vec<char> = src.text.chars().collect();
     let words = text_words(&chars);
-    let mut out = Source { text: String::new(), positions: Vec::new(), options: Vec::new(), debugging: None, free: Vec::new(), notes: Vec::new() };
+    let mut out = Source { text: String::new(), positions: Vec::new(), options: Vec::new(), debugging: None, free: Vec::new(), notes: Vec::new(), constants: Vec::new() };
     let emit = |out: &mut Source, text: &str, pos: Pos| {
         for c in text.chars() {
             out.text.push(c);
@@ -406,7 +430,7 @@ fn expand_nested(source: Source, libraries: &Libraries, files: &mut Vec<String>,
     if !words.iter().any(|w| w.text.eq_ignore_ascii_case("COPY") || w.text.eq_ignore_ascii_case("INCLUDE")) {
         return Ok(source);
     }
-    let mut out = Source { text: String::new(), positions: Vec::new(), options: source.options.clone(), debugging: source.debugging.clone(), free: source.free.clone(), notes: source.notes.clone() };
+    let mut out = Source { text: String::new(), positions: Vec::new(), options: source.options.clone(), debugging: source.debugging.clone(), free: source.free.clone(), notes: source.notes.clone(), constants: source.constants.clone() };
     let read = |text: &str, file: u16| source::read_under(text, file, source.debugging.is_some(), libraries.compliance());
     let (mut cursor, mut i) = (0usize, 0usize);
     while i < words.len() {
@@ -430,7 +454,7 @@ fn expand_nested(source: Source, libraries: &Libraries, files: &mut Vec<String>,
             (Some(path), _) => {
                 let copied_free = source.free_at(pos).is_some();
                 let detect = libraries.source_format() != numeric::SourceFormat::Fixed;
-                let copied = |text: &str, file: u16| source::read_copied(text, file, source.debugging.is_some(), libraries.compliance(), copied_free, detect);
+                let copied = |text: &str, file: u16| source::read_copied(text, file, source.debugging.is_some(), libraries.compliance(), copied_free, detect, libraries.member_tab_stops);
                 (path.display().to_string(), read_member(&path, pos, files, &copied)?)
             }
             (None, Some((path, mapset))) => {
@@ -462,6 +486,7 @@ fn expand_nested(source: Source, libraries: &Libraries, files: &mut Vec<String>,
         }
         out.free.extend(member.free.iter().cloned());
         out.notes.extend(member.notes.iter().cloned());
+        out.constants.extend(member.constants.iter().cloned());
         let replaced = apply(&member, &replacing);
         out.text.push_str(&replaced.text);
         out.positions.extend(replaced.positions);
@@ -485,9 +510,9 @@ pub fn replace(source: Source) -> Result<Source, Error> {
     if !(0..words.len()).any(starts) {
         return Ok(source);
     }
-    let mut out = Source { text: String::new(), positions: Vec::new(), options: source.options.clone(), debugging: source.debugging.clone(), free: source.free.clone(), notes: source.notes.clone() };
+    let mut out = Source { text: String::new(), positions: Vec::new(), options: source.options.clone(), debugging: source.debugging.clone(), free: source.free.clone(), notes: source.notes.clone(), constants: source.constants.clone() };
     let segment = |out: &mut Source, range: std::ops::Range<usize>, active: &[Replacing]| {
-        let text = Source { text: chars[range.clone()].iter().collect(), positions: source.positions[range].to_vec(), options: Vec::new(), debugging: None, free: Vec::new(), notes: Vec::new() };
+        let text = Source { text: chars[range.clone()].iter().collect(), positions: source.positions[range].to_vec(), options: Vec::new(), debugging: None, free: Vec::new(), notes: Vec::new(), constants: Vec::new() };
         let replaced = apply(&text, active);
         out.text.push_str(&replaced.text);
         out.positions.extend(replaced.positions);

@@ -8,7 +8,7 @@
 use super::{Parser, R};
 use crate::ast::*;
 use crate::lexer::Tok;
-use crate::messages::IWS0102;
+use crate::messages::{IWS0102, IWX0059, IWX0065};
 use crate::Pos;
 
 /// A CD's fields in the order the standard lays out its area: the words that name each in a
@@ -56,14 +56,30 @@ impl Parser<'_> {
         (self.is_word("ENABLE") || self.is_word("DISABLE")) && self.word_at(1).is_some_and(|w| ["INPUT", "OUTPUT", "I-O"].contains(&w))
     }
 
-    fn refuse_communication(&mut self, pos: Pos, item: &str) {
-        self.messages.push(IWS0102.at(pos, format!("the Communication feature ({item}) is not part of Enterprise COBOL, which does not compile it")));
+    /// The feature's `item` at `pos` refused; under `--compliance loose` given as IWX0065-W, `left`
+    /// saying what becomes of it.
+    fn refuse_communication(&mut self, pos: Pos, item: &str, left: &str) {
+        let refusal = IWS0102.at(pos, format!("the Communication feature ({item}) is not part of Enterprise COBOL, which does not compile it"));
+        self.messages.push(if self.loose { IWX0065.at(pos, format!("{} (--compliance loose): {left}", refusal.labelled())) } else { refusal });
+    }
+
+    /// The feature's statement `item` at `pos` refused, as a statement that does nothing; under
+    /// `--compliance loose` a hole, with IWX0059-W.
+    fn communication_hole(&mut self, pos: Pos, item: &str) -> Stmt {
+        let refusal = IWS0102.at(pos, format!("the Communication feature ({item}) is not part of Enterprise COBOL, which does not compile it"));
+        if !self.loose {
+            self.messages.push(refusal);
+            return Stmt::Continue { pos };
+        }
+        let (construct, why) = (format!("the {item} at line {}", pos.line), refusal.labelled());
+        self.messages.push(IWX0059.at(pos, format!("{construct} (--compliance relaxed): {why}; it compiles as a hole, and a run that reaches it ends with IWR0078")));
+        Stmt::Hole { construct, why, pos }
     }
 
     /// The CD entries after COMMUNICATION SECTION, whose header is at `header`, as the data
     /// entries of their areas.
     pub(super) fn communication_section(&mut self, header: Pos) -> R<Vec<DataEntry>> {
-        self.refuse_communication(header, "COMMUNICATION SECTION");
+        self.refuse_communication(header, "COMMUNICATION SECTION", "the CD's area is declared as data, and each statement of the feature compiles as a hole");
         let mut entries = Vec::new();
         while self.is_word("CD") {
             entries.extend(self.cd_entry()?);
@@ -75,7 +91,7 @@ impl Parser<'_> {
         let pos = self.pos();
         self.at += 1;
         let name = self.name("a CD name")?;
-        self.refuse_communication(pos, &format!("CD {name}"));
+        self.refuse_communication(pos, &format!("CD {name}"), "the CD's area is declared as data, and each statement of the feature compiles as a hole");
         self.cds.push(name.clone());
         self.accept_word("FOR");
         self.accept_word("INITIAL");
@@ -162,8 +178,7 @@ impl Parser<'_> {
         }
     }
 
-    /// ENABLE, DISABLE, RECEIVE, SEND or PURGE, `verb` already read, as a statement that does
-    /// nothing once refused.
+    /// ENABLE, DISABLE, RECEIVE, SEND or PURGE, `verb` already read, refused.
     pub(super) fn communication_statement(&mut self, verb: &str, pos: Pos) -> R<Stmt> {
         match verb {
             "ENABLE" | "DISABLE" => {
@@ -223,16 +238,14 @@ impl Parser<'_> {
                 self.name("a CD name")?;
             }
         }
-        self.refuse_communication(pos, &format!("{verb} statement"));
-        Ok(Stmt::Continue { pos })
+        Ok(self.communication_hole(pos, &format!("{verb} statement")))
     }
 
     /// ACCEPT cd-name [MESSAGE] COUNT, its target already read, when that is what follows.
     pub(super) fn accept_message_count(&mut self, pos: Pos) -> Option<Stmt> {
         let words = if self.is_word("COUNT") { 1 } else if self.is_word("MESSAGE") && self.word_at(1) == Some("COUNT") { 2 } else { return None };
         self.at += words;
-        self.refuse_communication(pos, "ACCEPT MESSAGE COUNT");
-        Some(Stmt::Continue { pos })
+        Some(self.communication_hole(pos, "ACCEPT MESSAGE COUNT"))
     }
 
     /// A CD named in USE FOR DEBUGGING ON, refused and passed over: whether one was.
@@ -240,7 +253,7 @@ impl Parser<'_> {
         let Some(name) = self.word_at(0).map(str::to_string).filter(|w| self.cds.contains(w)) else { return false };
         let pos = self.pos();
         self.at += 1;
-        self.refuse_communication(pos, &format!("USE FOR DEBUGGING ON CD {name}"));
+        self.refuse_communication(pos, &format!("USE FOR DEBUGGING ON CD {name}"), "the CD is left out of the USE statement");
         true
     }
 }

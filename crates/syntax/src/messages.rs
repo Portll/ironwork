@@ -908,6 +908,15 @@ catalogue! {
     IWX0064 Warning "{record} (--compliance loose): {why ironwork refuses it}; it is left out, and a statement naming one of its items compiles as a hole";
     IWX0065 Warning "{message} (--compliance loose): {what is left out}";
     IWX0066 Warning "{FLOAT-HEX-7 or FLOAT-HEX-15} (z390's zCOBOL; Enterprise COBOL writes {COMP-1 or COMP-2}): it is read as {COMP-1 or COMP-2}, the same hexadecimal floating point";
+    IWX0067 Warning "{directive} (GnuCOBOL and Micro Focus; Enterprise COBOL has no compile-time constant): {name} stands for {literal} in the program, as a level-78 constant does";
+    IWX0068 Warning "ALPHABET {name} IS ASCII (GnuCOBOL and Micro Focus; Enterprise COBOL writes STANDARD-1): it is read as STANDARD-1, the ASCII collating sequence";
+    IWX0069 Warning "REPOSITORY PROGRAM {name} (COBOL 2014 and GnuCOBOL; Enterprise COBOL names classes and functions there): CALL {name}, unquoted, calls the program so named";
+    IWX0070 Warning "{name} in Area A (Micro Focus and GnuCOBOL; Enterprise COBOL puts the header's parameters in Area B): it is read as the PROCEDURE DIVISION header's last parameter";
+    IWX0071 Warning "{section} SECTION with no DATA DIVISION header (Micro Focus and GnuCOBOL; Enterprise COBOL writes DATA DIVISION first): it is read as though DATA DIVISION came first";
+    IWX0072 Warning "OPTIONAL (GnuCOBOL and Micro Focus; Enterprise COBOL has no optional parameter): it is read and has no effect, an argument the caller leaves out reading as OMITTED, as one does under Enterprise COBOL";
+    IWX0073 Warning "FUNCTION-ID with no IDENTIFICATION DIVISION header before it (COBOL 2002 and GnuCOBOL; Enterprise COBOL requires the header): the function reads as though IDENTIFICATION DIVISION. came before it";
+    IWX0074 Warning "constant {name} AS an arithmetic expression (COBOL 2002, Micro Focus and GnuCOBOL; Enterprise COBOL has no constant entry): it stands for {value}, the expression's value truncated to an integer, as the standard gives it";
+    IWX0075 Warning "no IDENTIFICATION DIVISION or PROGRAM-ID (GnuCOBOL under -std=mf or -std=ibm assumes them; Enterprise COBOL requires them): the program is named {name}, after its file{, and the statements it begins with are read as its PROCEDURE DIVISION}";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

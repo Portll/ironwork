@@ -3,7 +3,7 @@
 //! debugging line >>D, and >>TURN, >>LISTING, >>PAGE and a word after >>D that is no directive,
 //! read and of no effect.
 
-use crate::messages::{IWC0318, IWX0048, IWX0049, IWX0050};
+use crate::messages::{IWC0318, IWX0048, IWX0049, IWX0050, IWX0067};
 use crate::{Error, Pos};
 use std::collections::HashMap;
 
@@ -18,20 +18,72 @@ pub enum Directive {
     Ignored(Error),
     /// >>D: the rest of the line, a debugging line's text, and its warning.
     Debugging(Vec<char>, Error),
+    /// `>>DEFINE CONSTANT name [AS] literal [OVERRIDE]` or `$SET CONSTANT name literal`, and its
+    /// warning.
+    Constant(Constant, Error),
+}
+
+/// A constant the program text may name from the line after the directive on: its literal as
+/// written, and whether it replaces one of its name defined before (OVERRIDE), which is otherwise
+/// kept, as cobc keeps it.
+#[derive(Clone, Debug)]
+pub struct Constant {
+    pub name: String,
+    pub literal: String,
+    pub replaces: bool,
+    pub pos: Pos,
+}
+
+/// Where a compiler directive starts on `chars`: `>>` first on the line, or `$` first in column 1
+/// or 7. On a line read in fixed form, `>>` also starts one after text in the sequence area, and `$`
+/// in column 7 after it, as cobc reads `000100 >>SOURCE FREE`.
+pub fn start(chars: &[char], fixed: bool) -> Option<usize> {
+    let first = chars.iter().position(|c| *c != ' ')?;
+    if chars[first..].starts_with(&['>', '>']) || chars[first] == '$' && (first == 0 || first == 6) {
+        return Some(first);
+    }
+    if chars[first] == '$' && chars[first + 1..].iter().collect::<String>().to_ascii_uppercase().starts_with("SET ") {
+        return Some(first);
+    }
+    if !fixed || first >= 6 || chars.get(6).is_none_or(|c| !matches!(c, ' ' | '$')) {
+        return None;
+    }
+    if chars[6] == '$' {
+        return Some(6);
+    }
+    let after = 7 + chars.get(7..)?.iter().position(|c| *c != ' ')?;
+    chars[after..].starts_with(&['>', '>']).then_some(after)
 }
 
 /// The directive on `chars`, None for any other line and for >>SOURCE and >>SET, which the source
 /// reader takes.
-pub fn read(chars: &[char], pos: Pos) -> Option<Result<Directive, Error>> {
-    let start = chars.iter().position(|c| *c != ' ')?;
-    let rest = chars[start..].strip_prefix(&['>', '>'])?;
+pub fn read(chars: &[char], pos: Pos, fixed: bool) -> Option<Result<Directive, Error>> {
+    let start = start(chars, fixed)?;
     let pos = Pos { col: start as u32 + 1, ..pos };
+    let shown: String = chars[start..].iter().collect::<String>().trim_end().to_owned();
+    let constant = |words: &[String]| {
+        let replaces = words.last().is_some_and(|w| w.eq_ignore_ascii_case("OVERRIDE"));
+        let words: Vec<&String> = words.iter().filter(|w| !w.eq_ignore_ascii_case("AS") && !w.eq_ignore_ascii_case("OVERRIDE")).collect();
+        let [name, literal] = words.as_slice() else { return None };
+        let name = name.to_ascii_uppercase();
+        let note = IWX0067.at(pos, format!("{shown} (GnuCOBOL and Micro Focus; Enterprise COBOL has no compile-time constant): {name} stands for {literal} in the program, as a level-78 constant does"));
+        Some(Directive::Constant(Constant { name, literal: (*literal).clone(), replaces, pos }, note))
+    };
+    if chars[start] == '$' {
+        let words = words(&chars[start + 1..].iter().collect::<String>());
+        let set = words.first().is_some_and(|w| w.eq_ignore_ascii_case("SET")) && words.get(1).is_some_and(|w| w.eq_ignore_ascii_case("CONSTANT"));
+        return set.then(|| constant(&words[2..]).ok_or_else(|| IWC0318.at(pos, format!("{shown}: $SET CONSTANT takes a name and a literal"))));
+    }
+    let rest = chars[start..].strip_prefix(&['>', '>'])?;
     let words = words(&rest.iter().collect::<String>());
     let first = words.first()?.to_ascii_uppercase();
-    let shown: String = chars[start..].iter().collect::<String>().trim_end().to_owned();
     let tail = || words[1..].to_vec();
     Some(Ok(match first.as_str() {
         "SOURCE" | "SET" => return None,
+        "DEFINE" if words.get(1).is_some_and(|w| w.eq_ignore_ascii_case("CONSTANT")) => match constant(&words[2..]) {
+            Some(c) => c,
+            None => return Some(Err(IWC0318.at(pos, format!("{shown}: >>DEFINE CONSTANT takes a name, then AS and a literal")))),
+        },
         "DEFINE" => match define(&words[1..]) {
             Some((name, value)) => Directive::Define { name, value },
             None => return Some(Err(IWC0318.at(pos, format!("{shown}: >>DEFINE takes a name, then AS and a literal or OFF")))),
@@ -175,7 +227,7 @@ impl Conditions {
             Directive::EndIf => {
                 self.open.pop().ok_or_else(|| IWC0318.at(pos, ">>END-IF with no >>IF before it"))?;
             }
-            Directive::Ignored(_) | Directive::Debugging(..) => {}
+            Directive::Ignored(_) | Directive::Debugging(..) | Directive::Constant(..) => {}
         }
         Ok(())
     }
@@ -189,7 +241,7 @@ impl Conditions {
     }
 
     /// Whether `condition` holds: terms joined by AND and OR, left to right, each `[NOT] name
-    /// [IS] [NOT] DEFINED` or a comparison of a defined name with a literal. A comparison naming
+    /// [IS] [NOT] DEFINED` (or SET) or a comparison of a defined name with a literal. A comparison naming
     /// an undefined name is false.
     fn holds(&self, condition: &[String], pos: Pos) -> Result<bool, Error> {
         let bad = || IWC0318.at(pos, format!(">>IF {}: a condition of DEFINED tests and comparisons ironwork does not read", condition.join(" ")));
@@ -212,7 +264,8 @@ impl Conditions {
                 negated = !negated;
                 i += 1;
             }
-            let term = if upper.get(i).is_some_and(|w| w == "DEFINED") {
+            // cobc's SET reads as DEFINED; no name is predefined, P64 included, as ironwork's pointers are four bytes.
+            let term = if upper.get(i).is_some_and(|w| w == "DEFINED" || w == "SET") {
                 i += 1;
                 self.defined.contains_key(name)
             } else {

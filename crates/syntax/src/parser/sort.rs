@@ -6,6 +6,8 @@ use super::*;
 /// Words that end a list of keys in SORT and MERGE, beyond the phrase words.
 const SORT_PHRASES: &[&str] = &["ASCENDING", "DESCENDING", "DUPLICATES", "COLLATING", "SEQUENCE"];
 
+const ALPHABETS: &str = "expected STANDARD-1, STANDARD-2, NATIVE, EBCDIC or literals for the alphabet";
+
 /// Words that begin an I-O-CONTROL clause, and so end the file list of the one before.
 const IO_CONTROL_CLAUSES: &[&str] = &["SAME", "RERUN", "MULTIPLE", "APPLY"];
 
@@ -36,9 +38,19 @@ impl Parser<'_> {
         if self.accept_word("ALPHABET") {
             let name = self.name("an alphabet-name")?;
             if self.accept_word("FOR") {
+                if self.loose && self.is_word("NATIONAL") {
+                    self.national_alphabet_left_out(&name)?;
+                    return Ok(true);
+                }
                 self.accept_word("ALPHANUMERIC");
             }
             self.accept_word("IS");
+            if self.extended && self.is_word("ASCII") {
+                self.messages.push(crate::messages::IWX0068.at(self.pos(), format!("ALPHABET {name} IS ASCII (GnuCOBOL and Micro Focus; Enterprise COBOL writes STANDARD-1): it is read as STANDARD-1, the ASCII collating sequence")));
+                self.at += 1;
+                clauses.alphabets.push((name, Alphabet::Standard1));
+                return Ok(true);
+            }
             let alphabet = match self.accept_any(&["EBCDIC", "NATIVE", "STANDARD-1", "STANDARD-2"]).as_deref() {
                 Some("EBCDIC") => Alphabet::Ebcdic,
                 Some("NATIVE") => Alphabet::Native,
@@ -64,6 +76,21 @@ impl Parser<'_> {
         Ok(true)
     }
 
+    /// Under `--compliance loose`, the national alphabet of ALPHABET `name` FOR, at NATIONAL, read
+    /// and left out with IWX0065-W: ironwork has no national collating sequence.
+    fn national_alphabet_left_out(&mut self, name: &str) -> R<()> {
+        let refusal = self.error(ALPHABETS);
+        self.at += 1;
+        self.accept_word("IS");
+        if self.word().is_some_and(|w| ["NATIVE", "UCS-4", "UTF-8", "UTF-16"].contains(&w)) {
+            self.at += 1;
+        } else {
+            self.alphabet_entries()?;
+        }
+        self.messages.push(crate::messages::IWX0065.at(refusal.pos, format!("{} (--compliance loose): ALPHABET {name} FOR NATIONAL is left out", refusal.labelled())));
+        Ok(())
+    }
+
     /// The literals of an ALPHABET clause, up to the first token that is not one.
     fn alphabet_entries(&mut self) -> R<Vec<AlphabetEntry>> {
         let mut entries = Vec::new();
@@ -83,7 +110,7 @@ impl Parser<'_> {
             entries.push(entry);
         }
         if entries.is_empty() {
-            return Err(self.error("expected STANDARD-1, STANDARD-2, NATIVE, EBCDIC or literals for the alphabet"));
+            return Err(self.error(ALPHABETS));
         }
         Ok(entries)
     }

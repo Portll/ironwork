@@ -151,9 +151,10 @@ fn compile_once(program: Program, flags: &[String], at: CompileTime) -> Result<C
     compile_program(program, flags, true, at)
 }
 
-/// Under `--compliance loose`: compiled again without each data record a severe message names an
-/// entry of, a file's record taking its file with it, until the compile succeeds or no such record
-/// is left; then messages of severity E are given as warnings.
+/// Under `--compliance loose`: compiled again without each data record, file or report a severe
+/// message is placed in, a file's record taking its file with it, and with each statement one is
+/// placed at as a hole, until the compile succeeds or nothing is left to take out; then messages of
+/// severity E are given as warnings.
 fn loose(mut program: Program, flags: &[String], at: CompileTime) -> Result<Compiled, Vec<Error>> {
     let mut notes = Vec::new();
     loop {
@@ -173,8 +174,9 @@ fn loose(mut program: Program, flags: &[String], at: CompileTime) -> Result<Comp
     }
 }
 
-/// The first data record a severe message in `errors` is placed at an entry of, taken out of
-/// `program`, and the note saying so.
+/// The first data record, file or report a severe message in `errors` is placed in, taken out of
+/// `program`, or statement one is placed at, made a hole; and the note saying so. A USING name
+/// declared nowhere, its record left out, keeps its parameter's place.
 fn leave_out(program: &mut Program, errors: &[Error]) -> Option<Error> {
     let note = |name: Option<&str>, at: Pos, why: &Error| {
         let shown = name.map_or_else(|| format!("the record at line {}", at.line), |n| format!("the record {n}"));
@@ -190,12 +192,66 @@ fn leave_out(program: &mut Program, errors: &[Error]) -> Option<Error> {
             return Some(made);
         }
         let names_file = |f: &FileDecl| ["FD", "SD", "RD", "ASSIGN", "SELECT"].iter().any(|w| e.message.starts_with(&format!("{w} {}:", f.name)));
-        if let Some(k) = program.files.iter().position(|f| f.records.iter().any(|d| d.pos == e.pos) || names_file(f)) {
+        let at_clause = |f: &FileDecl| {
+            let keys = f.record_key.iter().chain(f.alternate_keys.iter().map(|(r, _)| r)).chain(&f.relative_key).chain(f.split_keys.iter().flat_map(|(_, refs)| refs));
+            keys.chain(&f.status).chain(&f.vsam_status).chain(&f.passwords).chain(f.assign_item.iter().map(|a| &a.reference)).any(|r| r.pos == e.pos)
+        };
+        if let Some(k) = program.files.iter().position(|f| f.records.iter().any(|d| d.pos == e.pos) || names_file(f) || at_clause(f)) {
             let file = program.files.remove(k);
             return Some(note(Some(&format!("of {}", file.name)), file.pos, e));
         }
+        let reports = &mut program.report_writer.reports;
+        if let Some(k) = reports.iter().position(|r| r.pos == e.pos || r.controls.iter().any(|c| c.pos == e.pos)) {
+            let report = reports.remove(k);
+            program.files.iter_mut().for_each(|f| f.reports.retain(|r| *r != report.name));
+            let left = format!("the report {} is left out, and a statement naming it or one of its groups compiles as a hole", report.name);
+            return Some(syntax::messages::IWX0065.at(report.pos, format!("{} (--compliance loose): {left}", e.labelled())));
+        }
+        if let Some(name) = e.message.strip_prefix("PROCEDURE DIVISION USING ").and_then(|m| m.split(':').next()).filter(|_| e.id == Some("IWC0050"))
+            && !declares(program, name)
+            && let Some(param) = program.using.iter_mut().find(|p| p.name == name)
+        {
+            let kept = format!("{name} (left out)");
+            param.name.clone_from(&kept);
+            program.linkage.push(report::entry(1, Some(kept), Some("X".into()), None, Pos::default()));
+            let left = format!("the parameter keeps its place, and a statement naming {name} compiles as a hole");
+            return Some(syntax::messages::IWX0065.at(e.pos, format!("{} (--compliance loose): {left}", e.labelled())));
+        }
+        let mut path = Vec::new();
+        if e.pos != Pos::default() && let Some(i) = program.paragraphs.iter().position(|p| statement_path(&p.statements, e.pos, &mut path)) {
+            let (construct, why) = (format!("the statement at line {}", e.pos.line), e.labelled());
+            let made = syntax::messages::IWX0059.at(e.pos, format!("{construct} (--compliance relaxed): {why}; it compiles as a hole, and a run that reaches it ends with IWR0078"));
+            *statement_at(&mut program.paragraphs[i].statements, &path) = Stmt::Hole { construct, why, pos: e.pos };
+            return Some(made);
+        }
     }
     None
+}
+
+/// Whether a data item of `program` is named `name`.
+fn declares(program: &Program, name: &str) -> bool {
+    let records = program.files.iter().flat_map(|f| &f.records);
+    program.working_storage.iter().chain(&program.local_storage).chain(&program.linkage).chain(records).any(|d| d.name.as_deref() == Some(name))
+}
+
+/// The path to the statement of `stmts` at `pos`, as [`statement_at`] takes it, left in `path`:
+/// whether there is one.
+fn statement_path(stmts: &[Stmt], pos: Pos, path: &mut Vec<usize>) -> bool {
+    for (j, s) in stmts.iter().enumerate() {
+        path.push(j);
+        if lower::stmt_pos(s) == Some(pos) {
+            return true;
+        }
+        for (b, body) in oo::bodies(s).into_iter().filter(|b| !b.is_empty()).enumerate() {
+            path.push(b);
+            if statement_path(body, pos, path) {
+                return true;
+            }
+            path.pop();
+        }
+        path.pop();
+    }
+    false
 }
 
 /// When a compile happens: SOURCE_DATE_EPOCH's seconds when the build sets it, the

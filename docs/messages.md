@@ -882,6 +882,15 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0064 | W | `{record} (--compliance loose): {why ironwork refuses it}; it is left out, and a statement naming one of its items compiles as a hole` |
 | IWX0065 | W | `{message} (--compliance loose): {what is left out}` |
 | IWX0066 | W | `{FLOAT-HEX-7 or FLOAT-HEX-15} (z390's zCOBOL; Enterprise COBOL writes {COMP-1 or COMP-2}): it is read as {COMP-1 or COMP-2}, the same hexadecimal floating point` |
+| IWX0067 | W | `{directive} (GnuCOBOL and Micro Focus; Enterprise COBOL has no compile-time constant): {name} stands for {literal} in the program, as a level-78 constant does` |
+| IWX0068 | W | `ALPHABET {name} IS ASCII (GnuCOBOL and Micro Focus; Enterprise COBOL writes STANDARD-1): it is read as STANDARD-1, the ASCII collating sequence` |
+| IWX0069 | W | `REPOSITORY PROGRAM {name} (COBOL 2014 and GnuCOBOL; Enterprise COBOL names classes and functions there): CALL {name}, unquoted, calls the program so named` |
+| IWX0070 | W | `{name} in Area A (Micro Focus and GnuCOBOL; Enterprise COBOL puts the header's parameters in Area B): it is read as the PROCEDURE DIVISION header's last parameter` |
+| IWX0071 | W | `{section} SECTION with no DATA DIVISION header (Micro Focus and GnuCOBOL; Enterprise COBOL writes DATA DIVISION first): it is read as though DATA DIVISION came first` |
+| IWX0072 | W | `OPTIONAL (GnuCOBOL and Micro Focus; Enterprise COBOL has no optional parameter): it is read and has no effect, an argument the caller leaves out reading as OMITTED, as one does under Enterprise COBOL` |
+| IWX0073 | W | `FUNCTION-ID with no IDENTIFICATION DIVISION header before it (COBOL 2002 and GnuCOBOL; Enterprise COBOL requires the header): the function reads as though IDENTIFICATION DIVISION. came before it` |
+| IWX0074 | W | `constant {name} AS an arithmetic expression (COBOL 2002, Micro Focus and GnuCOBOL; Enterprise COBOL has no constant entry): it stands for {value}, the expression's value truncated to an integer, as the standard gives it` |
+| IWX0075 | W | `no IDENTIFICATION DIVISION or PROGRAM-ID (GnuCOBOL under -std=mf or -std=ibm assumes them; Enterprise COBOL requires them): the program is named {name}, after its file{, and the statements it begins with are read as its PROCEDURE DIVISION}` |
 
 ## Run-time refusals
 

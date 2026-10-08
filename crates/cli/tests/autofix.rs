@@ -1,5 +1,6 @@
 //! `--autofix DIR`: repairs with one sensible fix, in the program and its COPY members, written to
-//! DIR with a diff and a report, and the repaired source checked or run.
+//! DIR with a diff and a report, and the repaired source checked or run; `--remediate DIR`, the
+//! same under `--compliance loose`.
 
 use std::fs;
 use std::path::PathBuf;
@@ -65,5 +66,29 @@ fn what_has_no_one_fix_is_left_in_the_report_and_check_gives_its_code() {
     let report = fs::read_to_string(out.join("autofix.json")).unwrap();
     assert!(report.contains("\"id\":\"IWC0001\"") && report.contains("UNKNOWN-ITEM is not defined"), "{report}");
     assert_eq!(ironwork(&["compile", &path, "--autofix", out.to_str().unwrap()]).status.code(), Some(2));
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn remediate_repairs_then_compiles_what_is_left_as_holes_under_loose() {
+    let dir = temp("remediate");
+    let path = program(&dir, true);
+    let out = dir.join("out");
+    let o = ironwork(&["check", &path, "--remediate", out.to_str().unwrap()]);
+    assert_eq!(o.status.code(), Some(4), "{}", stderr(&o));
+    let report = fs::read_to_string(out.join("autofix.json")).unwrap();
+    assert!(report.contains("\"remaining\":[]") && report.matches("\"fix\":").count() == 5, "{report}");
+    let holes = report.split("\"holes\":").nth(1).unwrap().split("\"left_out\":").next().unwrap();
+    assert!(holes.contains("\"id\":\"IWX0059\"") && holes.contains("UNKNOWN-ITEM is not defined"), "{report}");
+    for executor in ["--vm", "--interpret"] {
+        let o = ironwork(&["run", &path, "--remediate", out.to_str().unwrap(), executor]);
+        assert_eq!(String::from_utf8_lossy(&o.stdout), "ONE\n[   ][   ]\n", "{executor}: {}", stderr(&o));
+        assert_eq!(o.status.code(), Some(244), "{executor}: {}", stderr(&o));
+    }
+    let o = out.to_str().unwrap();
+    for refused in [vec!["check", &path, "--remediate", o, "--autofix", o], vec!["check", &path, "--remediate", o, "--compliance", "extended"], vec!["compile", &path, "--remediate", o]] {
+        assert_eq!(ironwork(&refused).status.code(), Some(2), "{refused:?}");
+    }
+    assert_eq!(ironwork(&["check", &path, "--remediate", o, "--compliance=loose"]).status.code(), Some(4));
     fs::remove_dir_all(dir).unwrap();
 }
