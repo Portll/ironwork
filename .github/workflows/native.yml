@@ -1,0 +1,51 @@
+name: Native differential
+
+# NIST CCVS85 run as native code and on the VM, each program's exit status, output and files
+# compared (tools/native-diff.py, docs/codegen-runtime.md §14.1): native code and the VM give the
+# same results or the job fails.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/rt/**'
+      - 'crates/numeric/**'
+      - 'crates/zarch/**'
+      - 'crates/cli/src/codegen.rs'
+      - 'crates/cli/src/native.rs'
+      - 'tools/native-diff.py'
+      - 'tools/nist.py'
+      - '.github/workflows/native.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  native-diff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: z390development/nistcobol85
+          ref: 272a401985c66dfca4302ff9bb037def167bc5f3
+          path: nistcobol85
+          persist-credentials: false
+          sparse-checkout: src/
+          sparse-checkout-cone-mode: false
+      - name: Toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Build
+        run: cargo build --release --locked -p ironwork
+      - name: NIST CCVS85 natively and on the VM
+        shell: bash
+        run: |
+          status=0
+          python3 tools/native-diff.py target/release/ironwork nistcobol85/src --runtime crates --workdir native-work | tee native-diff.txt || status=$?
+          { echo '```'; cat native-diff.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
