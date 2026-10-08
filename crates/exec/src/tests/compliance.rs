@@ -2465,3 +2465,93 @@ fn under_extended_assign_names_are_declared_or_take_a_later_constant() {
     let strict = diagnostics_under(&plain, numeric::Compliance::Strict);
     assert!(strict.iter().any(|d| (d.0, d.2) == (21, Some("IWC0001"))), "{strict:?}");
 }
+
+/// An indexed file whose RECORD KEY and ALTERNATE RECORD KEY names WORKING-STORAGE declares too.
+const KEYS_IN_RECORDS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. KEYS.\n",
+    "       ENVIRONMENT DIVISION.\n",
+    "       INPUT-OUTPUT SECTION.\n",
+    "       FILE-CONTROL.\n",
+    "           SELECT KF ASSIGN TO KFDD\n",
+    "               ORGANIZATION INDEXED ACCESS DYNAMIC\n",
+    "               RECORD KEY KF-KEY\n",
+    "               ALTERNATE RECORD KEY KF-ALT WITH DUPLICATES\n",
+    "               FILE STATUS IS FS.\n",
+    "       DATA DIVISION.\n",
+    "       FILE SECTION.\n",
+    "       FD KF.\n",
+    "       01 KF-REC.\n",
+    "          05 KF-KEY PIC X(3).\n",
+    "          05 KF-ALT PIC X(2).\n",
+    "          05 KF-DATA PIC X(5).\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 FS PIC XX.\n",
+    "       01 WS-REC.\n",
+    "          05 KF-KEY PIC X(3).\n",
+    "          05 KF-ALT PIC X(2).\n",
+    "          05 KF-DATA PIC X(5).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           OPEN OUTPUT KF\n",
+    "           MOVE 'BBBzzTWO' TO KF-REC\n",
+    "           WRITE KF-REC\n",
+    "           MOVE 'AAAyyONE' TO KF-REC\n",
+    "           WRITE KF-REC\n",
+    "           CLOSE KF\n",
+    "           OPEN INPUT KF\n",
+    "           MOVE 'AAA' TO KF-KEY OF WS-REC\n",
+    "           MOVE 'BBB' TO KF-KEY OF KF-REC\n",
+    "           READ KF KEY IS KF-KEY OF KF-REC\n",
+    "           DISPLAY FS ' ' KF-REC\n",
+    "           MOVE 'yy' TO KF-ALT OF KF-REC\n",
+    "           READ KF KEY IS KF-ALT OF KF-REC\n",
+    "           DISPLAY FS ' ' KF-REC\n",
+    "           CLOSE KF\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn under_extended_a_key_named_outside_the_records_too_is_the_records_item() {
+    // cobc 3.2's output, under -std=default, mf and ibm alike.
+    let expected = "00 BBBzzTWO  \n00 AAAyyONE  \n";
+    let dir = temp("keys-in-records");
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, executor) in [("interpreter", Executor::Interpreter), ("vm", Executor::Vm)] {
+        let file = dir.join(format!("{name}.dat"));
+        let _ = std::fs::remove_file(&file);
+        let ran = Harness::source(KEYS_IN_RECORDS).flags(EXTENDED).dds(&[format!("KFDD={}", file.display())]).run(executor);
+        assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{name}: {}", ran.err);
+    }
+    let warned: Vec<_> = diagnostics_under(KEYS_IN_RECORDS, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0105")).map(|d| d.0).collect();
+    assert_eq!(warned, [8, 9]);
+    let strict = diagnostics_under(KEYS_IN_RECORDS, numeric::Compliance::Strict);
+    assert!(strict.iter().any(|d| (d.0, d.2) == (8, Some("IWC0002"))), "{strict:?}");
+}
+
+/// GnuCOBOL's ACCEPT OMITTED, plain and with ON EXCEPTION.
+const ACCEPT_OMITTED: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. OMIT.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY 'PRESS A KEY' AT 0101\n",
+    "           ACCEPT OMITTED\n",
+    "           DISPLAY 'DONE' AT 0201\n",
+    "           ACCEPT OMITTED\n",
+    "               ON EXCEPTION DISPLAY 'PF' AT 0301\n",
+    "           END-ACCEPT\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn under_extended_accept_omitted_waits_for_a_key_alike_on_both_executors() {
+    let script = "string IGNORED\nENTER\nPF3\n";
+    let walked = Harness::source(ACCEPT_OMITTED).flags(EXTENDED).screens(script).run(Executor::Interpreter);
+    let expected = "--- screen 1 ---\nPRESS A KEY\n--- screen 2 ---\nPRESS A KEY\nDONE\n--- screen 3 ---\nPRESS A KEY\nDONE\nPF\n";
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (expected, Some(&Ending::Goback)), "{}", walked.err);
+    let vm = Harness::source(ACCEPT_OMITTED).flags(EXTENDED).screens(script).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    let warned: Vec<_> = diagnostics_under(ACCEPT_OMITTED, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0106")).map(|d| d.0).collect();
+    assert_eq!(warned, [5, 7]);
+    let strict = diagnostics_under(ACCEPT_OMITTED, numeric::Compliance::Strict);
+    assert!(strict.iter().any(|d| (d.0, d.2) == (5, Some("IWC0001"))), "{strict:?}");
+}

@@ -1019,7 +1019,8 @@ pub struct ScreenPhrases {
     pub secure: bool,
     pub attributes: Vec<String>,
     /// An ACCEPT of a SCREEN SECTION's screen: the screen's name, and its TO and USING fields,
-    /// which the compiler puts here. A positioned ACCEPT has neither, its one field its target.
+    /// which the compiler puts here; ACCEPT OMITTED's name is the parser's ACCEPT_OMITTED, with no
+    /// field. A positioned ACCEPT has neither, its one field its target.
     pub screen: Option<String>,
     pub inputs: Vec<ScreenInput>,
     pub pos: Pos,

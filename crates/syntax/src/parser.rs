@@ -330,6 +330,8 @@ fn gnucobol_float(word: &str, pos: Pos) -> Option<Error> {
 
 /// GnuCOBOL's special register for the key that ended a screen ACCEPT.
 pub const CRT_STATUS: &str = "COB-CRT-STATUS";
+/// The item an ACCEPT OMITTED names, which no field shows.
+pub const ACCEPT_OMITTED: &str = "ACCEPT%OMITTED";
 
 /// GnuCOBOL's special register for the number of arguments the running program was called with.
 pub const CALL_PARAMETERS: &str = "NUMBER-OF-CALL-PARAMETERS";
@@ -390,6 +392,8 @@ struct Parser<'a> {
     /// Statements one statement as written stands for, which go before it: ACCEPT ... FROM
     /// ENVIRONMENT's and SET ENVIRONMENT's DISPLAY UPON ENVIRONMENT-NAME.
     before: Vec<Stmt>,
+    /// Whether the program being parsed has an ACCEPT OMITTED, whose item it is given.
+    accepts_omitted: bool,
     /// DATA DIVISION EXEC blocks of the program being parsed.
     exec_declarations: Vec<ExecBlock>,
     /// Whether the program being parsed has EXEC CICS, so the translator's additions apply.
@@ -471,6 +475,7 @@ impl<'a> Parser<'a> {
             at: 0,
             exec_declarations: Vec::new(),
             before: Vec::new(),
+            accepts_omitted: false,
             cics: false,
             dli: false,
             intrinsics: Vec::new(),
@@ -785,6 +790,9 @@ impl Parser<'_> {
         if let Some(pos) = crt_status {
             self.messages.push(crate::messages::IWX0057.at(pos, "COB-CRT-STATUS (GnuCOBOL's special register; Enterprise COBOL has no screen ACCEPT): it holds the key that ended the last screen ACCEPT, as GnuCOBOL's screenio.cpy numbers the keys"));
             working_storage.push(register_entry(CRT_STATUS, "9(4)", None, pos));
+        }
+        if std::mem::take(&mut self.accepts_omitted) {
+            working_storage.push(DataEntry { value: None, ..register_entry(ACCEPT_OMITTED, "X", None, self.tokens.get(procedure_from).map_or_else(Pos::default, |t| t.pos)) });
         }
         if let Some(pos) = call_parameters {
             self.messages.push(crate::messages::IWX0078.at(pos, "NUMBER-OF-CALL-PARAMETERS (GnuCOBOL's special register; Enterprise COBOL has none): it holds the number of arguments the program was called with, or of the run's arguments in the main program"));
@@ -2582,6 +2590,9 @@ impl Parser<'_> {
             }
             "ACCEPT" => {
                 let positioned = self.screen_position("ACCEPT")?;
+                if self.extended && self.is_word("OMITTED") {
+                    return self.accept_omitted(positioned, pos);
+                }
                 let target = self.reference()?;
                 if let Some(refused) = self.accept_message_count(pos) {
                     return Ok(refused);
@@ -3927,6 +3938,24 @@ impl Parser<'_> {
         }
         self.accept_word("END-SEARCH");
         Ok(Search { table, all, varying, at_end, whens, pos })
+    }
+
+    /// GnuCOBOL's ACCEPT OMITTED under `--compliance extended`: a screen ACCEPT with no field, which
+    /// waits for the operator's next key (IWX0106).
+    fn accept_omitted(&mut self, positioned: Option<Box<ScreenPhrases>>, pos: Pos) -> R<Stmt> {
+        self.messages.push(crate::messages::IWX0106.at(self.pos(), "ACCEPT OMITTED (GnuCOBOL; Enterprise COBOL has no screen ACCEPT): a screen ACCEPT with no field, which waits for the next key"));
+        self.at += 1;
+        let mut screen = self.screen_phrases(positioned)?.unwrap_or_else(|| Box::new(ScreenPhrases { pos, ..ScreenPhrases::default() }));
+        screen.screen = Some(ACCEPT_OMITTED.into());
+        let [exception] = self.on_phrases(&["ON", "EXCEPTION"], &["END-ACCEPT"], |p| {
+            p.accept_word("ON");
+            p.expect_word("EXCEPTION")?;
+            Ok(0)
+        })?;
+        self.unreserved_terminator("END-ACCEPT", "ACCEPT");
+        self.accepts_omitted = true;
+        let target = Ref { name: ACCEPT_OMITTED.into(), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos };
+        Ok(Stmt::Accept { target, from: AcceptFrom::Sysin, exception, screen: Some(screen), pos })
     }
 
     /// Micro Focus's and RM/COBOL's `DISPLAY (line, column)` and `ACCEPT (line, column)` under

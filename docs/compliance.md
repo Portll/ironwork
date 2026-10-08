@@ -1384,6 +1384,28 @@ ASSIGN gives a file, after TO, USING or DYNAMIC, may be a constant the DATA DIVI
 as cobc 3.2 reads it: `SELECT F ASSIGN DYNAMIC LIST-NAME` with `78 LIST-NAME VALUE
 "./feeds/list.dat"` is read as `ASSIGN "./feeds/list.dat"`, a literal naming the DD.
 
+### IWX0105-W A key named in and outside the file's records
+
+`IWX0105-W {clause} {name} names an item in the records of {file} and another outside them
+(GnuCOBOL; Enterprise COBOL requires the name qualified): it is read as {name} OF {record}`, at the
+name.
+
+Enterprise COBOL's RECORD KEY and ALTERNATE RECORD KEY name an item in the file's records and may be
+qualified, so a name that WORKING-STORAGE or another file declares too is refused as ambiguous
+(IWC0002-S). cobc 3.2 takes the item in the file's records, under every dialect; extended does the
+same where exactly one of the file's records holds the name. ACAS's `COPY "plwspay.cob" REPLACING
+Pay-Record BY WS-Pay-Record` leaves PAY-KEY in WORKING-STORAGE and in the payments file's record.
+
+### IWX0106-W ACCEPT OMITTED
+
+`IWX0106-W ACCEPT OMITTED (GnuCOBOL; Enterprise COBOL has no screen ACCEPT): a screen ACCEPT with no
+field, which waits for the next key`, at OMITTED.
+
+`ACCEPT OMITTED`, with any screen phrases and ON EXCEPTION, waits for the operator's next key as a
+screen ACCEPT (IWX0020) with no field would: the `--screens` script plays to its next key, text
+typed before it goes nowhere, and COB-CRT-STATUS (IWX0057) takes the key. Strict refuses it, as
+OMITTED names no data item (IWC0001-S).
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

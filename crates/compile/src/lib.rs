@@ -372,6 +372,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     any_length::rewrite(&mut program, &mut errors);
     if options.compliance == numeric::Compliance::Extended {
         value_pictures(&mut program, &mut errors);
+        keys_in_records(&mut program, &inherited.entries, &mut errors);
         crt_status::rewrite(&mut program, &inherited.entries);
         call_parameters::rewrite(&mut program, &errors);
     }
@@ -546,6 +547,41 @@ fn value_pictures(program: &mut Program, errors: &mut Vec<Error>) {
             let name = e.name.clone().unwrap_or_else(|| "FILLER".into());
             errors.push(syntax::messages::IWX0096.at(e.pos, format!("{name} has no PICTURE (GnuCOBOL takes one from its VALUE; Enterprise COBOL requires one): it is read as PIC X({length})")));
             entries[k].picture = Some(format!("X({length})"));
+        }
+    }
+}
+
+/// A RECORD KEY or ALTERNATE RECORD KEY name that names one item in the file's records and others
+/// outside them is the one in its records, as cobc 3.2 resolves it: qualified by its record.
+fn keys_in_records(program: &mut Program, inherited: &[DataEntry], errors: &mut Vec<Error>) {
+    let mut named: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let everywhere = program.working_storage.iter().chain(&program.local_storage).chain(&program.linkage).chain(inherited).chain(program.files.iter().flat_map(|f| &f.records));
+    for name in everywhere.filter(|e| e.level != 88).filter_map(|e| e.name.clone()) {
+        *named.entry(name).or_default() += 1;
+    }
+    for f in &mut program.files {
+        let records = &f.records;
+        let holding = |name: &str| {
+            let mut record = None;
+            let mut found = Vec::new();
+            for e in records {
+                if e.level == 1 {
+                    record.clone_from(&e.name);
+                } else if e.name.as_deref() == Some(name) {
+                    found.push(record.clone());
+                }
+            }
+            match found.as_slice() {
+                [Some(r)] => Some(r.clone()),
+                _ => None,
+            }
+        };
+        let keys = f.record_key.iter_mut().map(|r| ("RECORD KEY", r)).chain(f.alternate_keys.iter_mut().map(|(r, _)| ("ALTERNATE RECORD KEY", r)));
+        for (clause, key) in keys.filter(|(_, r)| r.qualifiers.is_empty() && named.get(&r.name).is_some_and(|&n| n > 1)) {
+            let Some(record) = holding(&key.name) else { continue };
+            let name = &key.name;
+            errors.push(syntax::messages::IWX0105.at(key.pos, format!("{clause} {name} names an item in the records of {} and another outside them (GnuCOBOL; Enterprise COBOL requires the name qualified): it is read as {name} OF {record}", f.name)));
+            key.qualifiers.push(record);
         }
     }
 }

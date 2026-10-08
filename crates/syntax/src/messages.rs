@@ -942,6 +942,8 @@ catalogue! {
     IWX0102 Warning "{verb} (line, column) (Micro Focus's and RM/COBOL's; Enterprise COBOL has no screen): it is read as {verb} ... AT LINE line COLUMN column";
     IWX0103 Warning "{name} is not declared (GnuCOBOL and Micro Focus declare the name ASSIGN gives a file; Enterprise COBOL's assignment-name is never a data item): it is read as 01 {name} PIC X(4095) VALUE '{spelled}'";
     IWX0104 Warning "ASSIGN {name}: a constant defined after the ASSIGN (GnuCOBOL; Enterprise COBOL has no constant entry): the file's name is its value";
+    IWX0105 Warning "{clause} {name} names an item in the records of {file} and another outside them (GnuCOBOL; Enterprise COBOL requires the name qualified): it is read as {name} OF {record}";
+    IWX0106 Warning "ACCEPT OMITTED (GnuCOBOL; Enterprise COBOL has no screen ACCEPT): a screen ACCEPT with no field, which waits for the next key";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.
