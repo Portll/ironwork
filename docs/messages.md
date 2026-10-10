@@ -346,6 +346,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0325 | S | `FD {file}: RECORDING MODE F, but its records are {shortest} to {longest} bytes` |
 | IWC0326 | S | `CALL STATIC: GnuCOBOL's call convention, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0327 | S | `CALL ... GIVING: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's, which writes RETURNING; --compliance extended reads it` |
+| IWC0340 | S | `{name}: a table with no upper bound, OCCURS ... TO UNBOUNDED, is described in the LINKAGE SECTION` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
 | IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |
@@ -714,6 +715,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWR0075 | S | `FUNCTION {name}: a user-defined function is not supported here yet` |
 | IWR0076 | S | `ANY LENGTH on {name}: ironwork reads it on an alphanumeric 01 or 77 parameter, and {why}` |
 | IWR0077 | S | `BASED on {name}: ironwork reads BASED on an 01 or 77 entry` |
+| IWR0090 | S | `INITIALIZE {name}: a group holding a table with no upper bound is not supported yet` |
 | IWS0001 | S | `{what the syntax takes there}, found {the word or token there}` |
 | IWS0002 | S | `{COPY or a translator's INCLUDE} {name}: no such member in the copy libraries` |
 | IWS0003 | S | `COPY: {message}` |
@@ -823,6 +825,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWS0120 | E | `a period was required before level number {level}: one was assumed` |
 | IWS0121 | S | `INSPECT {literal} {phrase}: a literal is not a receiving item` |
 | IWS0122 | S | `SWITCH-{n}: GnuCOBOL's switches 8 to 36 have no UPSI switch to stand for them; extended reads SWITCH-0 to SWITCH-7` |
+| IWS0123 | S | `OCCURS {n} TO UNBOUNDED: a table with no upper bound needs DEPENDING ON` |
 | IWX0001 | W | `free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}` |
 | IWX0002 | W | `constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry` |
 | IWX0003 | W | `<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =` |

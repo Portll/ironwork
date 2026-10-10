@@ -60,11 +60,21 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             }
             Operand::Const(c) => constant(&self.p.consts[c as usize]).map_err(|a| self.abend(a, None).into()),
             Operand::LengthOf(p) => {
-                // A LINKAGE item's length no OCCURS DEPENDING ON or reference modification varies is
-                // the compile's, read without its address (Language Reference, LENGTH OF).
-                let q = &self.p.places[p as usize];
-                let fixed = matches!(q.base, Base::Linkage(_)) && q.odo.is_empty() && q.refmod.is_none();
-                let len = if fixed { q.len as usize } else { self.loc(p)?.len };
+                // A LINKAGE item's length is the compile's, less what its OCCURS DEPENDING ON
+                // tables do not hold, read without its address (Language Reference, LENGTH OF).
+                let program = self.p;
+                let q = &program.places[p as usize];
+                let len = if matches!(q.base, Base::Linkage(_)) && q.refmod.is_none() {
+                    let pos = self.pos(q.at);
+                    let mut len = i64::from(q.len);
+                    for odo in &q.odo {
+                        let current = self.occurrences(odo, pos)?;
+                        len = crate::loc::odo_len(len, odo.max, current, odo.element);
+                    }
+                    len as usize
+                } else {
+                    self.loc(p)?.len
+                };
                 Ok(Val::Num(Fixed::new(len as i128, Places::new(9, 0))))
             }
             Operand::AddressOf(p) => {

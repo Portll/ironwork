@@ -1864,7 +1864,7 @@ impl Parser<'_> {
                     let mut least = 1;
                     if self.accept_word("TO") {
                         least = most;
-                        most = count(self)?;
+                        most = if self.accept_word("UNBOUNDED") { UNBOUNDED } else { count(self)? };
                     }
                     e.occurs = Some(most);
                     self.accept_word("TIMES");
@@ -1872,6 +1872,8 @@ impl Parser<'_> {
                         self.accept_word("ON");
                         e.depending_on = Some(self.reference()?);
                         e.occurs_min = Some(least);
+                    } else if most == UNBOUNDED {
+                        return Err(crate::messages::IWS0123.at(self.pos(), format!("OCCURS {least} TO UNBOUNDED: a table with no upper bound needs DEPENDING ON")));
                     }
                     loop {
                         if let Some(order) = self.accept_any(&["ASCENDING", "DESCENDING"]) {

@@ -310,6 +310,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         }
         declared = based_items(&mut program, declared, &mut errors);
     }
+    unbounded_outside_linkage(&program, &mut errors);
     screens::expand(&mut program, options.compliance == numeric::Compliance::Extended, &mut errors);
     let page = options.code_page();
     if let Err((message, m)) = syntax::parser::decode_currency(&mut program.environment, |bytes| page.decode(bytes)) {
@@ -1188,6 +1189,16 @@ fn based_items(program: &mut Program, declared: usize, errors: &mut Vec<Error>) 
     declared_left
 }
 
+/// A table with no upper bound, outside the LINKAGE SECTION, where Enterprise COBOL describes one
+/// (Programming Guide SC27-8714-03, 'Working with unbounded tables and groups').
+fn unbounded_outside_linkage(program: &Program, errors: &mut Vec<Error>) {
+    let records = program.files.iter().flat_map(|f| &f.records);
+    for e in program.working_storage.iter().chain(&program.local_storage).chain(records).filter(|e| e.occurs == Some(syntax::ast::UNBOUNDED)) {
+        let name = e.name.as_deref().unwrap_or("FILLER");
+        errors.push(syntax::messages::IWC0340.at(e.pos, format!("{name}: a table with no upper bound, OCCURS ... TO UNBOUNDED, is described in the LINKAGE SECTION")));
+    }
+}
+
 /// BINARY-CHAR, Micro Focus's and GnuCOBOL's one-byte binary: a warning naming its range under
 /// `--compliance extended` (assumption C460), refused under strict.
 fn binary_chars(program: &Program, options: &Options, errors: &mut Vec<Error>) {
@@ -1610,7 +1621,12 @@ impl Check<'_> {
                         self.errors.push(syntax::messages::IWC0078.at(*pos, format!("INITIALIZE {}: a variably located item, or a group holding one, cannot be initialized (Language Reference p. 351)", r.name)));
                     }
                 }
-                if let Some(with) = with {
+                let items = &self.layout.items;
+                let unbounded: Vec<&Ref> = targets.iter().filter(|r| self.item(r).is_some_and(|i| items[i].odo.iter().any(|&t| items[t].unbounded))).collect();
+                for r in &unbounded {
+                    self.errors.push(syntax::messages::IWR0090.at(*pos, format!("INITIALIZE {}: a group holding a table with no upper bound is not supported yet", r.name)));
+                }
+                if let Some(with) = with.as_ref().filter(|_| unbounded.is_empty()) {
                     with.replacing.iter().for_each(|(_, by)| self.operand(by));
                     self.initialize_incompatible(targets, with, *pos);
                 }

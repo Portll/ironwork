@@ -2871,3 +2871,53 @@ fn under_extended_no_echo_may_be_two_words() {
         assert_eq!(o.ending, Ok(Ending::Goback), "{}", o.err);
     }
 }
+
+/// A table with no upper bound in the LINKAGE SECTION, given storage by ALLOCATE, which takes the
+/// group's current length.
+const UNBOUNDED_TABLE: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. UNBOUND.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 CAP PIC 9(4) BINARY VALUE 3.\n",
+    "       01 I PIC 9(4) BINARY.\n",
+    "       01 L PIC 9(9) BINARY.\n",
+    "       LINKAGE SECTION.\n",
+    "       01 ARENA.\n",
+    "          02 NODE OCCURS 1 TO UNBOUNDED DEPENDING ON CAP.\n",
+    "             03 NODE-A PIC X(2).\n",
+    "             03 NODE-B PIC 9(3).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           ALLOCATE ARENA\n",
+    "           PERFORM VARYING I FROM 1 BY 1 UNTIL I > CAP\n",
+    "               MOVE 'AB' TO NODE-A(I)\n",
+    "               MOVE I TO NODE-B(I)\n",
+    "           END-PERFORM\n",
+    "           MOVE LENGTH OF ARENA TO L\n",
+    "           DISPLAY ARENA ' ' L\n",
+    "           MOVE 2 TO CAP\n",
+    "           MOVE ALL '*' TO ARENA\n",
+    "           DISPLAY ARENA '|' NODE-A(3)\n",
+    "           INITIALIZE NODE(1)\n",
+    "           DISPLAY NODE(1) '|'\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn a_table_with_no_upper_bound_takes_its_current_length_alike_on_both_executors() {
+    for flags in [&[][..], EXTENDED] {
+        for executor in [Executor::Interpreter, Executor::Vm] {
+            let o = Harness::source(UNBOUNDED_TABLE).flags(flags).run(executor);
+            assert_eq!((o.out.as_str(), o.ending), ("AB001AB002AB003 000000015\n**********|AB\n  000|\n", Ok(Ending::Goback)), "{}", o.err);
+        }
+    }
+    let unbounded_in_storage = UNBOUNDED_TABLE.replace("       LINKAGE SECTION.\n", "");
+    let refused = diagnostics_under(&unbounded_in_storage, numeric::Compliance::Strict);
+    assert!(refused.iter().any(|d| (d.0, d.2) == (9, Some("IWC0340"))), "{refused:?}");
+    let initialized = UNBOUNDED_TABLE.replace("           ALLOCATE ARENA\n", "           ALLOCATE ARENA\n           INITIALIZE ARENA\n");
+    let refused = diagnostics_under(&initialized, numeric::Compliance::Strict);
+    assert!(refused.iter().any(|d| (d.0, d.2) == (15, Some("IWR0090"))), "{refused:?}");
+    let undepending = UNBOUNDED_TABLE.replace(" DEPENDING ON CAP.", ".");
+    let error = syntax::parse(&undepending).unwrap_err();
+    assert_eq!((error.pos.line, error.id), (10, Some("IWS0123")), "{error}");
+}

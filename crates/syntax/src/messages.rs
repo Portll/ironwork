@@ -372,6 +372,7 @@ catalogue! {
     IWC0325 Severe "FD {file}: RECORDING MODE F, but its records are {shortest} to {longest} bytes";
     IWC0326 Severe "CALL STATIC: GnuCOBOL's call convention, not Enterprise COBOL's; --compliance extended reads it";
     IWC0327 Severe "CALL ... GIVING: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's, which writes RETURNING; --compliance extended reads it";
+    IWC0340 Severe "{name}: a table with no upper bound, OCCURS ... TO UNBOUNDED, is described in the LINKAGE SECTION";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
     IWJ0002 Severe "an unbalanced ) in {text}";
     IWJ0003 Severe "unbalanced parentheses or quotes in {text}";
@@ -740,6 +741,7 @@ catalogue! {
     IWR0075 Severe "FUNCTION {name}: a user-defined function is not supported here yet";
     IWR0076 Severe "ANY LENGTH on {name}: ironwork reads it on an alphanumeric 01 or 77 parameter, and {why}";
     IWR0077 Severe "BASED on {name}: ironwork reads BASED on an 01 or 77 entry";
+    IWR0090 Severe "INITIALIZE {name}: a group holding a table with no upper bound is not supported yet";
     IWS0001 Severe "{what the syntax takes there}, found {the word or token there}";
     IWS0002 Severe "{COPY or a translator's INCLUDE} {name}: no such member in the copy libraries";
     IWS0003 Severe "COPY: {message}";
@@ -849,6 +851,7 @@ catalogue! {
     IWS0120 Error "a period was required before level number {level}: one was assumed";
     IWS0121 Severe "INSPECT {literal} {phrase}: a literal is not a receiving item";
     IWS0122 Severe "SWITCH-{n}: GnuCOBOL's switches 8 to 36 have no UPSI switch to stand for them; extended reads SWITCH-0 to SWITCH-7";
+    IWS0123 Severe "OCCURS {n} TO UNBOUNDED: a table with no upper bound needs DEPENDING ON";
     IWX0001 Warning "free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}";
     IWX0002 Warning "constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry";
     IWX0003 Warning "<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =";

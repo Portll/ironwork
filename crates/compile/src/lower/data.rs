@@ -190,7 +190,8 @@ impl Lower<'_> {
         }
         let table = layout.table_range(index).filter(|_| ssrange).map(|(displacement, extent)| lir::TableRange { displacement, extent });
         let mut odo = Vec::new();
-        if !item.odo.is_empty() && !(receiving && r.refmod.is_none() && !item.followed && self.objects_within(&item.odo, index)?) {
+        let unbounded = item.odo.iter().any(|&t| layout.items[t].unbounded);
+        if !item.odo.is_empty() && !(receiving && r.refmod.is_none() && !item.followed && !unbounded && self.objects_within(&item.odo, index)?) {
             for &t in &item.odo {
                 odo.push(self.odo(t, r.pos)?);
             }

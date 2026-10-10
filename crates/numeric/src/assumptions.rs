@@ -392,6 +392,7 @@ pub const CHAINING: &str = "C488";
 pub const CRT_STATUS_CODES: &str = "C489";
 pub const WIDE_PICTURES: &str = "C490";
 pub const SORT_FILE_ASSIGN_ITEM: &str = "C500";
+pub const UNBOUNDED_TABLES: &str = "C501";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2774,6 +2775,13 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[O(Extended), S(Arithmetic)]],
+    },
+    Assumption {
+        id: UNBOUNDED_TABLES,
+        claim: "A table OCCURS n TO UNBOUNDED DEPENDING ON, which Enterprise COBOL describes in the LINKAGE SECTION, holds as many occurrences as fit the interpreter's 128 MB of storage after the table's place in its record, and its object's value is held there as any OCCURS DEPENDING ON object's is to its maximum. A group holding one is always its current length, as a receiving item too: 'the maximum length rule does not apply to unbounded groups' (Programming Guide SC27-8714-03, Working with unbounded tables and groups; Language Reference SC27-8713-03, OCCURS DEPENDING ON clause). Enterprise COBOL bounds the table only by the storage the program gives it",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[U(OccursDepending)]],
     },
     Assumption {
         id: SORT_FILE_ASSIGN_ITEM,

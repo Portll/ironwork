@@ -29,6 +29,9 @@ pub struct Item {
     pub table: bool,
     /// OCCURS ... DEPENDING ON: the item holding the current number of occurrences.
     pub depending_on: Option<syntax::ast::Ref>,
+    /// OCCURS ... TO UNBOUNDED: `occurs` is as many occurrences as fit the storage left after the
+    /// table's place in its record (assumption C501).
+    pub unbounded: bool,
     /// The OCCURS DEPENDING ON tables within this group, other than one within another of them: the
     /// occurrences past each one's current count leave its length out.
     pub odo: Vec<usize>,
@@ -233,6 +236,7 @@ pub fn build(
                 occurs_min: 1,
                 table: false,
                 depending_on: None,
+                unbounded: false,
                 odo: Vec::new(),
                 moved_by: Vec::new(),
                 followed: false,
@@ -278,10 +282,11 @@ pub fn build(
             children: Vec::new(),
             offset: 0,
             size: 0,
-            occurs: e.occurs.unwrap_or(1),
+            occurs: e.occurs.filter(|&n| n != syntax::ast::UNBOUNDED).or(e.occurs_min).unwrap_or(1),
             occurs_min: e.occurs_min.or(e.occurs).unwrap_or(1),
             table: e.occurs.is_some(),
             depending_on: e.depending_on.clone(),
+            unbounded: e.occurs == Some(syntax::ast::UNBOUNDED),
             odo: Vec::new(),
             moved_by: Vec::new(),
             followed: false,
@@ -361,6 +366,7 @@ pub fn build(
                 occurs_min: 1,
                 table: false,
                 depending_on: None,
+                unbounded: false,
                 odo: Vec::new(),
                 moved_by: Vec::new(),
                 followed: false,
@@ -857,6 +863,9 @@ fn measure(items: &mut [Item], aligns: &[u32], index: usize, base: u32) -> Resul
         if items[c].table {
             let m = widest_alignment(items, aligns, c);
             items[c].size = items[c].size.div_ceil(m) * m;
+        }
+        if items[c].unbounded {
+            items[c].occurs = (MAX_STORAGE.saturating_sub(base + offset) / items[c].size.max(1)).max(items[c].occurs_min);
         }
         let too_large = || syntax::messages::IWL0006.at(items[c].pos, format!("an item larger than the interpreter's {MAX_STORAGE} bytes"));
         let span = items[c].size.checked_mul(items[c].occurs).filter(|&s| s <= MAX_STORAGE).ok_or_else(too_large)?;

@@ -683,7 +683,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
         offset += composed;
         let (mut len, mut kind) = (item.size as i64, item.kind);
-        if !item.odo.is_empty() && !(receiving && r.refmod.is_none() && !item.followed && self.objects_within(&item.odo, index)?) {
+        let unbounded = item.odo.iter().any(|&t| self.layout.items[t].unbounded);
+        if !item.odo.is_empty() && !(receiving && r.refmod.is_none() && !item.followed && !unbounded && self.objects_within(&item.odo, index)?) {
             for &t in &item.odo {
                 len -= self.unused(t, r.pos)?;
             }
@@ -824,13 +825,21 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             }
             Operand::Literal(lit) => self.literal_value(lit, pos),
             Operand::LengthOf(r) => {
+                // A LINKAGE item's length is the compile's, less what its OCCURS DEPENDING ON
+                // tables do not hold, read without its address (Language Reference, LENGTH OF).
                 let layout = self.layout;
-                let fixed = match layout.resolve(&r.name, &r.qualifiers, r.pos) {
-                    Ok(Resolved::Item(i)) if r.refmod.is_none() && layout.items[i].odo.is_empty() && layout.items[i].linkage.is_some() => Some(layout.items[i].size as usize),
+                let linkage = match layout.resolve(&r.name, &r.qualifiers, r.pos) {
+                    Ok(Resolved::Item(i)) if r.refmod.is_none() && layout.items[i].linkage.is_some() => Some(i),
                     _ => None,
                 };
-                let len = match fixed {
-                    Some(len) => len,
+                let len = match linkage {
+                    Some(i) => {
+                        let mut len = i64::from(layout.items[i].size);
+                        for &t in &layout.items[i].odo {
+                            len -= self.unused(t, r.pos)?;
+                        }
+                        len as usize
+                    }
                     None => self.locate(&layout.length_of_ref(r))?.len,
                 };
                 Ok(Val::Num(Fixed::new(len as i128, Places::new(9, 0))))

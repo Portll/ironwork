@@ -304,6 +304,7 @@ pub struct DataEntry {
     pub value: Option<Literal>,
     pub redefines: Option<String>,
     /// OCCURS: the number of occurrences, or the most of them for OCCURS DEPENDING ON.
+    /// The OCCURS maximum, [`UNBOUNDED`] for OCCURS ... TO UNBOUNDED.
     pub occurs: Option<u32>,
     /// OCCURS ... DEPENDING ON: the fewest occurrences, 1 when no integer-1 TO is written
     /// (Language Reference SC27-8713-03, p. 204).
@@ -721,6 +722,10 @@ pub struct UnstringInto {
     pub delimiter_in: Option<Ref>,
     pub count_in: Option<Ref>,
 }
+
+/// The OCCURS maximum of a table with no upper bound, OCCURS n TO UNBOUNDED DEPENDING ON, which
+/// Enterprise COBOL describes in the LINKAGE SECTION.
+pub const UNBOUNDED: u32 = u32::MAX;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Unstring {
