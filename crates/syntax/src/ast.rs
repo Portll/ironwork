@@ -354,6 +354,8 @@ pub enum Literal {
     Number(String),
     Figurative(Figurative),
     All(Box<Literal>),
+    /// A floating-point literal as written: mantissa, E, exponent.
+    Float(String),
 }
 
 /// A paragraph, or a section header holding the statements before the section's first paragraph.

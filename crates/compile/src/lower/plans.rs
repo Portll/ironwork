@@ -325,7 +325,7 @@ impl Lower<'_> {
             Literal::Hex(b) => self.page.decode(b),
             Literal::National(s) => rt::display::national(self.page, &s.encode_utf16().flat_map(u16::to_be_bytes).collect::<Vec<_>>(), upon_console),
             Literal::Dbcs(s) => self.page.decode_dbcs(&self.dbcs(s, pos)?),
-            Literal::Number(t) => t.clone(),
+            Literal::Number(t) | Literal::Float(t) => t.clone(),
             Literal::Figurative(f) => self.page.decode_byte(self.c.collating.figurative(*f)).to_string(),
             Literal::All(inner) => match &**inner {
                 Literal::Alnum(_) | Literal::Hex(_) | Literal::National(_) | Literal::Figurative(_) => self.display_text(inner, upon_console, pos)?,

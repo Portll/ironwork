@@ -29,6 +29,9 @@ pub enum Const {
     Refused(AbendId),
     /// A DBCS literal's bytes in the code page's DBCS component.
     Dbcs(Vec<u8>),
+    /// A floating-point literal's value, in hexadecimal floating point of 8 bytes, or 16 under
+    /// ARITH(EXTEND).
+    Float(Vec<u8>),
 }
 
 /// `Fixed` locates each place of `prepass` before it evaluates `expr`, as the walker's dmax pass
@@ -135,7 +138,7 @@ pub enum SqlTest {
 }
 
 codec_enum!(Operand { Load(place) = 0, Const(id) = 1, LengthOf(place) = 2, AddressOf(place) = 3, Function(id) = 4, UserFunction(id) = 5 });
-codec_enum!(Const { Bytes(b) = 0, National(n) = 1, Number(f) = 2, Figurative(f) = 3, All(b) = 4, Refused(abend) = 5, AllNational(n) = 6, Dbcs(b) = 7 });
+codec_enum!(Const { Bytes(b) = 0, National(n) = 1, Number(f) = 2, Figurative(f) = 3, All(b) = 4, Refused(abend) = 5, AllNational(n) = 6, Dbcs(b) = 7, Float(b) = 8 });
 codec_enum!(IntExpr { Const(n) = 0, Item(place) = 1, Fixed { expr, dmax, prepass } = 2, Walk(k) = 3 });
 codec_enum!(Expr { Operand(o) = 0, Neg(e) = 1, Bin(a, op, b) = 2, Pow(base, exponent) = 3 });
 codec_enum!(Cond {

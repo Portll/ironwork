@@ -91,7 +91,7 @@ fn layout(entries: &[ScreenEntry], notation: Notation, declared: &[String], stor
 /// A literal's characters as a screen shows them.
 fn literal_text(l: &Literal) -> String {
     match l {
-        Literal::Alnum(s) | Literal::National(s) | Literal::Dbcs(s) | Literal::Number(s) => s.clone(),
+        Literal::Alnum(s) | Literal::National(s) | Literal::Dbcs(s) | Literal::Number(s) | Literal::Float(s) => s.clone(),
         Literal::Hex(b) => " ".repeat(b.len()),
         Literal::All(inner) => literal_text(inner),
         Literal::Figurative(_) => " ".into(),

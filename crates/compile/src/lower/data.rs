@@ -470,6 +470,11 @@ impl Lower<'_> {
                 None => return unsupported("a numeric literal of more than 31 digits", pos),
             },
             Literal::Figurative(f) => (lir::Const::Figurative(*f), Value::Fig(*f), 0),
+            Literal::Float(written) => {
+                let Some(fixed) = syntax::parser::float_fixed(written).as_deref().and_then(literal_fixed) else { return unsupported("a floating-point literal of more than 31 digits in fixed point", pos) };
+                let Ok(hfp) = numeric::float::from_fixed(fixed, self.c.options.arith.float_intermediate(), Default::default()) else { return unsupported("a floating-point literal outside hexadecimal floating point's range", pos) };
+                (lir::Const::Float(hfp.to_bytes()), Value::Float, 0)
+            }
             Literal::All(inner) => match &**inner {
                 Literal::Alnum(s) => (lir::Const::All(self.encode(s, pos)?), Value::All, 0),
                 Literal::Hex(b) => (lir::Const::All(b.clone()), Value::All, 0),

@@ -2921,3 +2921,42 @@ fn a_table_with_no_upper_bound_takes_its_current_length_alike_on_both_executors(
     let error = syntax::parse(&undepending).unwrap_err();
     assert_eq!((error.pos.line, error.id), (10, Some("IWS0123")), "{error}");
 }
+
+/// Floating-point literals in the PROCEDURE DIVISION: MOVE, COMPUTE and a comparison.
+const FLOAT_LITERALS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. FLOATLIT.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 F COMP-2.\n",
+    "       01 X PIC 9(9)V99.\n",
+    "       01 Y PIC 9(10).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE 1.0E9 TO F\n",
+    "           MOVE F TO Y\n",
+    "           DISPLAY Y\n",
+    "           COMPUTE X = 1.5E3 * 2\n",
+    "           DISPLAY X\n",
+    "           COMPUTE X = 2.5E-1 + 1\n",
+    "           DISPLAY X\n",
+    "           MOVE 4.0E+02 TO Y\n",
+    "           DISPLAY Y\n",
+    "           IF F = 1.0E+09 DISPLAY 'EQUAL' END-IF\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn floating_point_literals_are_floating_point_operands_alike_on_both_executors() {
+    // Extended shows the decimal point, as the GnuCOBOL DISPLAY form it picks does.
+    let strict = "1000000000\n00000300000\n00000000125\n0000000400\nEQUAL\n";
+    let extended = "1000000000\n000003000.00\n000000001.25\n0000000400\nEQUAL\n";
+    for (flags, expected) in [(&[][..], strict), (EXTENDED, extended)] {
+        for executor in [Executor::Interpreter, Executor::Vm] {
+            let o = Harness::source(FLOAT_LITERALS).flags(flags).run(executor);
+            assert_eq!((o.out.as_str(), o.ending), (expected, Ok(Ending::Goback)), "{}", o.err);
+        }
+    }
+    let wide = FLOAT_LITERALS.replace("MOVE 1.0E9 TO F", "MOVE 1.0E40 TO F");
+    let error = syntax::parse(&wide).unwrap_err();
+    assert_eq!((error.pos.line, error.id), (9, Some("IWR0091")), "{error}");
+}

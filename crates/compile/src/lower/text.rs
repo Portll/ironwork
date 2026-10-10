@@ -219,6 +219,7 @@ impl Lower<'_> {
                 Some(f) => zoned_digits(f.magnitude.to_u128().unwrap_or(0), f.places.total() as usize, decimal::UNSIGNED),
                 None => return unsupported("a numeric literal of more than 31 digits", pos),
             },
+            Literal::Float(_) => return unsupported("a floating-point literal as characters", pos),
             Literal::Figurative(f) => vec![self.c.collating.figurative(*f)],
             Literal::All(inner) => match &**inner {
                 Literal::Alnum(_) | Literal::Hex(_) | Literal::National(_) | Literal::Figurative(_) => self.natural_bytes(inner, pos)?,

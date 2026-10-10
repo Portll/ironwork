@@ -393,6 +393,7 @@ pub const CRT_STATUS_CODES: &str = "C489";
 pub const WIDE_PICTURES: &str = "C490";
 pub const SORT_FILE_ASSIGN_ITEM: &str = "C500";
 pub const UNBOUNDED_TABLES: &str = "C501";
+pub const FLOAT_LITERALS: &str = "C502";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2775,6 +2776,13 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[O(Extended), S(Arithmetic)]],
+    },
+    Assumption {
+        id: FLOAT_LITERALS,
+        claim: "A floating-point literal in the PROCEDURE DIVISION is a floating-point operand wherever it stands: its value, written in fixed point as a VALUE's is (C172), is converted when the program is compiled to long-precision hexadecimal floating point, or extended under ARITH(EXTEND), and an expression holding it is evaluated in floating point (Programming Guide SC27-8714-03, Intermediate results and arithmetic precision: 'Floating-point literals ... are converted to long-precision floating point for processing'). A MOVE of one converts from that value, as a MOVE from a COMP-2 item does. DISPLAY shows it as written, as it shows a fixed-point literal. A literal of more than 31 digits in fixed point is refused (IWR0091)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[U(Float)]],
     },
     Assumption {
         id: UNBOUNDED_TABLES,

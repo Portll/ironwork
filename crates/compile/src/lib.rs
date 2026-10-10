@@ -1340,7 +1340,7 @@ fn inspected_literal(l: &Literal) -> Option<(&'static str, CharUsage)> {
         Literal::All(inner) => inspected_literal(inner),
         Literal::National(_) => Some(("a national literal", CharUsage::National)),
         Literal::Dbcs(_) => Some(("a DBCS literal", CharUsage::Dbcs)),
-        Literal::Number(_) => Some(("a numeric literal", CharUsage::Display)),
+        Literal::Number(_) | Literal::Float(_) => Some(("a numeric literal", CharUsage::Display)),
         Literal::Alnum(_) | Literal::Hex(_) => Some(("an alphanumeric literal", CharUsage::Display)),
     }
 }

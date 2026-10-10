@@ -716,6 +716,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWR0076 | S | `ANY LENGTH on {name}: ironwork reads it on an alphanumeric 01 or 77 parameter, and {why}` |
 | IWR0077 | S | `BASED on {name}: ironwork reads BASED on an 01 or 77 entry` |
 | IWR0090 | S | `INITIALIZE {name}: a group holding a table with no upper bound is not supported yet` |
+| IWR0091 | S | `{literal}: a floating-point literal of more than 31 digits in fixed point is not supported yet` |
 | IWS0001 | S | `{what the syntax takes there}, found {the word or token there}` |
 | IWS0002 | S | `{COPY or a translator's INCLUDE} {name}: no such member in the copy libraries` |
 | IWS0003 | S | `COPY: {message}` |

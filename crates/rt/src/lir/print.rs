@@ -379,6 +379,7 @@ impl<'a> Printer<'a> {
             Const::All(b) => format!("ALL {}", self.bytes(b)),
             Const::AllNational(units) => format!("ALL {}", national(units)),
             Const::Dbcs(b) => hex("GX", b),
+            Const::Float(b) => hex("float X", b),
             Const::Refused(a) => format!("refused {}", abend_ref(*a)),
         }
     }

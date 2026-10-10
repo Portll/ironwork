@@ -606,7 +606,8 @@ SUBSTITUTE and SUBSTITUTE-CASE, and `DispSign` 2 and 3, GnuCOBOL's two ways of s
 hold the function 92, NUMBER-OF-CALL-PARAMETERS, which came after the bump. 1.4 adds `UserArgument`
 2, `Literal`, an alphanumeric literal passed to an ANY LENGTH parameter under `--compliance
 extended` (lir.md §9.15). 1.5 adds the `UnstringValue` op, 41, an UNSTRING whose sending field is a
-function's value under `--compliance extended`. A 0.x module is refused, and compiling the source again is the remedy (question 1).
+function's value under `--compliance extended`, and `Const` 8, `Float`, a floating-point literal's
+value in the PROCEDURE DIVISION. A 0.x module is refused, and compiling the source again is the remedy (question 1).
 
 | The reader finds | It does |
 |---|---|

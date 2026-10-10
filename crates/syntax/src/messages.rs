@@ -742,6 +742,7 @@ catalogue! {
     IWR0076 Severe "ANY LENGTH on {name}: ironwork reads it on an alphanumeric 01 or 77 parameter, and {why}";
     IWR0077 Severe "BASED on {name}: ironwork reads BASED on an 01 or 77 entry";
     IWR0090 Severe "INITIALIZE {name}: a group holding a table with no upper bound is not supported yet";
+    IWR0091 Severe "{literal}: a floating-point literal of more than 31 digits in fixed point is not supported yet";
     IWS0001 Severe "{what the syntax takes there}, found {the word or token there}";
     IWS0002 Severe "{COPY or a translator's INCLUDE} {name}: no such member in the copy libraries";
     IWS0003 Severe "COPY: {message}";

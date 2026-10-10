@@ -147,6 +147,7 @@ fn characters(literal: &Literal, page: &CodePage, quote: Quote) -> Result<Vec<u8
         Literal::National(_) => return Err((syntax::messages::IWC0283, "a national literal cannot be in an ALPHABET clause".into())),
         Literal::Dbcs(_) => return Err((syntax::messages::IWC0284, "a DBCS literal cannot be in an ALPHABET clause".into())),
         Literal::All(_) => return Err((syntax::messages::IWC0285, "ALL cannot be in an ALPHABET clause".into())),
+        Literal::Float(written) => return Err((syntax::messages::IWC0281, format!("{written} is not an ordinal position from 1 to 256"))),
     })
 }
 

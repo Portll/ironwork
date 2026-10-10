@@ -777,7 +777,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     fn literal_value(&self, lit: &Literal, pos: Pos) -> R<Val> {
-        compile::values::literal_value(self.page, lit, pos)
+        compile::values::literal_value(self.page, lit, self.options.arith.float_intermediate(), pos)
     }
 
     /// What a DECIMAL-POINT IS COMMA program shows for a decimal point.

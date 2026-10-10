@@ -16,6 +16,12 @@ use numeric::precision::{Fixed, Places};
 use std::rc::Rc;
 use zarch::hfp::{Hfp, Precision};
 
+/// A floating-point constant's value from its 8 or 16 bytes.
+pub fn float_constant(bytes: &[u8]) -> zarch::hfp::Hfp {
+    let precision = if bytes.len() == 16 { zarch::hfp::Precision::Extended } else { zarch::hfp::Precision::Long };
+    zarch::hfp::Hfp::from_bytes(precision, bytes)
+}
+
 /// A constant's value, or the abend reading a refused one gives.
 pub(super) fn constant(c: &Const) -> Result<Val, AbendId> {
     Ok(match c {
@@ -26,6 +32,7 @@ pub(super) fn constant(c: &Const) -> Result<Val, AbendId> {
         Const::All(b) => Val::All(b.clone()),
         Const::AllNational(b) => Val::AllNational(b.clone()),
         Const::Dbcs(b) => Val::Dbcs(b.clone()),
+        Const::Float(b) => Val::Float(float_constant(b)),
         Const::Refused(abend) => return Err(*abend),
     })
 }

@@ -174,6 +174,13 @@ fn gnucobol_switch(word: &str) -> Option<u8> {
     word.strip_prefix("SWITCH-")?.parse::<u8>().ok().filter(|n| *n <= 36)
 }
 
+/// The value of the floating-point literal `written`, mantissa E exponent, as a fixed-point
+/// numeric literal of at most 31 digits.
+pub fn float_fixed(written: &str) -> Option<String> {
+    let (mantissa, exponent) = written.split_once('E')?;
+    fixed_point(mantissa, exponent.parse().ok()?)
+}
+
 /// `mantissa` times ten to `exponent`, as a fixed-point numeric literal of at most 31 digits.
 fn fixed_point(mantissa: &str, exponent: i32) -> Option<String> {
     let (sign, body) = match mantissa.strip_prefix('-') {
@@ -2257,10 +2264,17 @@ impl Parser<'_> {
         }
     }
 
-    /// The exponent that makes `mantissa`, the numeric literal at `at`, a floating-point literal
-    /// (Language Reference SC27-8713-03, p. 45), taken with it; the value comes back written in
-    /// fixed point (numeric::assumptions::FLOAT_VALUE_LITERAL), None when no exponent follows.
+    /// A VALUE's floating-point literal, its value written in fixed point
+    /// (numeric::assumptions::FLOAT_VALUE_LITERAL); None when no exponent follows the mantissa.
     fn floating_point(&mut self, mantissa: &str, at: Pos) -> R<Option<String>> {
+        let Some(written) = self.float_literal(mantissa, at)? else { return Ok(None) };
+        float_fixed(&written).map(Some).ok_or_else(|| crate::messages::IWR0005.at(at, format!("VALUE {written}: a floating-point VALUE of more than 31 digits in fixed point is not supported yet")))
+    }
+
+    /// The exponent that makes `mantissa`, the numeric literal at `at`, a floating-point literal
+    /// (Language Reference SC27-8713-03, p. 45), taken with it: the literal as written, None when
+    /// no exponent follows.
+    fn float_literal(&mut self, mantissa: &str, at: Pos) -> R<Option<String>> {
         let end = at.col + mantissa.chars().count() as u32;
         let adjacent = |p: &Self, k: usize, col: u32| p.tokens.get(p.at + k).is_some_and(|t| t.pos.file == at.file && t.pos.line == at.line && t.pos.col == col);
         let Some(Tok::Word(word)) = self.peek().cloned() else { return Ok(None) };
@@ -2281,8 +2295,8 @@ impl Parser<'_> {
         if mantissa.bytes().filter(u8::is_ascii_digit).count() > 16 {
             return Err(crate::messages::IWS0052.at(at, format!("{written}: a floating-point literal's mantissa has at most 16 digits")));
         }
-        let exponent: i32 = exponent.parse().map_err(|_| crate::messages::IWS0053.at(at, format!("{written}: not an exponent")))?;
-        fixed_point(mantissa, exponent).map(Some).ok_or_else(|| crate::messages::IWR0005.at(at, format!("VALUE {written}: a floating-point VALUE of more than 31 digits in fixed point is not supported yet")))
+        exponent.parse::<i32>().map_err(|_| crate::messages::IWS0053.at(at, format!("{written}: not an exponent")))?;
+        Ok(Some(written))
     }
 
     fn literal(&mut self) -> R<Literal> {
@@ -4330,7 +4344,16 @@ impl Parser<'_> {
             }
             Some(Tok::Word(w)) if figurative(w).is_some() || w == "ALL" => Ok(Operand::Literal(self.literal()?)),
             Some(Tok::Word(_)) => Ok(Operand::Ref(self.reference()?)),
-            Some(Tok::Alnum(_) | Tok::Hex(_) | Tok::National(_) | Tok::Dbcs(_) | Tok::Number(_)) => Ok(Operand::Literal(self.literal()?)),
+            Some(Tok::Number(n)) => {
+                let n = n.clone();
+                self.at += 1;
+                let Some(written) = self.float_literal(&n, pos)? else { return Ok(Operand::Literal(Literal::Number(n))) };
+                if float_fixed(&written).is_none() {
+                    return Err(crate::messages::IWR0091.at(pos, format!("{written}: a floating-point literal of more than 31 digits in fixed point is not supported yet")));
+                }
+                Ok(Operand::Literal(Literal::Float(written)))
+            }
+            Some(Tok::Alnum(_) | Tok::Hex(_) | Tok::National(_) | Tok::Dbcs(_)) => Ok(Operand::Literal(self.literal()?)),
             _ => Err(self.error("an operand")),
         }
     }

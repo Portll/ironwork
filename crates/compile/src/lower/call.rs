@@ -90,6 +90,7 @@ impl Lower<'_> {
                 }
                 None => return unsupported("a numeric literal of more than 31 digits", pos),
             },
+            Literal::Float(_) => return unsupported("a floating-point literal BY CONTENT", pos),
             Literal::Figurative(f) => vec![self.c.collating.figurative(*f)],
             Literal::All(inner) => match &**inner {
                 Literal::Alnum(_) | Literal::Hex(_) | Literal::National(_) | Literal::Figurative(_) => self.content_bytes(inner, pos)?,

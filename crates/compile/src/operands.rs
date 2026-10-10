@@ -220,7 +220,7 @@ fn nonnumeric_literal(l: &Literal) -> Option<&'static str> {
         Literal::Figurative(Figurative::HighValue) => "HIGH-VALUE",
         Literal::Figurative(Figurative::LowValue) => "LOW-VALUE",
         Literal::Figurative(Figurative::Quote) => "QUOTE",
-        Literal::Figurative(Figurative::Zero | Figurative::Null) | Literal::Number(_) => return None,
+        Literal::Figurative(Figurative::Zero | Figurative::Null) | Literal::Number(_) | Literal::Float(_) => return None,
         Literal::All(inner) => match &**inner {
             Literal::Figurative(_) => return nonnumeric_literal(inner),
             Literal::National(_) => "an ALL national literal",

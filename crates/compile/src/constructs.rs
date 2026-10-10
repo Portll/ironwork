@@ -449,7 +449,7 @@ impl Walk<'_> {
             Literal::National(_) => self.facts.usage(U::National),
             Literal::Dbcs(_) => self.facts.usage(U::Dbcs),
             Literal::All(inner) => self.literal(inner),
-            Literal::Alnum(_) | Literal::Hex(_) | Literal::Number(_) | Literal::Figurative(_) => {}
+            Literal::Alnum(_) | Literal::Hex(_) | Literal::Number(_) | Literal::Float(_) | Literal::Figurative(_) => {}
         }
     }
 

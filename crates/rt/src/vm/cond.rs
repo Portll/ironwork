@@ -236,7 +236,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             Comparand::Operand(Operand::Const(c)) => match &self.p.consts[*c as usize] {
                 Const::Bytes(_) | Const::All(_) | Const::AllNational(_) | Const::Dbcs(_) | Const::Refused(_) => true,
                 Const::Figurative(f) => !matches!(f, Figurative::Zero | Figurative::Null),
-                Const::National(_) | Const::Number(_) => false,
+                Const::National(_) | Const::Number(_) | Const::Float(_) => false,
             },
             Comparand::Operand(Operand::Load(o)) => store::nonnumeric(self.loc(*o)?.kind),
             _ => false,

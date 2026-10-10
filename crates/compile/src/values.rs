@@ -9,6 +9,7 @@ use rt::files::Dds;
 use rt::loc;
 use rt::oo::ClassCode;
 use rt::storage::{Loc, Val, literal_fixed};
+use zarch::hfp::Precision;
 use rt::store;
 use rt::unit::{Clock, FoundClass, LoadError, LoadedProgram, Loader, RunUnit};
 use std::rc::Rc;
@@ -29,15 +30,16 @@ pub fn initialize<H, L: Loader<H>>(c: &Compiled, unit: &mut RunUnit<'_, H, L>, b
         for k in 0..occurrences {
             let offset = base + item.offset as usize + loc::occurrence_offset(&item.dims, k);
             let loc = Loc { offset, len: item.size as usize, kind, item: index };
-            let val = literal_value(facts.page, value, item.pos)?;
+            let val = literal_value(facts.page, value, c.options.arith.float_intermediate(), item.pos)?;
             store::assign(&facts, unit, loc, val, None, item.pos)?;
         }
     }
     Ok(())
 }
 
-/// A literal's value, its text in the program's code page.
-pub fn literal_value(page: &CodePage, lit: &Literal, pos: Pos) -> R<Val> {
+/// A literal's value, its text in the program's code page; a floating-point literal's in
+/// hexadecimal floating point of `float` precision (assumption C502).
+pub fn literal_value(page: &CodePage, lit: &Literal, float: Precision, pos: Pos) -> R<Val> {
     Ok(match lit {
         Literal::Alnum(s) => Val::Bytes(page.encode(s).map_err(|e| Abend::ironwork(e.to_string(), pos))?),
         Literal::Hex(b) => Val::Bytes(b.clone()),
@@ -45,7 +47,11 @@ pub fn literal_value(page: &CodePage, lit: &Literal, pos: Pos) -> R<Val> {
         Literal::Dbcs(s) => Val::Dbcs(store::dbcs_literal(page, s).map_err(|m| Abend::ironwork(m, pos))?),
         Literal::Number(t) => Val::Num(literal_fixed(t).ok_or_else(|| Abend::ironwork(format!("the literal {t} has more than 31 digits"), pos))?),
         Literal::Figurative(f) => Val::Fig(*f),
-        Literal::All(inner) => match literal_value(page, inner, pos)? {
+        Literal::Float(written) => {
+            let fixed = syntax::parser::float_fixed(written).as_deref().and_then(literal_fixed).ok_or_else(|| Abend::ironwork(format!("the literal {written} has more than 31 digits in fixed point"), pos))?;
+            Val::Float(numeric::float::from_fixed(fixed, float, Default::default()).map_err(|c| Abend::check(c, pos))?)
+        }
+        Literal::All(inner) => match literal_value(page, inner, float, pos)? {
             Val::Bytes(b) | Val::Dbcs(b) => Val::All(b),
             Val::National(n) => Val::AllNational(n),
             Val::Fig(f) => Val::Fig(f),

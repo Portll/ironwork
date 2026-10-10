@@ -363,7 +363,9 @@ pub enum Operand {
 /// national literal, its UTF-16 units repeated to the length of what it is moved to or compared
 /// with. `Refused` is an alphanumeric or DBCS literal, or ALL one, the code page cannot encode,
 /// whose reading abends. `Dbcs` is a DBCS literal's bytes in the code page's DBCS component.
-pub enum Const { Bytes(Vec<u8>), National(Vec<u8>), Number(Fixed), Figurative(Figurative), All(Vec<u8>), Refused(AbendId), AllNational(Vec<u8>), Dbcs(Vec<u8>) }
+/// `Float` is a floating-point literal's value in hexadecimal floating point, 8 bytes, or 16 under
+/// ARITH(EXTEND) (C502).
+pub enum Const { Bytes(Vec<u8>), National(Vec<u8>), Number(Fixed), Figurative(Figurative), All(Vec<u8>), Refused(AbendId), AllNational(Vec<u8>), Dbcs(Vec<u8>), Float(Vec<u8>) }
 
 /// A subscript, bound, TIMES count or exponent, as `integer()` gives it (machine.rs:613-619).
 /// `Fixed` locates each place of `prepass`, then evaluates `expr` with `dmax` (§7.5).
