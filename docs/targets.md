@@ -44,12 +44,12 @@ gnucobol`, or under `--compliance extended`, `relaxed` or `loose`.
 | C491, CALL ... RETURNING of a program with no RETURNING phrase | the item kept as it was | the item takes the called program's RETURN-CODE | yes |
 | RETURN-CODE after a CALL with RETURNING | kept as it was (Language Reference, CALL) | the called program's | yes, but after a program whose header says RETURNING OMITTED, where cobc keeps it |
 | The RETURN-CODE special register's size | `S9(4) BINARY` | a fullword | not yet |
-| DISPLAY of a zoned item holding other characters than digits | the bytes | each rewritten as 0 | not yet |
+| DISPLAY of a zoned item holding other characters than digits | the bytes | under `gnucobol` a sign and the decimal point among the characters, each after the point shown as 0; under `gnucobol-ibm-strict` the sign after them, a space shown as 0 | yes |
 | A binary item larger than its PICTURE | cut under TRUNC(STD) | kept, as TRUNC(BIN); give `CBL TRUNC(BIN)` | by card |
 | ACCEPT into an item longer than a line (C261) | the next records fill it | one line, the rest spaces | yes |
 | ACCEPT into a numeric item | the characters as they come | the line moved as an alphanumeric MOVE moves it | yes |
 | MOVE of an alphanumeric item to a numeric one (C240) | an unsigned integer, each character's low half | one sign and the digits aligned on the decimal point; another character before the receiver is full gives zero | yes |
-| MOVE of a zoned item holding other characters than digits to a zoned one (C260) | each digit's low half, zone F | each digit's byte copied, aligned on the decimal point | yes |
+| MOVE of a zoned item holding other characters than digits to a zoned one (C260) | each digit's low half, zone F | each byte copied, aligned on the decimal point, a space as 0 and the sign byte read as a comparison reads it | yes |
 | A receiving group holding its own OCCURS DEPENDING ON object | its maximum length | the object's current value | not yet |
 | `ADD X TO X Y`, and SUBTRACT and MULTIPLY with one sending item | the sending item read once for every receiver | read again for each receiver, after the one before is stored; two or more sending operands summed once, as IBM sums them | yes |
 | A signed zoned item compared with an alphanumeric operand (C221) | the sign byte's zone made F under ZWB, so a space reads as 0 | a sign removed from a digit; a space kept; another character read as 0 | yes |

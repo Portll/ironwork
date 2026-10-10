@@ -709,7 +709,8 @@ pub fn move_sender(facts: &dyn ProgramFacts, mem: &[u8], src: Loc, dest: Loc, po
 }
 
 /// Whether a zoned sender with no separate sign, moved to a zoned receiver with none, holds a byte
-/// that is no digit character outside its sign position: cobc, which reads characters, copies it.
+/// that is no digit character, or in its sign position no overpunched digit: cobc, which reads
+/// characters, copies it.
 pub fn holds_characters(src: Loc, dest: Loc, b: &[u8]) -> bool {
     let in_place = |kind: Kind| matches!(kind, Kind::Zoned { sign: None | Some(SignClause { separate: false, .. }), .. });
     let Kind::Zoned { signed, sign, .. } = src.kind else { return false };
@@ -717,7 +718,7 @@ pub fn holds_characters(src: Loc, dest: Loc, b: &[u8]) -> bool {
         return false;
     }
     let sign_at = if matches!(sign, Some(SignClause { position: SignPosition::Leading, .. })) { 0 } else { b.len() - 1 };
-    b.iter().enumerate().any(|(i, &x)| (x >> 4 != 0x0F || x & 0x0F > 9) && !(signed && i == sign_at))
+    b.iter().enumerate().any(|(i, &x)| if signed && i == sign_at { x >> 4 < 0xA || x & 0x0F > 9 } else { x >> 4 != 0x0F || x & 0x0F > 9 })
 }
 
 /// A zoned or packed item's digits as half-bytes, most significant first, and its sign half-byte
@@ -745,7 +746,9 @@ fn digit_halves(kind: Kind, b: &[u8]) -> (Vec<u8>, Option<u8>) {
 /// receiver as PACK and UNPK move it: each receiver digit takes the sender's digit of the same
 /// power of ten, zero where there is none, and the data exception comes where the receiver is next
 /// read as a number (C260). Compiled for GnuCOBOL, a zoned receiver with no separate sign takes the
-/// digit bytes of a zoned sender with none as stored, '0' where there is none, as cobc copies them.
+/// bytes of a zoned sender with none as cobc moves them (cob_move_display_to_display, libcob/move.c):
+/// the sign byte read as [`cobc_sign_byte`] reads it, '0' for a space and where there is no byte,
+/// any other byte as stored, and a negative sign overpunched on a digit.
 fn carry_digits<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, dest: Loc, src: Loc, sender: &[u8], pos: Pos) -> R<()> {
     if packed_copy(facts, src, dest) {
         unit.write(dest.offset, sender);
@@ -757,7 +760,22 @@ fn carry_digits<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_
         let (m, n) = (sender.len() as i64, dest.len as i64);
         let shift = m - n + power(src) - power(dest);
         let zero = facts.page().encode_char('0').unwrap_or(0xF0);
-        let copied: Vec<u8> = (0..n).map(|j| usize::try_from(j + shift).ok().and_then(|i| sender.get(i)).copied().unwrap_or(zero)).collect();
+        let sign_at = |kind: Kind, len: usize| if matches!(kind, Kind::Zoned { sign: Some(SignClause { position: SignPosition::Leading, .. }), .. }) { 0 } else { len - 1 };
+        let mut sender = sender.to_vec();
+        let mut negative = false;
+        if matches!(src.kind, Kind::Zoned { signed: true, .. }) && !sender.is_empty() {
+            let at = sign_at(src.kind, sender.len());
+            (sender[at], negative) = cobc_sign_byte(sender[at]);
+        }
+        let mut copied: Vec<u8> = (0..n)
+            .map(|j| usize::try_from(j + shift).ok().and_then(|i| sender.get(i)).copied().filter(|&b| b != ebcdic::SPACE && b != 0).unwrap_or(zero))
+            .collect();
+        if negative && matches!(dest.kind, Kind::Zoned { signed: true, .. }) && !copied.is_empty() {
+            let at = sign_at(dest.kind, copied.len());
+            if (0xF0..=0xF9).contains(&copied[at]) {
+                copied[at] = copied[at] & 0x0F | 0xD0;
+            }
+        }
         unit.write(dest.offset, &copied);
         return Ok(());
     }
@@ -1172,17 +1190,24 @@ pub fn compared_zoned_bytes(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc) -> O
         _ if !signed => {}
         _ if facts.options().emulates_cobc() => {
             let b = if leading { image.first_mut()? } else { image.last_mut()? };
-            *b = match *b {
-                ebcdic::SPACE => ebcdic::SPACE,
-                d if d >> 4 >= 0xA && d & 0x0F <= 9 => d | 0xF0,
-                _ => 0xF0,
-            };
+            *b = cobc_sign_byte(*b).0;
         }
         _ if !facts.options().zwb => {}
         _ if leading => image[0] |= 0xF0,
         _ => *image.last_mut()? |= 0xF0,
     }
     Some(image)
+}
+
+/// A zoned item's sign byte as libcob reads it (cob_real_get_sign, libcob/common.c): a digit or a
+/// space as it stands, an overpunched digit as the digit, any other character as 0; and whether
+/// the sign is negative.
+pub fn cobc_sign_byte(b: u8) -> (u8, bool) {
+    match b {
+        0xF0..=0xF9 | ebcdic::SPACE => (b, false),
+        _ if b >> 4 >= 0xA && b & 0x0F <= 9 => (b | 0xF0, matches!(b >> 4, 0xB | 0xD)),
+        _ => (0xF0, false),
+    }
 }
 
 /// `image`, from [`compared_zoned_bytes`], compared as alphanumeric with `other`, whose own bytes

@@ -9,7 +9,7 @@ use crate::vocab::{Pos, SignClause, SignPosition};
 use numeric::{Dialect, DispSign, Native, Switched};
 use std::io::Write;
 use zarch::decimal;
-use zarch::ebcdic::CodePage;
+use zarch::ebcdic::{self, CodePage};
 use zarch::hfp::{Hfp, Precision};
 
 type R<T> = Result<T, Abend>;
@@ -60,19 +60,7 @@ pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos, upon_cons
             };
             facts.page().decode(&if signed && separate { sign_first(f.negative, shown) } else { shown })
         }
-        Kind::Zoned { signed: true, sign, .. } if dispsign == DispSign::CobcIbmStrict && !sign.is_some_and(|s| s.separate) => {
-            let mut shown = store::bytes(mem, loc).to_vec();
-            let leading = sign.is_some_and(|s| s.position == SignPosition::Leading);
-            let at = if leading { 0 } else { shown.len() - 1 };
-            let mark = if matches!(shown[at] >> 4, 0xB | 0xD) { 0x60 } else { 0x4E };
-            shown[at] |= 0xF0;
-            if leading {
-                shown.insert(0, mark);
-            } else {
-                shown.push(mark);
-            }
-            facts.page().decode(&shown)
-        }
+        Kind::Zoned { signed, sign, .. } if dispsign == DispSign::CobcIbmStrict => facts.page().decode(&cobc_ibm_strict_zoned(store::bytes(mem, loc), signed, sign)),
         Kind::Zoned { signed: true, sign, .. } if separate && !sign.is_some_and(|s| s.separate) => {
             let mut shown = store::bytes(mem, loc).to_vec();
             let at = if sign == Some(SignClause { position: SignPosition::Leading, separate: false }) { 0 } else { shown.len() - 1 };
@@ -88,9 +76,46 @@ pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos, upon_cons
     })
 }
 
+/// cobc -std=ibm-strict's DISPLAY of a zoned item, which moves it to a copy with a separate sign
+/// (display_numeric, libcob/termio.c): its bytes as cob_move_display_to_display moves them, the sign
+/// byte read as [`store::cobc_sign_byte`] reads it and a space as 0, then the sign, before them
+/// under SIGN LEADING and after them otherwise.
+fn cobc_ibm_strict_zoned(b: &[u8], signed: bool, sign: Option<SignClause>) -> Vec<u8> {
+    let leading = sign.is_some_and(|s| s.position == SignPosition::Leading);
+    let (mut shown, negative) = match sign {
+        Some(SignClause { separate: true, .. }) if leading => (b[1..].to_vec(), b[0] == 0x60),
+        Some(SignClause { separate: true, .. }) => (b[..b.len() - 1].to_vec(), b[b.len() - 1] == 0x60),
+        _ if signed => {
+            let mut body = b.to_vec();
+            let at = if leading { 0 } else { body.len() - 1 };
+            let negative;
+            (body[at], negative) = store::cobc_sign_byte(body[at]);
+            (body, negative)
+        }
+        _ => (b.to_vec(), false),
+    };
+    for x in &mut shown {
+        if *x == ebcdic::SPACE || *x == 0 {
+            *x = 0xF0;
+        }
+    }
+    if signed {
+        let mark = if negative { 0x60 } else { 0x4E };
+        if leading {
+            shown.insert(0, mark);
+        } else {
+            shown.push(mark);
+        }
+    }
+    shown
+}
+
 /// cobc's default dialect's DISPLAY of a zoned, packed or binary item: a sign first, or where a
 /// separate one is declared, the digits with the program's decimal point at the item's scale, and
-/// PICTURE P positions as zeros. A zoned item holding a byte other than a digit shows its bytes.
+/// PICTURE P positions as zeros, as cobc moves it to a numeric-edited copy (pretty_display_numeric,
+/// libcob/termio.c). A zoned item's characters other than digits are shown as they are before the
+/// point and as 0 after it, its sign byte read as [`store::cobc_sign_byte`] reads it; the sign is -
+/// only where a digit is not 0.
 fn cobc(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> R<String> {
     let Some((digits, scale)) = loc.kind.digits_scale() else { unreachable!() };
     let (signed, separate) = match loc.kind {
@@ -111,16 +136,13 @@ fn cobc(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> R<String> {
                 (true, None, Some(SignPosition::Leading)) => Some(0),
                 (true, None, _) => Some(body.len() - 1),
             };
-            let digit = |i: usize, b: u8| if Some(i) == overpunched { b | 0xF0 } else { b };
-            if body.iter().enumerate().any(|(i, &b)| !(0xF0..=0xF9).contains(&digit(i, b))) {
-                return Ok(facts.page().decode(bytes));
-            }
+            let shown: Vec<u8> = body.iter().enumerate().map(|(i, &b)| if Some(i) == overpunched { store::cobc_sign_byte(b).0 } else { b }).collect();
             let negative = match separate {
                 Some(SignPosition::Leading) => bytes[0] == 0x60,
                 Some(SignPosition::Trailing) => bytes[bytes.len() - 1] == 0x60,
-                None => overpunched.is_some_and(|at| matches!(body[at] >> 4, 0xB | 0xD)),
+                None => overpunched.is_some_and(|at| store::cobc_sign_byte(body[at]).1),
             };
-            (negative, body.iter().enumerate().map(|(i, &b)| char::from(b'0' + (digit(i, b) & 0x0F))).collect::<String>())
+            (negative, facts.page().decode(&shown))
         }
         _ => {
             let Val::Num(f) = store::read_stored(facts, mem, loc, pos)? else { unreachable!() };
@@ -129,15 +151,17 @@ fn cobc(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> R<String> {
         }
     };
     let point = facts.decimal_point();
+    let decimal = |part: &str| part.chars().map(|c| if c.is_ascii_digit() || ",.+-/B".contains(c) { c } else { '0' }).collect::<String>();
     let shown = if scale > digits {
-        format!("{point}{}{number}", "0".repeat((scale - digits) as usize))
+        format!("{point}{}{}", "0".repeat((scale - digits) as usize), decimal(&number))
     } else if scale > 0 {
-        let (whole, fraction) = number.split_at((digits - scale) as usize);
-        format!("{whole}{point}{fraction}")
+        let at = number.char_indices().nth((digits - scale) as usize).map_or(number.len(), |(i, _)| i);
+        let (whole, fraction) = number.split_at(at);
+        format!("{whole}{point}{}", decimal(fraction))
     } else {
         format!("{number}{}", "0".repeat(store::scaling(facts, loc) as usize))
     };
-    let mark = if negative { '-' } else { '+' };
+    let mark = if negative && number.chars().any(|c| c != '0') { '-' } else { '+' };
     Ok(match (signed, separate) {
         (false, _) => shown,
         (true, Some(SignPosition::Trailing)) => format!("{shown}{mark}"),

@@ -317,3 +317,51 @@ fn a_failing_vsam_open_or_close_ends_the_run_for_a_gnucobol_target_and_returns_f
         }
     }
 }
+
+/// Zoned items holding characters other than digits, shown and moved; the sign position holds no
+/// letter, which ironwork's EBCDIC reads as an overpunched digit.
+const ZONED_SHOWN: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. ZONEDCH.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 U PIC 9(4).\n",
+    "       01 UG REDEFINES U PIC X(4).\n",
+    "       01 S PIC S9(4).\n",
+    "       01 SG REDEFINES S PIC X(4).\n",
+    "       01 L PIC S9(4) SIGN LEADING.\n",
+    "       01 LG REDEFINES L PIC X(4).\n",
+    "       01 D PIC S9(2)V99.\n",
+    "       01 DG REDEFINES D PIC X(4).\n",
+    "       01 E PIC S9(4) SIGN LEADING SEPARATE.\n",
+    "       01 EG REDEFINES E PIC X(5).\n",
+    "       01 T PIC S9(5).\n",
+    "       01 TG REDEFINES T PIC X(5).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE '1 #4' TO UG DISPLAY U\n",
+    "           MOVE '    ' TO UG DISPLAY U\n",
+    "           MOVE '#1*2' TO SG DISPLAY S\n",
+    "           MOVE '12#$' TO SG DISPLAY S\n",
+    "           MOVE '12# ' TO SG DISPLAY S\n",
+    "           MOVE ' 2#4' TO LG DISPLAY L\n",
+    "           MOVE '#2 0' TO DG DISPLAY D\n",
+    "           MOVE '-#1 2' TO EG DISPLAY E\n",
+    "           MOVE '1 #4' TO UG MOVE U TO T DISPLAY '[' TG ']'\n",
+    "           MOVE '12 $' TO SG MOVE S TO T DISPLAY '[' TG ']'\n",
+    "           MOVE -5 TO S MOVE '1 ' TO SG(1:2) MOVE S TO T\n",
+    "           DISPLAY '[' TG(1:4) ']' IF T < 0 DISPLAY 'NEGATIVE' END-IF\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn a_gnucobol_target_shows_and_moves_a_zoned_items_characters_as_cobc_does() {
+    // cobc 3.2's output by default, then under -std=ibm-strict.
+    for (target, expected) in [(numeric::Target::Gnucobol, "1 #4\n    \n+#1*2\n+12#0\n+12# \n+ 2#4\n+#2.00\n-#1 2\n[010#4]\n[01200]\n[0100]\nNEGATIVE\n"), (numeric::Target::GnucobolIbmStrict, "10#4\n0000\n#1*2+\n12#0+\n12#0+\n+02#4\n#200+\n-#102\n[010#4]\n[01200]\n[0100]\nNEGATIVE\n")] {
+        let flags = target.flags();
+        let flags: Vec<&str> = flags.iter().map(String::as_str).collect();
+        for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+            let ran = Harness::source(ZONED_SHOWN).flags(&flags).run(executor);
+            assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{} {name}: {}", target.name(), ran.err);
+        }
+    }
+}
