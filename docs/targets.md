@@ -59,14 +59,15 @@ gnucobol`, or under `--compliance extended`, `relaxed` or `loose`.
 | The rest of a JSON or XML GENERATE receiver | kept | spaces, in the document's encoding | yes |
 | INSPECT of a national item (C230) | national characters | TALLYING FOR CHARACTERS in bytes, two to a character | yes |
 | An intermediate result of more than 30 digits (C1) | cut to 30 (31) | every digit kept, to 46 | yes |
-| MEAN, MEDIAN, NUMVAL and COMBINED-DATETIME | floating point, rounded | exact decimal, truncated | not yet |
+| The floating-point functions, MEAN, MEDIAN, NUMVAL, COMBINED-DATETIME, SQRT, LOG, PI and the rest, and a floating-point value stored in a fixed-point item (C111) | floating point, rounded into the receiver | decimal, to 32 significant digits, truncated unless ROUNDED; a fractional power stays floating point, where cobc takes a decimal base's power in decimal | yes |
 | MAX, MIN, RANGE, REM, SUM; INTEGER, INTEGER-PART, MOD of fixed-point arguments | IBM's places | cobc's fields | not yet |
 | A zero divisor outside ON SIZE ERROR | S0CB, S0C9 or S0CF | the receiver kept as it was, and the run goes on | yes |
 | Invalid decimal data in arithmetic, comparisons, MOVE and DISPLAY | S0C7 | read as libcob reads it: a zoned character worth the low half of its ASCII code, a packed digit its half-byte's value, HIGH-VALUE and LOW-VALUE as plus and minus 10 to the item's size; the run goes on | yes |
 | An OPEN or CLOSE of an indexed or relative file that fails, with no FILE STATUS and no declarative (C451) | control returns; the next statement on the file is a logic error | the run ends at the OPEN or CLOSE, U4038 with IGZ0035S | yes |
 | Zero to a negative power, with or without ON SIZE ERROR (C334) | a size error; without the phrase U4038 with IGZ0050S | zero, and the run goes on | yes |
 | A function argument outside what it takes, such as `CHAR(0)` (C452) | U4038 with LE's message | CHAR the sequence's first character, a function of characters none, any other zero, RANDOM the seed's magnitude; the run goes on | yes |
-| C16, C54, C99, C112, C181, C333, C391 ([dialect.md](dialect.md) §5.5) | ironwork's chosen result | cobc's | not yet |
+| C112, an argument outside a math function's domain, MOD and REM by zero | U4038 with Language Environment's message, or the divide program check | 0, with no size error; SIN, COS and TAN of any argument | yes |
+| C16, C54, C99, C181, C333 ([dialect.md](dialect.md) §5.5) | ironwork's chosen result | cobc's | not emulated: §5.5 gives each one's reason |
 
 "Not yet" rows give IBM's result under every target. Each is a task under ironwork-roadmap 29.3,
 taken cheapest first and checked against cobc 3.2; [dialect.md](dialect.md) §5 gives each one's

@@ -1292,8 +1292,9 @@ fn a_function_evaluates_its_arguments_then_any_again_as_an_integer_then_its_refe
     assert!(matches!((&f[1].args[..], &f[1].integer), ([lir::Argument::Value(Comparand::Expr { mode: Mode::Fixed, .. })], Some(IntExpr::Fixed { .. }))));
     assert_eq!(f[2].func, lir::Func::Max);
     assert_eq!(moves(&p)[2], MovePlan::Numeric { from: NumericFrom::Float, store: StorePlan::Zoned { digits: 3, scale: 0, signed: false, sign: None } });
+    // Under extended RANDOM leaves the expression in fixed point, as cobc computes in decimal.
     let compute = &p.plans.arith[0].steps[0];
-    assert_eq!(compute.mode, Mode::Float(numeric::Arith::Compat.float_intermediate()));
+    assert_eq!(compute.mode, Mode::Fixed);
     assert_eq!((f[5].side, f[5].arity), (Some(lir::TrimSide::Leading), None));
     let arity = f[6].arity.unwrap();
     assert_eq!((f[6].func, symbol(&p, p.abends[arity as usize].message)), (lir::Func::Reverse, "FUNCTION REVERSE takes 1..=1 arguments"));
@@ -1492,8 +1493,10 @@ fn each_function_s_result_reads_as_the_walker_s_value_does() {
     let f = &p.plans.function;
     let hex = f.iter().find(|f| f.func == lir::Func::HexOf).unwrap();
     assert!(matches!(&hex.args[..], [lir::Argument::Value(Comparand::Operand(LirOperand::Load(q)))] if symbol(&p, p.places[*q as usize].name) == "N"));
+    // Under extended SQRT leaves its expression in fixed point, as cobc computes in decimal; F is
+    // floating point.
     let steps: Vec<Mode> = p.plans.arith.iter().map(|a| a.steps[0].mode).collect();
-    assert_eq!(steps, [Mode::Float(numeric::Arith::Compat.float_intermediate()); 2]);
+    assert_eq!(steps, [Mode::Fixed, Mode::Float(numeric::Arith::Compat.float_intermediate())]);
 }
 
 #[test]

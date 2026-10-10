@@ -620,3 +620,82 @@ fn a_gnucobol_target_keeps_an_intermediate_past_31_digits_and_ibm_cuts_it() {
         }
     }
 }
+
+/// Floating-point functions, NUMVAL in a division, and a COMP-2 value moved to a fixed item.
+const FUNCTION_VALUES: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. FNVALUES.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 R PIC 9(3)V9(6).\n",
+    "       01 S PIC S9(3)V9(2).\n",
+    "       01 T PIC 9(9)V9(6).\n",
+    "       01 F COMP-2.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           COMPUTE R = FUNCTION MEAN(1 2 2) DISPLAY R\n",
+    "           COMPUTE R = FUNCTION MEDIAN(1 2 4 7) DISPLAY R\n",
+    "           COMPUTE S = FUNCTION MEAN(0.01 0.02) DISPLAY S\n",
+    "           COMPUTE R = FUNCTION NUMVAL('0.1') * 3 DISPLAY R\n",
+    "           COMPUTE R = 1 / 3 * FUNCTION NUMVAL('3') DISPLAY R\n",
+    "           COMPUTE T = FUNCTION COMBINED-DATETIME(146097 43200.5)\n",
+    "           DISPLAY T\n",
+    "           COMPUTE R = FUNCTION SQRT(2) DISPLAY R\n",
+    "           COMPUTE R = FUNCTION LOG(10) DISPLAY R\n",
+    "           COMPUTE R = FUNCTION PI DISPLAY R\n",
+    "           COMPUTE R = FUNCTION SIN(1) DISPLAY R\n",
+    "           COMPUTE R = FUNCTION STANDARD-DEVIATION(1 2 4) DISPLAY R\n",
+    "           COMPUTE R = FUNCTION ANNUITY(0.1 3) DISPLAY R\n",
+    "           COMPUTE R = 2 ** 0.5 DISPLAY R\n",
+    "           COMPUTE S ROUNDED = FUNCTION MEAN(1 1 2) DISPLAY S\n",
+    "           COMPUTE F = 2 / 3 MOVE F TO R DISPLAY R\n",
+    "           STOP RUN.\n",
+);
+
+/// Arguments outside a math function's domain, and MOD and REM by zero.
+const FUNCTION_DOMAIN: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. FNDOMAIN.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 R PIC S9(3)V9(3).\n",
+    "       01 Z PIC 9 VALUE 0.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           COMPUTE R = FUNCTION SQRT(-1) DISPLAY R\n",
+    "           COMPUTE R = FUNCTION LOG(0) DISPLAY R\n",
+    "           COMPUTE R = FUNCTION ACOS(2) DISPLAY R\n",
+    "           MOVE 9 TO R\n",
+    "           COMPUTE R = FUNCTION MOD(7 Z)\n",
+    "               ON SIZE ERROR DISPLAY 'SIZE ERROR'\n",
+    "               NOT ON SIZE ERROR DISPLAY 'NO SIZE ERROR'\n",
+    "           END-COMPUTE\n",
+    "           DISPLAY R\n",
+    "           COMPUTE R = FUNCTION REM(7 Z) DISPLAY R\n",
+    "           COMPUTE R = FUNCTION SIN(4000000000000000) DISPLAY R\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn a_gnucobol_target_computes_floating_point_functions_in_decimal_and_truncates_them() {
+    // cobc 3.2's output by default, then under -std=ibm-strict; IBM computes the functions in
+    // floating point and rounds them into the receivers (C111).
+    let flags = |target: numeric::Target| target.flags().to_vec();
+    for (flags, expected) in [(flags(numeric::Target::Gnucobol), "001.666666\n003.000000\n+000.01\n000.300000\n000.999999\n000146097.432005\n001.414213\n002.302585\n003.141592\n000.841470\n001.247219\n000.402114\n001.414213\n+001.33\n000.666666\n"), (flags(numeric::Target::GnucobolIbmStrict), "001666666\n003000000\n00001+\n000300000\n000999999\n000146097432005\n001414213\n002302585\n003141592\n000841470\n001247219\n000402114\n001414213\n00133+\n000666666\n"), (Vec::new(), "001666667\n003000000\n0000A\n000300000\n001000000\n000146097432005\n001414214\n002302585\n003141593\n000841471\n001247219\n000402115\n001414214\n0013C\n000666667\n")] {
+        let flags: Vec<&str> = flags.iter().map(String::as_str).collect();
+        for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+            let ran = Harness::source(FUNCTION_VALUES).flags(&flags).run(executor);
+            assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{flags:?} {name}: {}", ran.err);
+        }
+    }
+}
+
+#[test]
+fn a_gnucobol_target_gives_zero_for_an_argument_outside_a_math_functions_domain_and_ibm_ends_the_run() {
+    // cobc 3.2's output (C112).
+    for (name, vm) in [("interpreter", false), ("VM", true)] {
+        let executor = || if vm { Executor::Vm } else { Executor::Interpreter };
+        let cobc = Harness::source(FUNCTION_DOMAIN).flags(EXTENDED).run(executor());
+        assert_eq!((cobc.out.as_str(), cobc.ending.as_ref().ok()), ("+000.000\n+000.000\n+000.000\nNO SIZE ERROR\n+000.000\n+000.000\n+000.833\n", Some(&Ending::StopRun)), "{name}: {}", cobc.err);
+        let ibm = Harness::source(FUNCTION_DOMAIN).run(executor());
+        assert!(ibm.ending.as_ref().is_err_and(|a| a.message.starts_with("CEE2010E")), "{name}: {:?}", ibm.ending);
+    }
+}

@@ -129,19 +129,20 @@ pub fn refmod(value: Val, pos: Pos, bounds: impl FnOnce() -> R<(i64, Option<i64>
 }
 
 /// The conditions Language Environment signals for an argument outside what a function takes
-/// (assumption C452).
+/// (assumption C452), and its math services for one outside a function's domain (C112).
 const ARGUMENT_CONDITIONS: &[&str] = &[
     "IGZ0029S", "IGZ0030S", "IGZ0100S", "IGZ0159S", "IGZ0160S", "IGZ0161S", "IGZ0162S", "IGZ0215S", "IGZ0216S", "IGZ0217S", "IGZ0218S", "IGZ0348S", "IGZ0372S",
-    "IGZ0373S", "IGZ0374S",
+    "IGZ0373S", "IGZ0374S", "CEE2010E", "CEE2012E", "CEE2016E",
 ];
 
 /// A function of its arguments' values. `side` is TRIM's LEADING or TRAILING. Compiled for
 /// GnuCOBOL, an argument outside what the function takes gives what cobc gives instead of the
-/// condition: no characters, CHAR X'00', the native sequence's first character, and zero (C452).
+/// condition: no characters, CHAR X'00', the native sequence's first character, and zero (C452),
+/// as does an argument outside a math function's domain and a MOD or REM by zero (C112).
 pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args: &mut Vec<Val>, pos: Pos) -> R<Val> {
     let facts = x.facts();
     match checked(x, name, side, args, pos) {
-        Err(a) if facts.options().emulates_cobc() && ARGUMENT_CONDITIONS.iter().any(|id| a.message.starts_with(id)) => Ok(match name {
+        Err(a) if facts.options().emulates_cobc() && (ARGUMENT_CONDITIONS.iter().any(|id| a.message.starts_with(id)) || matches!(name, "MOD" | "REM") && a.divides_by_zero()) => Ok(match name {
             "CHAR" => Val::Bytes(vec![0]),
             _ if super::CHARACTER_VALUED.contains(&name) => Val::Bytes(Vec::new()),
             _ => integer(0, 1),
@@ -153,6 +154,7 @@ pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args
 fn checked(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args: &mut Vec<Val>, pos: Pos) -> R<Val> {
     let facts = x.facts();
     let page = facts.page();
+    let cobc = facts.options().emulates_cobc();
     let arity = |n: RangeInclusive<usize>| {
         if n.contains(&args.len()) { Ok(()) } else { Err(Abend::ironwork(format!("FUNCTION {name} takes {n:?} arguments"), pos)) }
     };
@@ -208,7 +210,7 @@ fn checked(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args: &mu
             let value = numval::parse(&text, form, digits, facts.decimal_point() == ',').map(|n| n.to_real()).unwrap_or(Real::ZERO);
             // Long floating point under ARITH(COMPAT), extended under ARITH(EXTEND) (Programming
             // Guide SC27-8714-03, p. 115).
-            float_result(value, arith.float_intermediate(), pos)?
+            float_result(value, arith.float_intermediate(), cobc, pos)?
         }
         "TRIM" => {
             arity(1..=1)?;
@@ -410,8 +412,36 @@ fn reals(args: &[Val], p: Precision, name: &str, pos: Pos) -> R<Vec<Real>> {
     args.iter().map(|v| real(v, p, name, pos)).collect()
 }
 
-fn float_result(r: Real, p: Precision, pos: Pos) -> R<Val> {
+/// A floating-point function's value: floating point of `p`; for cobc, which computes it in
+/// decimal, [`cobc_value`].
+fn float_result(r: Real, p: Precision, cobc: bool, pos: Pos) -> R<Val> {
+    if cobc {
+        return Ok(cobc_value(r));
+    }
     Ok(Val::Float(r.to_hfp(p).map_err(|c| Abend::check(c, pos))?))
+}
+
+/// `r` as a decimal of 32 significant digits, rounded half away from zero: close enough to cobc's
+/// decimal value that truncating either into any receiver gives the same digits, and a value an
+/// exact decimal gives, such as a MEAN of 0.15, exactly.
+fn cobc_value(r: Real) -> Val {
+    let (significand, exponent) = r.parts();
+    if significand == 0 {
+        return integer(0, 1);
+    }
+    let integer_digits = r.abs().to_f64().log10().floor() as i64 + 1;
+    let dec = (32 - integer_digits).clamp(0, 38) as u32;
+    let scaled = U256::widening_mul(significand, U256::pow10(dec).to_u128().unwrap_or(1));
+    let magnitude = match exponent {
+        e if e >= 0 => scaled.checked_mul(U256::from_u128(1) << e.unsigned_abs().min(127)).unwrap_or(scaled),
+        e if e <= -256 => U256::ZERO,
+        e => {
+            let shift = e.unsigned_abs();
+            (scaled + (U256::from_u128(1) << (shift - 1))) >> shift
+        }
+    };
+    let int = (magnitude.bits() as f64 * std::f64::consts::LOG10_2).ceil() as u32 + 1;
+    Val::Num(crate::fixed::fixed(r.is_negative(), magnitude, Places::new(int.saturating_sub(dec).max(1), dec)))
 }
 
 /// An integer argument's value, any fraction truncated.
@@ -557,6 +587,7 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
     let facts: &dyn ProgramFacts = &facts;
     let arith = facts.options().arith;
     let intdate = facts.options().intdate;
+    let cobc = facts.options().emulates_cobc();
     let p = arith.float_intermediate();
     let arity = |n: RangeInclusive<usize>, args: &[Val]| {
         if n.contains(&args.len()) { Ok(()) } else { Err(Abend::ironwork(format!("FUNCTION {name} takes {n:?} arguments, not {}", args.len()), pos)) }
@@ -567,7 +598,8 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
         "SQRT" | "EXP" | "EXP10" | "LOG" | "LOG10" | "SIN" | "COS" | "TAN" | "ASIN" | "ACOS" | "ATAN" => {
             arity(1..=1, args)?;
             let x = real(&args[0], p, name, pos)?;
-            if let Some(abend) = math_condition(name, x, p, pos) {
+            // cobc computes SIN, COS and TAN of any argument.
+            if let Some(abend) = math_condition(name, x, p, pos).filter(|_| !(facts.options().emulates_cobc() && matches!(name, "SIN" | "COS" | "TAN"))) {
                 return Err(abend);
             }
             let value = match name {
@@ -583,11 +615,11 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
                 "ACOS" => math::acos(x),
                 _ => Some(math::atan(x)),
             };
-            float_result(value.ok_or_else(|| outside(x, "the argument is beyond the range ironwork for COBOL reduces"))?, p, pos)
+            float_result(value.ok_or_else(|| outside(x, "the argument is beyond the range ironwork for COBOL reduces"))?, p, cobc, pos)
         }
         "E" | "PI" => {
             arity(0..=0, args)?;
-            float_result(if name == "E" { math::e() } else { math::pi() }, p, pos)
+            float_result(if name == "E" { math::e() } else { math::pi() }, p, cobc, pos)
         }
         "ANNUITY" => {
             arity(2..=2, args)?;
@@ -597,7 +629,7 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
                 return Err(out_of_range("IGZ0029S", "Argument-1 for function ANNUITY was less than zero.".into(), rate.to_f64(), pos));
             }
             let value = u128::try_from(periods).ok().and_then(|n| math::annuity(rate, n));
-            float_result(value.ok_or_else(|| out_of_range("IGZ0030S", "Argument-2 for function ANNUITY was not a positive integer.".into(), periods, pos))?, p, pos)
+            float_result(value.ok_or_else(|| out_of_range("IGZ0030S", "Argument-2 for function ANNUITY was not a positive integer.".into(), periods, pos))?, p, cobc, pos)
         }
         "PRESENT-VALUE" => {
             if args.len() < 2 {
@@ -605,7 +637,7 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             }
             let values = reals(args, p, name, pos)?;
             let value = math::present_value(values[0], &values[1..]).ok_or_else(|| out_of_range("IGZ0100S", "Argument-1 for function PRESENT-VALUE was less than or equal to -1.".into(), values[0].to_f64(), pos))?;
-            float_result(value, p, pos)
+            float_result(value, p, cobc, pos)
         }
         "MEAN" | "MEDIAN" | "MIDRANGE" | "VARIANCE" | "STANDARD-DEVIATION" => {
             series(args)?;
@@ -617,7 +649,7 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
                 "VARIANCE" => math::variance(&values),
                 _ => math::variance(&values).map(Real::sqrt),
             };
-            float_result(value.expect("a series with at least one value"), p, pos)
+            float_result(value.expect("a series with at least one value"), p, cobc, pos)
         }
         "MIN" | "MAX" | "ORD-MIN" | "ORD-MAX" | "RANGE" => {
             series(args)?;
@@ -635,11 +667,11 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
                         }
                         (_, hi, lo) => {
                             let (hi, lo) = (real(hi, p, name, pos)?, real(lo, p, name, pos)?);
-                            float_result(hi.sub(lo), p, pos)
+                            float_result(hi.sub(lo), p, cobc, pos)
                         }
                     }
                 }
-                _ if floating => float_result(real(&args[best], p, name, pos)?, p, pos),
+                _ if floating => float_result(real(&args[best], p, name, pos)?, p, cobc, pos),
                 _ => Ok(match values_places(args, name, arith) {
                     Some(widest) => Val::Num(widened(&args[best], widest)),
                     None => args.swap_remove(best),
@@ -650,7 +682,7 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             series(args)?;
             if args.iter().any(|v| matches!(v, Val::Float(_))) {
                 let values = reals(args, p, name, pos)?;
-                return float_result(values.iter().fold(Real::ZERO, |s, v| s.add(*v)), p, pos);
+                return float_result(values.iter().fold(Real::ZERO, |s, v| s.add(*v)), p, cobc, pos);
             }
             let mut fixed = Vec::with_capacity(args.len());
             for v in args.iter() {
@@ -731,7 +763,7 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             let (seconds, hundredths) = x.now();
             let c = civil(seconds);
             let of_day = i128::from((c.hour * 3600 + c.minute * 60 + c.second) * 100 + hundredths);
-            float_result(Real::from_i128(of_day).div(Real::from_u128(100)), p, pos)
+            float_result(Real::from_i128(of_day).div(Real::from_u128(100)), p, cobc, pos)
         }
         "NUMVAL-F" | "TEST-NUMVAL" | "TEST-NUMVAL-C" | "TEST-NUMVAL-F" => {
             arity(if name == "TEST-NUMVAL-C" { 1..=2 } else { 1..=1 }, args)?;
@@ -749,7 +781,7 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             let comma = facts.decimal_point() == ',';
             if name == "NUMVAL-F" {
                 let value = numval::parse(&text, form, digits, comma).map(|n| n.to_real()).unwrap_or(Real::ZERO);
-                return float_result(value, p, pos);
+                return float_result(value, p, cobc, pos);
             }
             Ok(integer(numval::test(&text, form, digits, comma) as i128, 9))
         }
@@ -846,7 +878,7 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
                     let (seconds, fraction, digits) = reading.seconds.unwrap_or_default();
                     let scale = 10u128.pow(u32::from(digits));
                     let value = Real::from_u128(u128::from(seconds) * scale + u128::from(fraction)).div(Real::from_u128(scale));
-                    float_result(value, p, pos)
+                    float_result(value, p, cobc, pos)
                 }
             }
         }
@@ -861,8 +893,12 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             if seconds.is_negative() || seconds.compare(Real::from_u128(86_400)) != Ordering::Less {
                 return Err(out_of_range("IGZ0373S", format!("Argument 2 for function {name} was less than 0 or greater than or equal to 86400."), seconds.to_f64(), pos));
             }
+            let combined = Real::from_u128(date as u128) + seconds / Real::from_u128(100_000);
+            if cobc {
+                return Ok(cobc_value(combined));
+            }
             // A long-precision result whatever ARITH says (Language Reference SC27-8713-03, p. 541).
-            let long = (Real::from_u128(date as u128) + seconds / Real::from_u128(100_000)).to_hfp(Precision::Long).map_err(|c| Abend::check(c, pos))?;
+            let long = combined.to_hfp(Precision::Long).map_err(|c| Abend::check(c, pos))?;
             Ok(Val::Float(if p.digits() > Precision::Long.digits() { long.lengthen(p) } else { long }))
         }
         "CONTENT-OF" => {

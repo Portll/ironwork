@@ -928,7 +928,8 @@ const GNUCOBOL_FLOATS: &str = concat!(
 fn float_short_and_float_long_are_comp_1_and_comp_2_shown_as_ibm_shows_them_on_both_executors() {
     let walked = Harness::source(GNUCOBOL_FLOATS).flags(EXTENDED).run(Executor::Interpreter);
     assert!(walked.ending.is_ok(), "{:?}\n{}", walked.ending, walked.err);
-    assert_eq!(walked.out, " .15000000E 01 -.99999993E-03\n .33333333333333333E 00  .00000000000000000E 00\n+12345.68\n");
+    // MOVE truncates a floating-point value into N as cobc 3.2 does.
+    assert_eq!(walked.out, " .15000000E 01 -.99999993E-03\n .33333333333333333E 00  .00000000000000000E 00\n+12345.67\n");
     let vm = Harness::source(GNUCOBOL_FLOATS).flags(EXTENDED).run(Executor::Vm);
     assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
     let warned = diagnostics_under(GNUCOBOL_FLOATS, numeric::Compliance::Extended);

@@ -318,7 +318,7 @@ pub fn store_value<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit
             Ok(false)
         }
         (_, Val::Float(h)) => {
-            let (f, overflow) = float::to_receiver(h, places(facts, loc));
+            let (f, overflow) = float_to_receiver(facts, h, places(facts, loc), rounded);
             if overflow && keep_on_size_error {
                 return Ok(true);
             }
@@ -327,6 +327,13 @@ pub fn store_value<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit
         (_, Val::Num(f)) => store_fixed_checked(facts, unit, loc, &f, rounded, keep_on_size_error, pos),
         _ => Err(Abend::ironwork("a non-numeric arithmetic result", pos)),
     }
+}
+
+/// A floating-point value as a receiver of `places` takes it, and whether its integer part
+/// overflowed: rounded (assumption C111); for cobc, which converts the value exactly, truncated
+/// unless ROUNDED.
+fn float_to_receiver(facts: &dyn ProgramFacts, h: Hfp, places: Places, rounded: bool) -> (Fixed, bool) {
+    if facts.options().emulates_cobc() { float::to_fixed(h, places, rounded) } else { float::to_receiver(h, places) }
 }
 
 pub fn store_fixed<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, loc: Loc, value: &Fixed, rounded: bool, pos: Pos) -> R<()> {
@@ -695,7 +702,7 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
                 }
             }
             Val::Float(h) => {
-                let (f, _) = float::to_receiver(h, places(facts, dest));
+                let (f, _) = float_to_receiver(facts, h, places(facts, dest), false);
                 store_fixed(facts, unit, dest, &f, false, pos)?;
             }
             Val::Fig(Figurative::Zero) => store_fixed(facts, unit, dest, &Fixed::new(0, Places::new(1, 0)), false, pos)?,

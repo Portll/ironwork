@@ -368,8 +368,9 @@ impl Lower<'_> {
                     return Ok(matches!(udf.result.kind, Kind::Float(_)));
                 }
                 let name = f.name.as_str();
+                // cobc computes these functions in decimal.
                 if rt::intrinsic::FLOATING_POINT.contains(&name) {
-                    return Ok(true);
+                    return Ok(!self.c.options.emulates_cobc());
                 }
                 if rt::intrinsic::MIXED.contains(&name) {
                     for a in &f.args {

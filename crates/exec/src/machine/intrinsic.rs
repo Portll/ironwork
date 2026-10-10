@@ -90,8 +90,9 @@ impl<'p> Machine<'p, '_, '_> {
         if let Some(udf) = self.user_function(&f.name) {
             return Ok(matches!(udf.result.kind, Kind::Float(_)));
         }
+        // cobc computes these functions in decimal.
         if intrinsic::FLOATING_POINT.contains(&f.name.as_str()) {
-            return Ok(true);
+            return Ok(!self.options.emulates_cobc());
         }
         if intrinsic::MIXED.contains(&f.name.as_str()) {
             for a in &f.args {
