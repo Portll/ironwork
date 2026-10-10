@@ -39,6 +39,11 @@ pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos, upon_cons
         {
             let Val::Num(f) = store::read_stored(facts, mem, loc, pos)? else { unreachable!() };
             let shown = match loc.kind {
+                // cobc's RETURN-CODE, the only COMP-X item at its offset, shows every digit past its nine.
+                Kind::Binary { native: Native::CompX, .. } if loc.offset == crate::unit::RETURN_CODE => {
+                    let m = f.magnitude.to_u128().unwrap_or(0);
+                    zoned_digits(m, (digits as usize).max(m.to_string().len()), decimal::UNSIGNED)
+                }
                 Kind::Binary { native: Native::CompX, .. } => zoned_digits(f.magnitude.div_rem(pow10(digits)).1.to_u128().unwrap_or(0), digits as usize, decimal::UNSIGNED),
                 Kind::Binary { .. } => zoned_digits(f.magnitude.to_u128().unwrap_or(0), whole_binary_digits(loc.len), decimal::UNSIGNED),
                 _ => zoned_digits(f.magnitude.div_rem(pow10(digits)).1.to_u128().unwrap_or(0), digits as usize, decimal::UNSIGNED),

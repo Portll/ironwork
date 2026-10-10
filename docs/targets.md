@@ -43,7 +43,7 @@ gnucobol`, or under `--compliance extended`, `relaxed` or `loose`.
 | C456, a main program that runs past its last statement | U4038 with IGZ0037S | the run ends as GOBACK ends it, return code RETURN-CODE | yes |
 | C491, CALL ... RETURNING of a program with no RETURNING phrase | the item kept as it was | the item takes the called program's RETURN-CODE | yes |
 | RETURN-CODE after a CALL with RETURNING | kept as it was (Language Reference, CALL) | the called program's | yes, but after a program whose header says RETURNING OMITTED, where cobc keeps it |
-| The RETURN-CODE special register's size | `S9(4) BINARY` | a fullword | not yet |
+| The RETURN-CODE special register's size | `S9(4) BINARY` | a fullword, shown in nine digits: `+000000007` | yes |
 | DISPLAY of a zoned item holding other characters than digits | the bytes | under `gnucobol` a sign and the decimal point among the characters, each after the point shown as 0; under `gnucobol-ibm-strict` the sign after them, a space shown as 0 | yes |
 | A binary item larger than its PICTURE | cut under TRUNC(STD) | kept, as TRUNC(BIN); give `CBL TRUNC(BIN)` | by card |
 | ACCEPT into an item longer than a line (C261) | the next records fill it | one line, the rest spaces | yes |

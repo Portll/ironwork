@@ -429,3 +429,38 @@ fn a_gnucobol_target_reads_invalid_decimal_data_as_cobc_does_and_ibm_ends_the_ru
         assert!(ibm.ending.as_ref().is_err_and(|a| a.message.starts_with("CEE3207S")), "{name}: {:?}", ibm.ending);
     }
 }
+
+/// RETURN-CODE given values its halfword and its fullword hold, and its length.
+const RETURN_CODE_SIZE: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. RCSIZE.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 N PIC S9(9) COMP-5.\n",
+    "       01 X PIC S9(12).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE 7 TO RETURN-CODE DISPLAY RETURN-CODE\n",
+    "           MOVE 70000 TO RETURN-CODE DISPLAY RETURN-CODE\n",
+    "           MOVE RETURN-CODE TO X DISPLAY X\n",
+    "           MOVE 1234567890 TO RETURN-CODE DISPLAY RETURN-CODE\n",
+    "           COMPUTE RETURN-CODE = -40000 DISPLAY RETURN-CODE\n",
+    "           MOVE LENGTH OF RETURN-CODE TO N DISPLAY N\n",
+    "           ADD 1 TO RETURN-CODE DISPLAY RETURN-CODE\n",
+    "           MOVE 259 TO RETURN-CODE\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn a_gnucobol_target_keeps_return_code_in_a_fullword_and_ibm_in_a_halfword() {
+    // cobc 3.2's output by default, then under -std=ibm-strict; IBM's halfword cuts each value
+    // to four digits.
+    let ibm_shown = "0007\n0000\n00000000000{\n7890\n0000\n0000000002\n0001\n";
+    let flags = |target: numeric::Target| target.flags().to_vec();
+    for (flags, expected) in [(flags(numeric::Target::Gnucobol), "+000000007\n+000070000\n+000000070000\n+1234567890\n-000040000\n+0000000004\n-000039999\n"), (flags(numeric::Target::GnucobolIbmStrict), "+000000007\n+000070000\n000000070000+\n+1234567890\n-000040000\n+0000000004\n-000039999\n"), (Vec::new(), ibm_shown)] {
+        let flags: Vec<&str> = flags.iter().map(String::as_str).collect();
+        for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+            let ran = Harness::source(RETURN_CODE_SIZE).flags(&flags).run(executor);
+            assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok(), ran.return_code), (expected, Some(&Ending::StopRun), 259), "{flags:?} {name}: {}", ran.err);
+        }
+    }
+}

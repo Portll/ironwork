@@ -643,7 +643,8 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             return Ok(loc);
         }
         if r.name == "RETURN-CODE" && r.qualifiers.is_empty() && !self.layout.items.iter().any(|i| i.name.as_deref() == Some("RETURN-CODE")) {
-            let loc = Loc { offset: RETURN_CODE, len: 2, kind: Kind::Binary { digits: 4, scale: 0, signed: true, native: numeric::Native::No }, item: usize::MAX };
+            let (offset, len, kind) = rt::unit::return_code_place(&self.options);
+            let loc = Loc { offset: RETURN_CODE + offset, len, kind, item: usize::MAX };
             self.unit.taint_read(loc);
             return Ok(loc);
         }
@@ -1096,7 +1097,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 let dest = self.locate(target)?;
                 self.assign(dest, Val::Num(Fixed::new(i128::from(status), Places::new(9, 0))), None, c.pos)?;
             }
-            None => self.unit.write(RETURN_CODE, &status.to_be_bytes()),
+            None => self.unit.set_return_code(i32::from(status), self.options.emulates_cobc()),
         }
         Ok(Some(match &c.not_on_exception {
             Some(body) => self.run_block(body)?,
@@ -1168,7 +1169,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         }
         self.parmcheck_test(c, &addresses, |unit| unit.programs[index].name.clone())?;
         // A program with no RETURNING phrase gives its RETURN-CODE, compiled for GnuCOBOL (C491).
-        let returned = returned.or_else(|| self.options.emulates_cobc().then(|| self.unit.return_code_value()));
+        let returned = returned.or_else(|| self.options.emulates_cobc().then(|| self.unit.return_code_value(true)));
         if let Some(kept) = kept {
             self.unit.restore_return_code(kept);
         }

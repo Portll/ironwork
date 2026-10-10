@@ -92,7 +92,7 @@ fn a_program_returning_omitted_returns_its_return_code_and_no_item() {
     let walked = Harness::source(RETURNING_OMITTED).flags(EXTENDED).run(Executor::Interpreter);
     // The item takes the RETURN-CODE, as cobc 3.2 gives it; cobc keeps its caller's RETURN-CODE
     // after a program RETURNING OMITTED, where ironwork gives it the called program's (C491).
-    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("+0001\n0002 +0002\n", Some(&Ending::Goback)), "{}", walked.err);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("+000000001\n0002 +000000002\n", Some(&Ending::Goback)), "{}", walked.err);
     let vm = Harness::source(RETURNING_OMITTED).flags(EXTENDED).run(Executor::Vm);
     assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
     let parsed = syntax::parse_all_with(RETURNING_OMITTED, &syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended)).unwrap();

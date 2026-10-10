@@ -15,7 +15,7 @@ use crate::parmcheck;
 use crate::set;
 use crate::storage::{Kind, Loc, Val};
 use crate::store;
-use crate::unit::{Event, LoadError, Loader, OS_COMMAND_ROUTINES, RETURN_CODE, RunUnit, UnitHost};
+use crate::unit::{Event, LoadError, Loader, OS_COMMAND_ROUTINES, RunUnit, UnitHost};
 use crate::virtual_printer::{self, Job};
 use crate::vocab::Pos;
 use numeric::{LeServices, ProgramScope, Switched};
@@ -197,7 +197,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         self.spare.addresses = addresses;
         self.spare.lengths = lengths;
         // A program with no RETURNING phrase gives its RETURN-CODE, compiled for GnuCOBOL (C491).
-        let returned = returned.or_else(|| self.p.options.options.emulates_cobc().then(|| self.unit.return_code_value()));
+        let returned = returned.or_else(|| self.p.options.options.emulates_cobc().then(|| self.unit.return_code_value(true)));
         if let Some(kept) = kept {
             self.unit.restore_return_code(kept);
         }
@@ -274,7 +274,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 let dest = self.loc(target)?;
                 store::assign(&self.facts(), self.unit, dest, Val::Num(Fixed::new(i128::from(status), Places::new(9, 0))), None, pos)?;
             }
-            None => self.unit.write(RETURN_CODE, &status.to_be_bytes()),
+            None => self.unit.set_return_code(i32::from(status), self.p.options.options.emulates_cobc()),
         }
         Ok(Some(if plan.on_exception || plan.not_on_exception { Step::Arm(0) } else { Step::Next }))
     }

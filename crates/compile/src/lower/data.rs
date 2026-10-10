@@ -142,11 +142,12 @@ impl Lower<'_> {
             return self.push_place(place, None);
         }
         if r.name == "RETURN-CODE" && r.qualifiers.is_empty() && !layout.items.iter().any(|i| i.name.as_deref() == Some("RETURN-CODE")) {
+            let (offset, len, kind) = rt::unit::return_code_place(&self.c.options);
             let place = lir::Place {
                 base: lir::Base::ReturnCode,
-                offset: 0,
-                len: 2,
-                kind: Kind::Binary { digits: 4, scale: 0, signed: true, native: numeric::Native::No },
+                offset: offset as u32,
+                len: len as u32,
+                kind,
                 scaling: 0,
                 moved: Vec::new(),
                 subscripts: Vec::new(),

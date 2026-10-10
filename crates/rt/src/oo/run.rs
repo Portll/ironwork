@@ -13,7 +13,7 @@ use crate::jni;
 use crate::lir::{CallArg, InvokePlan, MethodName, Receiver, Step};
 use crate::storage::{Kind, Loc, Val};
 use crate::store::{self, ProgramFacts};
-use crate::unit::{ADDRESS_BASE, Event, Loaded, Loader, RETURN_CODE, RunUnit, UnitHost};
+use crate::unit::{ADDRESS_BASE, Event, Loaded, Loader, RunUnit, UnitHost};
 use crate::vocab::{Figurative, Pos};
 use numeric::assumptions::{EXPIRED_REFERENCE_ABENDS, LOCAL_FRAMES};
 use numeric::precision::{Fixed, Places};
@@ -495,7 +495,7 @@ fn run_method<'w, P: Copy, O, S, X: OoHost<'w, P, O, S>>(x: &mut X, plan: &Invok
     let here = site(x, pos);
     let unit = x.unit();
     let base = data.map(|d| unit.programs[d].base);
-    let return_code = [unit.mem[RETURN_CODE], unit.mem[RETURN_CODE + 1]];
+    let return_code = unit.kept_return_code();
     let mark = unit.mem.len();
     let invoked_text = format!("method \"{}\" of {}, invoked at {here}", method.name, unit.oo.classes[class].external);
     let invoked = unit.oo.event(invoked_text.clone());
@@ -548,7 +548,7 @@ fn run_method<'w, P: Copy, O, S, X: OoHost<'w, P, O, S>>(x: &mut X, plan: &Invok
         };
         returned = Some(Val::Address(value));
     }
-    unit.mem[RETURN_CODE..RETURN_CODE + 2].copy_from_slice(&return_code);
+    unit.restore_return_code(return_code);
     if let (Some((place, _)), Some(val)) = (&plan.returning, returned) {
         let dest = x.locate(*place, false)?;
         x.assign(dest, val, None, pos)?;

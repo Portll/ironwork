@@ -20,7 +20,7 @@ pub(crate) fn rewrite(program: &mut Program, inherited: &[DataEntry], extended: 
         rewriter.statements(&mut p.statements);
     }
     if rewriter.rewritten {
-        let saved = crate::report::entry(1, Some(SAVED_RETURN_CODE.into()), Some("S9(4)".into()), Some(Usage::Binary), Pos::default());
+        let saved = crate::report::entry(1, Some(SAVED_RETURN_CODE.into()), Some("S9(9)".into()), Some(Usage::NativeBinary), Pos::default());
         if program.recursive { program.local_storage.push(saved) } else { program.working_storage.push(saved) }
     }
 }

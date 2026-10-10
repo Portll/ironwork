@@ -22,8 +22,24 @@ use std::rc::Rc;
 /// A pointer's value is its offset into run-unit memory plus this, so that no item's address is
 /// NULL.
 pub const ADDRESS_BASE: u32 = 0x0001_0000;
-/// RETURN-CODE, a halfword shared by every program in the run unit.
+/// RETURN-CODE, shared by every program in the run unit: a fullword, cobc's register, whose last
+/// two bytes are Enterprise COBOL's halfword.
 pub const RETURN_CODE: usize = 0;
+pub const RETURN_CODE_LEN: usize = 4;
+/// Where Enterprise COBOL's halfword RETURN-CODE lies in the fullword.
+pub const RETURN_CODE_HALFWORD: usize = RETURN_CODE + 2;
+
+/// RETURN-CODE as a program compiled with `options` sees it, from [`RETURN_CODE`]: its offset,
+/// length and kind. cobc's is the fullword, never truncated and shown in nine digits, as COMP-X
+/// is; Enterprise COBOL's the halfword, `S9(4) BINARY`.
+pub fn return_code_place(options: &numeric::Options) -> (usize, usize, crate::storage::Kind) {
+    use crate::storage::Kind;
+    if options.emulates_cobc() {
+        (0, RETURN_CODE_LEN, Kind::Binary { digits: 9, scale: 0, signed: true, native: numeric::Native::CompX })
+    } else {
+        (RETURN_CODE_HALFWORD - RETURN_CODE, 2, Kind::Binary { digits: 4, scale: 0, signed: true, native: numeric::Native::No })
+    }
+}
 const RESERVED: usize = 8;
 const ALIGNMENT: usize = 8;
 
@@ -86,7 +102,7 @@ struct Enclave {
     heap: Vec<(usize, usize, bool)>,
     random: Option<u32>,
     /// RETURN-CODE's bytes, and whether they may hold input.
-    return_code: ([u8; 2], bool),
+    return_code: ([u8; RETURN_CODE_LEN], bool),
 }
 
 /// A program's state in a CICS run unit that a LINK or XCTL has set aside.
@@ -571,9 +587,8 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
     pub fn begin_cics_run_unit(&mut self) {
         let programs = self.programs.iter_mut().map(Loaded::set_aside).collect();
         let (externals, connectors) = (std::mem::take(&mut self.externals), std::mem::take(&mut self.connectors));
-        let return_code = ([self.mem[RETURN_CODE], self.mem[RETURN_CODE + 1]], self.holds_input(RETURN_CODE, 2));
-        self.mem[RETURN_CODE..RETURN_CODE + 2].fill(0);
-        self.mark_input(RETURN_CODE, 2, false);
+        let return_code = self.kept_return_code();
+        self.clear_return_code();
         let (heap, random) = (std::mem::take(&mut self.le.heap), self.random.take());
         self.set_aside.push(Enclave { programs, externals, connectors, heap, random, return_code });
     }
@@ -600,9 +615,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
         }
         (self.externals, self.connectors, self.le.heap, self.random) = (enclave.externals, enclave.connectors, enclave.heap, enclave.random);
         if !xctl {
-            let (bytes, input) = enclave.return_code;
-            self.mem[RETURN_CODE..RETURN_CODE + 2].copy_from_slice(&bytes);
-            self.mark_input(RETURN_CODE, 2, input);
+            self.restore_return_code(enclave.return_code);
         }
         closed
     }
@@ -955,23 +968,42 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
         }
     }
 
+    /// RETURN-CODE's last halfword, which the run's ending code and a job step's are taken from.
     pub fn return_code(&self) -> i16 {
-        i16::from_be_bytes([self.mem[RETURN_CODE], self.mem[RETURN_CODE + 1]])
+        i16::from_be_bytes([self.mem[RETURN_CODE_HALFWORD], self.mem[RETURN_CODE_HALFWORD + 1]])
     }
 
     /// RETURN-CODE's bytes and whether they hold input, to put back with [`RunUnit::restore_return_code`].
-    pub fn kept_return_code(&self) -> ([u8; 2], bool) {
-        ([self.mem[RETURN_CODE], self.mem[RETURN_CODE + 1]], self.holds_input(RETURN_CODE, 2))
+    pub fn kept_return_code(&self) -> ([u8; RETURN_CODE_LEN], bool) {
+        let mut bytes = [0; RETURN_CODE_LEN];
+        bytes.copy_from_slice(&self.mem[RETURN_CODE..RETURN_CODE + RETURN_CODE_LEN]);
+        (bytes, self.holds_input(RETURN_CODE, RETURN_CODE_LEN))
     }
 
-    pub fn restore_return_code(&mut self, (bytes, input): ([u8; 2], bool)) {
-        self.mem[RETURN_CODE..RETURN_CODE + 2].copy_from_slice(&bytes);
-        self.mark_input(RETURN_CODE, 2, input);
+    pub fn restore_return_code(&mut self, (bytes, input): ([u8; RETURN_CODE_LEN], bool)) {
+        self.mem[RETURN_CODE..RETURN_CODE + RETURN_CODE_LEN].copy_from_slice(&bytes);
+        self.mark_input(RETURN_CODE, RETURN_CODE_LEN, input);
     }
 
-    /// RETURN-CODE as a value a MOVE stores: `S9(4) BINARY`'s.
-    pub fn return_code_value(&self) -> crate::storage::Val {
-        crate::storage::Val::Num(numeric::precision::Fixed::new(i128::from(self.return_code()), numeric::precision::Places::new(4, 0)))
+    pub fn clear_return_code(&mut self) {
+        self.restore_return_code(([0; RETURN_CODE_LEN], false));
+    }
+
+    /// RETURN-CODE as a value a MOVE stores: the fullword's, nine digits, for cobc, otherwise
+    /// Enterprise COBOL's halfword, `S9(4) BINARY`.
+    pub fn return_code_value(&self, fullword: bool) -> crate::storage::Val {
+        let (value, digits) = if fullword {
+            (i128::from(i32::from_be_bytes([self.mem[RETURN_CODE], self.mem[RETURN_CODE + 1], self.mem[RETURN_CODE + 2], self.mem[RETURN_CODE + 3]])), 9)
+        } else {
+            (i128::from(self.return_code()), 4)
+        };
+        crate::storage::Val::Num(numeric::precision::Fixed::new(value, numeric::precision::Places::new(digits, 0)))
+    }
+
+    /// Sets RETURN-CODE to `value`: the fullword for cobc, otherwise the halfword, the value cut to it.
+    pub fn set_return_code(&mut self, value: i32, fullword: bool) {
+        let bytes = if fullword { value.to_be_bytes() } else { i32::from(value as i16).to_be_bytes() };
+        self.write(RETURN_CODE, &bytes);
     }
 
     /// The current time: seconds since the epoch, and hundredths.

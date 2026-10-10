@@ -6,7 +6,7 @@ use super::{Condition, Reading, Stamp};
 use crate::abend::{Abend, AbendCode};
 use crate::calendar;
 use crate::lir::LeService;
-use crate::unit::{ADDRESS_BASE, Loader, RETURN_CODE, RunUnit, UnitHost};
+use crate::unit::{ADDRESS_BASE, Loader, RunUnit, UnitHost};
 use crate::vocab::Pos;
 use std::io::Write;
 use zarch::ebcdic::CodePage;
@@ -96,8 +96,7 @@ impl<H: Clone, L: Loader<H>> Services<'_, '_, H, L> {
 
     /// RETURN-CODE after a service: 0, except after a failure with fc OMITTED, which leaves it alone.
     fn clear_return_code(&mut self) {
-        self.unit.mem[RETURN_CODE..RETURN_CODE + 2].fill(0);
-        self.unit.mark_input(RETURN_CODE, 2, false);
+        self.unit.clear_return_code();
     }
 
     /// The address of parameter `i`; an OMITTED one is a null address the service stores through.
