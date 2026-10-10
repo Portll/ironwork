@@ -641,7 +641,7 @@ impl Rules<'_> {
                 self.receiver(&st.into, st.pos);
             }
             Stmt::Unstring(u) => {
-                self.plain(&Operand::Ref(u.source.clone()), u.pos);
+                self.plain(&u.source, u.pos);
                 u.into.iter().for_each(|i| self.receiver(&i.target, u.pos));
             }
             Stmt::Inspect(i) => match &i.target {

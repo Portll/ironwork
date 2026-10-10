@@ -2791,3 +2791,57 @@ fn under_extended_space_and_zero_are_one_character_arguments() {
     let refused = diagnostics_under(&quote, numeric::Compliance::Extended);
     assert!(refused.iter().any(|d| (d.0, d.2) == (8, Some("IWC0141"))), "{refused:?}");
 }
+
+/// UNSTRING of function values: TRIM, UPPER-CASE with POINTER, and TRIM of spaces with and without
+/// POINTER.
+const UNSTRING_VALUES: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. UNSFN.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 REC PIC X(20) VALUE '  ab,cd ef  '.\n",
+    "       01 BLANK-REC PIC X(8) VALUE SPACES.\n",
+    "       01 A PIC X(6).\n",
+    "       01 B PIC X(6).\n",
+    "       01 C PIC X(6).\n",
+    "       01 N PIC 99 VALUE 0.\n",
+    "       01 CA PIC 99 VALUE 0.\n",
+    "       01 P PIC 99 VALUE 1.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           UNSTRING FUNCTION TRIM(REC) DELIMITED BY ',' OR SPACE\n",
+    "               INTO A COUNT IN CA B C TALLYING IN N\n",
+    "           DISPLAY '[' A '][' B '][' C '] ' N ' ' CA\n",
+    "           MOVE 'x' TO A B C  MOVE 0 TO N\n",
+    "           UNSTRING FUNCTION UPPER-CASE(REC) DELIMITED BY ALL SPACE\n",
+    "               INTO A B C WITH POINTER P TALLYING IN N\n",
+    "               ON OVERFLOW DISPLAY 'overflow'\n",
+    "           END-UNSTRING\n",
+    "           DISPLAY '[' A '][' B '][' C '] ' N ' ' P\n",
+    "           MOVE 'x' TO A B  MOVE 0 TO N\n",
+    "           UNSTRING FUNCTION TRIM(BLANK-REC) DELIMITED BY ','\n",
+    "               INTO A B TALLYING IN N\n",
+    "               ON OVERFLOW DISPLAY 'overflow empty'\n",
+    "               NOT ON OVERFLOW DISPLAY 'no overflow empty'\n",
+    "           END-UNSTRING\n",
+    "           DISPLAY '[' A '][' B '] ' N\n",
+    "           MOVE 1 TO P\n",
+    "           UNSTRING FUNCTION TRIM(BLANK-REC) DELIMITED BY ','\n",
+    "               INTO A WITH POINTER P\n",
+    "               ON OVERFLOW DISPLAY 'overflow with pointer'\n",
+    "           END-UNSTRING\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn under_extended_unstring_sends_a_function_value_alike_on_both_executors() {
+    // cobc 3.2's output.
+    let expected = "[ab    ][cd    ][ef    ] 03 02\n[      ][AB,CD ][EF    ] 03 21\nno overflow empty\n[x     ][x     ] 00\noverflow with pointer\n";
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let o = Harness::source(UNSTRING_VALUES).flags(EXTENDED).run(executor);
+        assert_eq!((o.out.as_str(), o.ending), (expected, Ok(Ending::Goback)), "{}", o.err);
+    }
+    let warned: Vec<_> = diagnostics_under(UNSTRING_VALUES, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0112")).map(|d| d.0).collect();
+    assert_eq!(warned, [14, 18, 24, 31]);
+    let refused = syntax::parse(UNSTRING_VALUES).unwrap_err();
+    assert_eq!(refused.pos.line, 14, "{refused}");
+}

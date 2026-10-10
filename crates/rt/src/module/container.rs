@@ -23,7 +23,7 @@ pub struct Version {
 
 impl Version {
     /// The version this ironwork writes.
-    pub const CURRENT: Self = Self { major: 1, minor: 4 };
+    pub const CURRENT: Self = Self { major: 1, minor: 5 };
 
     /// The oldest version this ironwork reads (§8.1): its major's first minor.
     pub const OLDEST_READABLE: Self = Self { major: 1, minor: 0 };
@@ -382,7 +382,7 @@ mod tests {
     fn the_header_and_table_have_the_documented_layout() {
         let bytes = sample(&names(&["A"]));
         assert_eq!(bytes[..8], [0x89, 0x49, 0x57, 0x4D, 0x0D, 0x0A, 0x1A, 0x0A]);
-        assert_eq!(bytes[8..20], [1, 0, 4, 0, 0, 0, 0, 0, 8, 0, 0, 0]);
+        assert_eq!(bytes[8..20], [1, 0, 5, 0, 0, 0, 0, 0, 8, 0, 0, 0]);
         assert_eq!(u64_at(&bytes, 20), Some(bytes.len() as u64));
         assert_eq!(u32_at(&bytes, HEADER_CRC), Some(extend(crc32(&bytes[..28]), &bytes[32..TABLE_END])));
         let strings_body = [1, 1, b'A'];

@@ -125,20 +125,31 @@ pub fn string<P: Copy, O>(x: &mut impl Values<P, O>, into: P, pointer: Option<P>
     Ok(overflow)
 }
 
-/// UNSTRING: returns whether it overflowed. `delimiters` are the DELIMITED BY operands, each true
-/// for ALL; `tallying` is the TALLYING IN item.
+/// UNSTRING: returns whether it overflowed. `source` is the sending item, or under `--compliance
+/// extended` a function's value, which may hold no characters; `delimiters` are the DELIMITED BY
+/// operands, each true for ALL; `tallying` is the TALLYING IN item. A POINTER outside the sending
+/// field overflows; with no POINTER, an empty value fills nothing and does not, as cobc 3.2 reads it.
 pub fn unstring<P: Copy, O>(
     x: &mut impl Values<P, O>,
-    source: P,
+    source: &Chars<P, O>,
     pointer: Option<P>,
     delimiters: &[(bool, Chars<P, O>)],
     into: &[UnstringField<P>],
     tallying: Option<P>,
     pos: Pos,
 ) -> R<bool> {
-    let source_loc = x.locate(source, false)?;
-    let source = store::bytes(x.mem(), source_loc).to_vec();
-    let units = Units::of(source_loc.kind);
+    let (source, units) = match source {
+        Chars::Place(p) => {
+            let loc = x.locate(*p, false)?;
+            (store::bytes(x.mem(), loc).to_vec(), Units::of(loc.kind))
+        }
+        Chars::Value(o) => {
+            let val = x.value(o, pos)?;
+            let units = if matches!(val, Val::National(_)) { Units::National } else { Units::Bytes };
+            (in_units(x, val, units, pos)?, units)
+        }
+        Chars::Literal(bytes) => (bytes.clone(), Units::Bytes),
+    };
     let unit = units.size();
     let len = (source.len() / unit) as i64;
     let mut at = match pointer {
@@ -150,7 +161,7 @@ pub fn unstring<P: Copy, O>(
         found.push((*all, chars_in(x, d, units, pos)?));
     }
     let delimiters = found;
-    let mut overflow = at < 1 || at > len;
+    let mut overflow = (at < 1 || at > len) && (pointer.is_some() || len > 0);
     let mut fields = 0i64;
     if !overflow {
         for field in into {

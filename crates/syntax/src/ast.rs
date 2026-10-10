@@ -724,7 +724,8 @@ pub struct UnstringInto {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Unstring {
-    pub source: Ref,
+    /// The sending field: a data item, or under `--compliance extended` a function's value.
+    pub source: Operand,
     /// Each delimiter, and whether ALL makes a run of it one delimiter.
     pub delimiters: Vec<(bool, Operand)>,
     pub into: Vec<UnstringInto>,

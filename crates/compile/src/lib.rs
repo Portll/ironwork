@@ -1706,7 +1706,7 @@ impl Check<'_> {
                 self.statements(st.not_on_overflow.as_deref().unwrap_or_default());
             }
             Stmt::Unstring(u) => {
-                self.reference(&u.source);
+                self.operand(&u.source);
                 u.delimiters.iter().for_each(|(_, d)| self.operand(d));
                 for into in &u.into {
                     self.reference(&into.target);

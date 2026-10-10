@@ -647,6 +647,9 @@ pub enum Op {
     /// SEARCH's index steps, SORT-RETURN.
     SetInt { target: PlaceId, value: IntExpr },
     Inspect(InspectId), String(StringId), Unstring(UnstringId), SearchAll(SearchAllId),
+    /// UNSTRING sending a function's value under --compliance extended: the plan's source names
+    /// its first receiving item and is not read.
+    UnstringValue { value: Operand, plan: UnstringId },
     /// The PERFORM and CALL depth (§8.7), and TIMES counters.
     Nest, Unnest(u8), SetTemp(TempId, IntExpr), DecTemp(TempId),
     /// SEARCH's table count, `occurrences` of `Odo` once, held in a counter (§9.12).
@@ -730,7 +733,7 @@ pub enum RangeKind { Perform, SortProcedure, UseBeforeReporting, UseProcedure, D
 
 - **Tags** (load-module.md §4.3): `PerformEnter` is tag 12 and `Debug` 11 of `Terminator`, and tag 6
   is retired; `DebugLine` and `DebugAlter` are tags 30 and 31 of `Op`, `Markup` 32, `Set` 33, `SetCount` 34, `SetEntry` 35, `ArgumentNumber` 36, `ScreenDisplay` 37,
-  `ScreenAccept` 38, `Environment` 39, and tag 29
+  `ScreenAccept` 38, `Environment` 39, `DisplayError` 40, `UnstringValue` 41, and tag 29
   (`SetSegment`) is retired. `Processing` is tag 5 of `RangeKind`, `Xml` tag 7 of `Base` and
   `Walk` tag 3 of `IntExpr`.
 - **A range's region** (`Range::region`) is the paragraphs a GO TO stays in it for: `first` to

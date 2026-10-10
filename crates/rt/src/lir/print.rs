@@ -714,7 +714,8 @@ impl<'a> Printer<'a> {
             Op::SetInt { target, value } => format!("SetInt {} <- {}", self.place(*target), self.int(value)),
             Op::Inspect(id) => self.inspect(*id),
             Op::String(id) => self.string_op(*id),
-            Op::Unstring(id) => self.unstring(*id),
+            Op::Unstring(id) => self.unstring(*id, None),
+            Op::UnstringValue { value, plan } => self.unstring(*plan, Some(value)),
             Op::SearchAll(id) => self.search_all(*id),
             Op::Nest => "Nest".to_owned(),
             Op::Unnest(n) => format!("Unnest {n}"),
@@ -890,9 +891,12 @@ impl<'a> Printer<'a> {
         format!("String {} <- {}{pointer}", self.place(s.into), join(sources, ", "))
     }
 
-    fn unstring(&self, id: UnstringId) -> String {
+    fn unstring(&self, id: UnstringId, value: Option<&Operand>) -> String {
         let Some(u) = self.c.plans.unstring.get(id as usize) else { return format!("Unstring unstring{id}?") };
-        let mut text = format!("Unstring {}", self.place(u.source));
+        let mut text = match value {
+            Some(v) => format!("UnstringValue {}", self.operand(v)),
+            None => format!("Unstring {}", self.place(u.source)),
+        };
         if !u.delimiters.is_empty() {
             let delimiters = u.delimiters.iter().map(|(all, c)| format!("{}{}", if *all { "ALL " } else { "" }, self.chars(c)));
             text += &format!(" delimited by {}", join(delimiters, ", "));

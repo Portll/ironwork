@@ -3640,7 +3640,15 @@ impl Parser<'_> {
     }
 
     fn unstring(&mut self, pos: Pos) -> R<Unstring> {
-        let source = self.reference()?;
+        let source = if self.extended && self.is_word("FUNCTION") {
+            let source = self.operand()?;
+            if let Operand::Function(f) = &source {
+                self.messages.push(crate::messages::IWX0112.at(f.pos, format!("UNSTRING FUNCTION {} (GnuCOBOL; Enterprise COBOL's UNSTRING sends a data item): the function's value is the sending field", f.name)));
+            }
+            source
+        } else {
+            Operand::Ref(self.reference()?)
+        };
         let mut delimiters = Vec::new();
         if self.accept_word("DELIMITED") {
             self.accept_word("BY");

@@ -128,7 +128,7 @@ fn a_source_makes_one_module_named_after_it_holding_every_program() {
     let (shown, status, _) = dump(&module, &[]);
     assert_eq!(status, Some(0), "{shown}");
     for line in [
-        "format 1.4",
+        "format 1.5",
         &format!("length {}", bytes.len()),
         "program 0 PAYROLL parent - common no dynamic yes using [] returning no",
         "program 1 SUB parent 0 common no dynamic yes using [] returning no",

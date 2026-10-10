@@ -257,7 +257,7 @@ impl Walk<'_> {
                 st.pointer.iter().for_each(|r| self.reference(r));
             }
             Stmt::Unstring(u) => {
-                self.reference(&u.source);
+                self.operand(&u.source);
                 u.delimiters.iter().for_each(|(_, o)| self.operand(o));
                 for into in &u.into {
                     [Some(&into.target), into.delimiter_in.as_ref(), into.count_in.as_ref()].into_iter().flatten().for_each(|r| self.reference(r));

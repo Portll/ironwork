@@ -1481,6 +1481,16 @@ SUBSTITUTE-CASE, UPPER-CASE, LOWER-CASE, REVERSE and TRIM, whose arguments are a
 QUOTE, whose character the QUOTE and APOST options choose, and HIGH-VALUE and LOW-VALUE, which the
 collating sequence chooses, stay refused.
 
+### IWX0112-W UNSTRING of a function's value
+
+`IWX0112-W UNSTRING FUNCTION {name} (GnuCOBOL; Enterprise COBOL's UNSTRING sends a data item): the
+function's value is the sending field`, at the function.
+
+`UNSTRING FUNCTION TRIM(REC) DELIMITED BY ',' INTO A B` takes the function's value, as long as it
+is, as the sending field; the delimiters, receivers, POINTER, TALLYING and OVERFLOW are as for an
+item. A value with no characters, TRIM of spaces, fills nothing, and overflows only when POINTER is
+written, as cobc 3.2 does. Strict refuses a function there as an identifier was expected.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

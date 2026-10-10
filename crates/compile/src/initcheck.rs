@@ -873,7 +873,7 @@ impl<'w, 'p> Walk<'w, 'p> {
                 st = self.either(&s.on_overflow, &s.not_on_overflow, st.clone(), st);
             }
             Stmt::Unstring(u) => {
-                self.read(&u.source, u.pos, &st);
+                self.operand(&u.source, u.pos, &st);
                 u.delimiters.iter().for_each(|(_, d)| self.operand(d, u.pos, &st));
                 u.pointer.iter().chain(&u.tallying).for_each(|r| self.read(r, u.pos, &st));
                 for into in &u.into {

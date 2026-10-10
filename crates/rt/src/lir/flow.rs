@@ -37,6 +37,9 @@ pub enum Op {
     Inspect(InspectId),
     String(StringId),
     Unstring(UnstringId),
+    /// UNSTRING whose sending field is a function's value, under `--compliance extended`: the plan's
+    /// source names its first receiving item and is not read.
+    UnstringValue { value: Operand, plan: UnstringId },
     SearchAll(SearchAllId),
     /// Raises the PERFORM and CALL depth, abending past 100.
     Nest,
@@ -269,6 +272,7 @@ codec_enum!(Op {
     ScreenAccept { inputs, handled } = 38,
     Environment { display, value } = 39,
     DisplayError(id) = 40,
+    UnstringValue { value, plan } = 41,
 });
 codec_enum!(Step { Next = 0, Arm(arm) = 1, GoTo(para) = 2, End(ending) = 3, Return(frame) = 4, Resume(resume) = 5 });
 codec_enum!(Terminator {

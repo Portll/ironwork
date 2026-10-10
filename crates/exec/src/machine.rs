@@ -864,7 +864,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     fn unstring(&mut self, u: &'p Unstring) -> R<Flow> {
         let delimiters: Vec<_> = u.delimiters.iter().map(|(all, d)| (*all, facts::chars(d))).collect();
         let into: Vec<_> = u.into.iter().map(|i| UnstringField { target: &i.target, delimiter: i.delimiter_in.as_ref(), count: i.count_in.as_ref() }).collect();
-        let overflow = rt::text::unstring(self, &u.source, u.pointer.as_ref(), &delimiters, &into, u.tallying.as_ref(), u.pos)?;
+        let overflow = rt::text::unstring(self, &facts::chars(&u.source), u.pointer.as_ref(), &delimiters, &into, u.tallying.as_ref(), u.pos)?;
         self.overflow_branch(overflow, &u.on_overflow, &u.not_on_overflow)
     }
 

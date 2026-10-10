@@ -24,11 +24,18 @@ impl Lower<'_> {
         self.select(on_overflow.as_deref(), not_on_overflow.as_deref(), pos, ctx)
     }
 
-    /// UNSTRING's op, then its OVERFLOW phrases.
+    /// UNSTRING's op, then its OVERFLOW phrases. A function's value is sent by `UnstringValue`.
     pub(super) fn unstring(&mut self, u: &Unstring, pos: Pos, ctx: &Ctx) -> R<()> {
         let Unstring { source, delimiters, into, pointer, tallying, on_overflow, not_on_overflow, pos: _ } = u;
+        let value = match source {
+            Operand::Ref(_) => None,
+            op => Some(self.operand(op, pos)?.operand),
+        };
         let plan = self.unstring_plan(source, delimiters, into, pointer.as_ref(), tallying.as_ref(), pos)?;
-        self.op(Op::Unstring(plan), pos)?;
+        match value {
+            Some(value) => self.op(Op::UnstringValue { value, plan }, pos)?,
+            None => self.op(Op::Unstring(plan), pos)?,
+        }
         self.select(on_overflow.as_deref(), not_on_overflow.as_deref(), pos, ctx)
     }
 
@@ -47,8 +54,11 @@ impl Lower<'_> {
         push(&mut self.plans.string, StringPlan { into, pointer, sources }, "STRING plans")
     }
 
-    fn unstring_plan(&mut self, source: &Ref, written: &[(bool, Operand)], fields: &[ast::UnstringInto], pointer: Option<&Ref>, tallying: Option<&Ref>, pos: Pos) -> R<UnstringId> {
-        let source = self.place(source, false)?;
+    fn unstring_plan(&mut self, sender: &Operand, written: &[(bool, Operand)], fields: &[ast::UnstringInto], pointer: Option<&Ref>, tallying: Option<&Ref>, pos: Pos) -> R<UnstringId> {
+        let sent = match sender {
+            Operand::Ref(r) => Some(self.place(r, false)?),
+            _ => None,
+        };
         let pointer = self.pointer(pointer)?;
         let mut delimiters = Vec::with_capacity(written.len());
         for (all, d) in written {
@@ -81,6 +91,7 @@ impl Lower<'_> {
                 Some((place, self.count_plan(place, "TALLYING IN needs a numeric item")?))
             }
         };
+        let Some(source) = sent.or_else(|| into.first().map(|i| i.target)) else { return unsupported("an UNSTRING with no INTO", pos) };
         push(&mut self.plans.unstring, UnstringPlan { source, pointer, delimiters, into, tallying }, "UNSTRING plans")
     }
 

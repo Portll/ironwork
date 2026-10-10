@@ -9,7 +9,7 @@ use crate::display;
 use crate::fixed::places_of;
 use crate::host::{Host, Values};
 use super::markup::Receiving;
-use crate::lir::{DisplayItem, InitPlan, InitValue, Inspected, MovePlan, NumericFrom, Op, Operand, PlaceId, ScreenPlan, ScreenPosition, SearchAllPlan, SenderCheck, Step, StorePlan, TempId};
+use crate::lir::{Chars, DisplayItem, InitPlan, InitValue, Inspected, MovePlan, NumericFrom, Op, Operand, PlaceId, ScreenPlan, ScreenPosition, SearchAllPlan, SenderCheck, Step, StorePlan, TempId};
 use crate::set;
 use crate::storage::{Kind, Loc, Val};
 use crate::store;
@@ -117,7 +117,14 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 let plan = &p.plans.unstring[*id as usize];
                 let into: Vec<UnstringField<PlaceId>> =
                     plan.into.iter().map(|i| UnstringField { target: i.target, delimiter: i.delimiter.map(|d| d.target), count: i.count.map(|(q, _)| q) }).collect();
-                let result = text::unstring(self, plan.source, plan.pointer.map(|(q, _)| q), &plan.delimiters, &into, plan.tallying.map(|(q, _)| q), pos);
+                let result = text::unstring(self, &Chars::Place(plan.source), plan.pointer.map(|(q, _)| q), &plan.delimiters, &into, plan.tallying.map(|(q, _)| q), pos);
+                return Ok(Step::Arm(u8::from(self.settle(result)?)));
+            }
+            Op::UnstringValue { value, plan } => {
+                let plan = &p.plans.unstring[*plan as usize];
+                let into: Vec<UnstringField<PlaceId>> =
+                    plan.into.iter().map(|i| UnstringField { target: i.target, delimiter: i.delimiter.map(|d| d.target), count: i.count.map(|(q, _)| q) }).collect();
+                let result = text::unstring(self, &Chars::Value(*value), plan.pointer.map(|(q, _)| q), &plan.delimiters, &into, plan.tallying.map(|(q, _)| q), pos);
                 return Ok(Step::Arm(u8::from(self.settle(result)?)));
             }
             Op::SearchAll(id) => return self.search_all(&p.plans.search_all[*id as usize], pos),

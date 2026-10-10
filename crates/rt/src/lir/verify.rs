@@ -705,7 +705,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
             Op::Call(c) if p.services.calls.get(*c as usize).is_some_and(|plan| plan.on_exception || plan.not_on_exception) => 2,
             Op::Invoke(i) if p.services.invokes.get(*i as usize).is_some_and(|plan| plan.on_exception || plan.not_on_exception) => 2,
             Op::File(f) => p.services.file_ops.get(*f as usize).map_or(0, |op| op.arms()),
-            Op::String(_) | Op::Unstring(_) | Op::SearchAll(_) | Op::Return(_) | Op::Accept { from: AcceptFrom::ArgumentValue | AcceptFrom::EnvironmentValue, .. } => 2,
+            Op::String(_) | Op::Unstring(_) | Op::UnstringValue { .. } | Op::SearchAll(_) | Op::Return(_) | Op::Accept { from: AcceptFrom::ArgumentValue | AcceptFrom::EnvironmentValue, .. } => 2,
             Op::Markup(m) if p.services.markup.get(*m as usize).is_some_and(|x| x.phrases() != (false, false)) => 2,
             Op::ScreenAccept { handled: true, .. } => 2,
             _ => 0,
@@ -786,6 +786,10 @@ fn verify_program(p: &Program) -> Result<(), String> {
                 }
                 Op::String(id) => within("STRING plan", *id, p.plans.string.len())?,
                 Op::Unstring(id) => within("UNSTRING plan", *id, p.plans.unstring.len())?,
+                Op::UnstringValue { value, plan } => {
+                    operand(value)?;
+                    within("UNSTRING plan", *plan, p.plans.unstring.len())?;
+                }
                 Op::Inspect(id) => within("INSPECT plan", *id, p.plans.inspect.len())?,
                 Op::SearchAll(id) => within("SEARCH ALL plan", *id, p.plans.search_all.len())?,
                 Op::SetInt { target, value } => {
