@@ -23,7 +23,7 @@ pub struct Libraries {
     /// Members are read with cobc's tab stops, as a retry after a member did not read.
     member_tab_stops: bool,
     /// A source with no IDENTIFICATION DIVISION is a program named after its file, as a retry under
-    /// `--compliance loose`.
+    /// `--compliance extended`.
     assume_program_id: bool,
     /// A source read for a function's definition does not look for its own functions' definitions.
     no_function_search: bool,
@@ -75,10 +75,10 @@ impl Libraries {
     }
 
     /// The program file's name without its extension, which a program with no PROGRAM-ID takes
-    /// under `--compliance loose`, on the retry that assumes one.
+    /// under `--compliance extended`, on the retry that assumes one.
     pub fn program_stem(&self) -> Option<String> {
         let stem = self.program.as_deref()?.file_stem()?;
-        (self.loose && self.assume_program_id).then(|| stem.to_string_lossy().into_owned())
+        (self.compliance == numeric::Compliance::Extended && self.assume_program_id).then(|| stem.to_string_lossy().into_owned())
     }
 
     /// These libraries, their members read with each tab reaching the next column after a multiple

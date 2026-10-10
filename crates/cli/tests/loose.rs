@@ -1,7 +1,7 @@
 //! `--compliance loose`: a data record, file or report extended refuses is left out and a statement
 //! naming one of its items compiles as a hole, as does a statement a later check refuses; a
-//! directive ironwork does not read, a character outside COBOL's set and a missing IDENTIFICATION
-//! DIVISION are passed over; messages of severity E are warnings.
+//! directive ironwork does not read and a character outside COBOL's set are passed over; messages
+//! of severity E are warnings.
 
 use std::fs;
 use std::path::PathBuf;
@@ -51,7 +51,6 @@ fn records_lines_and_characters_are_left_out_and_check_warns_of_each() {
 
 /// Sources relaxed refuses, each with the warning loose gives instead.
 const LEFT_OUT: &[(&str, &str, &str)] = &[
-    ("HEADLESS", "           DISPLAY 'minimal'\n           GOBACK.\n", "IWX0075-W no IDENTIFICATION DIVISION or PROGRAM-ID"),
     (
         "NATIONAL",
         "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. NATIONAL.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       SPECIAL-NAMES.\n           ALPHABET UNI FOR NATIONAL IS UCS-4.\n       PROCEDURE DIVISION.\n           GOBACK.\n",
@@ -75,7 +74,7 @@ const LEFT_OUT: &[(&str, &str, &str)] = &[
 ];
 
 #[test]
-fn headers_alphabets_debugging_items_parameters_and_reports_are_left_out() {
+fn alphabets_debugging_items_parameters_and_reports_are_left_out() {
     let dir = temp("forms");
     for (name, text, warned) in LEFT_OUT {
         let path = dir.join(format!("{name}.cbl"));

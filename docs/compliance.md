@@ -1445,6 +1445,17 @@ UPSI-7, with the mnemonic-name and the ON and OFF STATUS condition-names after i
 SWITCH-36 have no UPSI switch and are refused with IWS0122-S. Strict, as Enterprise COBOL, knows
 UPSI-0 to UPSI-7 only.
 
+### IWX0075-W No IDENTIFICATION DIVISION or PROGRAM-ID
+
+`IWX0075-W no IDENTIFICATION DIVISION or PROGRAM-ID (GnuCOBOL under -std=mf or -std=ibm assumes
+them; Enterprise COBOL requires them): the program is named {name}, after its file`, at its first
+word.
+
+A source that begins with neither, but with another division or section header or with statements,
+is a program named after its file without the extension, as cobc 3.2 names it under -std=mf. When
+it begins with statements, they are its PROCEDURE DIVISION. A source compiled from no named file,
+and any source under strict, is refused where IDENTIFICATION DIVISION was expected.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and
@@ -1500,10 +1511,6 @@ extended.
 - `USE FOR DEBUGGING ON ALL [REFERENCES OF] item`: the item is left out of the USE statement, with
   `IWX0065-W`, and the section runs for the procedures it names. ALPHABET name FOR NATIONAL, which
   ironwork has no collating sequence for, is left out the same way.
-- A source with no IDENTIFICATION DIVISION or PROGRAM-ID is a program named after its file, as cobc
-  names it under -std=mf and -std=ibm, with `IWX0075-W no IDENTIFICATION DIVISION or PROGRAM-ID
-  (GnuCOBOL under -std=mf or -std=ibm assumes them; Enterprise COBOL requires them): the program is
-  named {name}, after its file`. When it begins with statements, they are its PROCEDURE DIVISION.
 - Messages of severity E are given as warnings, so a program whose worst message is an E-level
   recovery checks with return code 4.
 

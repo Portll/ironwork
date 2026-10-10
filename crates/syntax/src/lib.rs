@@ -221,16 +221,18 @@ fn parse_all_reading(text: &str, libraries: &copy::Libraries) -> Result<Vec<ast:
     if libraries.loose() {
         return parse_loose(text, libraries, start, detect);
     }
-    if !detect {
-        return parse_from(text, libraries, start).map(|(programs, _)| programs);
+    let read = |libraries: &copy::Libraries| if detect { parse_detecting(text, libraries, start.clone()) } else { parse_from(text, libraries, start.clone()).map(|(programs, _)| programs) };
+    match read(libraries) {
+        Err(e) if libraries.compliance() == Compliance::Extended && e.file.is_none() && e.message.starts_with("expected ID,") => read(&libraries.assuming_program_id()),
+        parsed => parsed,
     }
-    parse_detecting(text, libraries, start)
 }
 
 /// Under `--compliance loose`, the source parsed as [`parse_all_with`] parses it, and again after
 /// each directive ironwork does not read, character outside COBOL's set or stray period in the
 /// program's own file that stops it is left out, with IWX0065-W; up to 50 times. A source no reading
-/// finds IDENTIFICATION DIVISION in is read again as a program named after its file.
+/// finds IDENTIFICATION DIVISION in is read again as a program named after its file, as under
+/// extended.
 fn parse_loose(text: &str, libraries: &copy::Libraries, start: source::Start, detect: bool) -> Result<Vec<ast::Program>, Error> {
     let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
     let mut notes = Vec::new();

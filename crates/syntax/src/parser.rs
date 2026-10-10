@@ -68,7 +68,7 @@ pub fn parse(tokens: &[Token], options: Vec<String>, compliance: numeric::Compli
     parser.extended = compliance == numeric::Compliance::Extended;
     parser.relaxed = parser.extended && relaxed;
     parser.loose = parser.relaxed && loose;
-    parser.assumed_id = file_stem.filter(|_| parser.loose);
+    parser.assumed_id = file_stem.filter(|_| parser.extended);
     let mut programs = Vec::new();
     parser.program(&options, &mut programs)?;
     while parser.peek().is_some() {

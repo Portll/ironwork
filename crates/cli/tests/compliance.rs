@@ -150,3 +150,20 @@ fn job_and_fuzz_compile_their_programs_under_the_level() {
     assert!(manifest.contains("\"code\":\"S0C"), "{manifest}");
     fs::remove_dir_all(dir).unwrap();
 }
+
+/// A Micro Focus source with no IDENTIFICATION DIVISION or PROGRAM-ID: a program named after its
+/// file, which a caller reaches by that name.
+#[test]
+fn under_extended_a_source_with_no_program_id_is_named_after_its_file() {
+    let dir = temp("headless");
+    fs::write(dir.join("calc.cbl"), "       working-storage section.\n       01 n pic 9 value 3.\n       procedure division.\n           display \"calc \" n\n           goback.\n").unwrap();
+    fs::write(dir.join("caller.cbl"), "       identification division.\n       program-id. caller.\n       procedure division.\n           call \"calc\"\n           display \"back\"\n           stop run.\n").unwrap();
+    let checked = ironwork(&dir, &["check", "calc.cbl", "--compliance", "extended"]);
+    assert_eq!(checked.status.code(), Some(4), "{}", text(&checked.stderr));
+    assert!(text(&checked.stderr).contains("IWX0075-W no IDENTIFICATION DIVISION or PROGRAM-ID") && text(&checked.stderr).contains("after its file"), "{}", text(&checked.stderr));
+    let ran = ironwork(&dir, &["run", "caller.cbl", "--compliance", "extended", "-L", "."]);
+    assert_eq!(text(&ran.stdout), "calc 3\nback\n", "{}", text(&ran.stderr));
+    let strict = ironwork(&dir, &["check", "calc.cbl"]);
+    assert_eq!(strict.status.code(), Some(12), "{}", text(&strict.stderr));
+    fs::remove_dir_all(dir).unwrap();
+}
