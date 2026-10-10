@@ -41,7 +41,7 @@ impl<'p> Machine<'p, '_, '_> {
             return Ok(());
         }
         if self.program.files[k].status.is_none()
-            && let Some(abend) = fileio::unhandled(status, self.file_desc(k).organization, open_or_close, &self.program.files[k].name, &self.program.id, message, pos)
+            && let Some(abend) = fileio::unhandled(status, self.file_desc(k).organization, open_or_close, self.options.emulates_cobc(), &self.program.files[k].name, &self.program.id, message, pos)
         {
             return Err(abend);
         }

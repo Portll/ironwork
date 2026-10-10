@@ -301,7 +301,7 @@ impl<'p, L: Loader<Rc<Code>>> Io<'_, 'p, '_, '_, L> {
             return Ok(());
         }
         if file.status.is_none()
-            && let Some(abend) = fileio::unhandled(status, file.organization, open_or_close, file.name, self.vm.sym(self.vm.p.id), message, pos)
+            && let Some(abend) = fileio::unhandled(status, file.organization, open_or_close, self.vm.p.options.options.emulates_cobc(), file.name, self.vm.sym(self.vm.p.id), message, pos)
         {
             return Err(abend);
         }

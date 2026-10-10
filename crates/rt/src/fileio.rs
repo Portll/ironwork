@@ -122,10 +122,12 @@ pub fn is_unhandled_io(abend: &Abend) -> bool {
 /// output operations' and its two flow figures): IGZ0035S for an OPEN or CLOSE, IGZ0020S for a logic
 /// error (4x), IGZ0197S for a line-sequential (z/OS UNIX) file's permanent error and IGZ0002S, QSAM's
 /// SYNAD message, for a sequential file's. IBM names no message for an AT END or INVALID KEY no
-/// phrase takes, or a VSAM file's permanent error; ironwork says which phrase was missing.
-pub fn unhandled(status: FileStatus, organization: Organization, open_or_close: bool, file: &str, program: &str, detail: String, pos: Pos) -> Option<Abend> {
+/// phrase takes, or a VSAM file's permanent error; ironwork says which phrase was missing. For cobc
+/// a VSAM file's OPEN or CLOSE ends the run as any other file's does.
+#[allow(clippy::too_many_arguments)]
+pub fn unhandled(status: FileStatus, organization: Organization, open_or_close: bool, cobc: bool, file: &str, program: &str, detail: String, pos: Pos) -> Option<Abend> {
     use crate::abend::{AbendCode, LeCondition};
-    if !status.ends_the_run() || open_or_close && matches!(organization, Organization::Indexed | Organization::Relative) {
+    if !status.ends_the_run() || open_or_close && !cobc && matches!(organization, Organization::Indexed | Organization::Relative) {
         return None;
     }
     let code = status.as_str();

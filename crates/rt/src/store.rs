@@ -1152,14 +1152,16 @@ pub fn compare(facts: &dyn ProgramFacts, mem: &[u8], a: (Val, Option<Loc>), b: (
 
 /// The bytes a zoned integer holds, as a comparison with a nonnumeric operand reads them: as a MOVE
 /// to an alphanumeric item of its size leaves them, so a sign it overpunches is removed under ZWB
-/// and kept under NOZWB, and a separate sign is left out (assumption C221). None for an operand the
-/// comparison reads as a number first: not zoned, not an integer, or scaled.
+/// and kept under NOZWB, and a separate sign is left out (assumption C221); for cobc, a sign byte
+/// holding a space is kept and one holding no digit reads as 0. None for an operand the comparison
+/// reads as a number first: not zoned, not an integer, or scaled.
 pub fn compared_zoned_bytes(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc) -> Option<Vec<u8>> {
     let Kind::Zoned { scale: 0, signed, sign, .. } = loc.kind else { return None };
     if scaling(facts, loc) > 0 {
         return None;
     }
     let mut image = bytes(mem, loc).to_vec();
+    let leading = matches!(sign, Some(SignClause { position: SignPosition::Leading, .. }));
     match sign {
         Some(SignClause { separate: true, position: SignPosition::Leading }) => {
             image.remove(0);
@@ -1167,8 +1169,17 @@ pub fn compared_zoned_bytes(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc) -> O
         Some(SignClause { separate: true, position: SignPosition::Trailing }) => {
             image.pop();
         }
-        _ if !signed || !facts.options().zwb => {}
-        Some(SignClause { position: SignPosition::Leading, .. }) => image[0] |= 0xF0,
+        _ if !signed => {}
+        _ if facts.options().emulates_cobc() => {
+            let b = if leading { image.first_mut()? } else { image.last_mut()? };
+            *b = match *b {
+                ebcdic::SPACE => ebcdic::SPACE,
+                d if d >> 4 >= 0xA && d & 0x0F <= 9 => d | 0xF0,
+                _ => 0xF0,
+            };
+        }
+        _ if !facts.options().zwb => {}
+        _ if leading => image[0] |= 0xF0,
         _ => *image.last_mut()? |= 0xF0,
     }
     Some(image)

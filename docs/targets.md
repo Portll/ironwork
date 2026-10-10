@@ -52,7 +52,7 @@ gnucobol`, or under `--compliance extended`, `relaxed` or `loose`.
 | MOVE of a zoned item holding other characters than digits to a zoned one (C260) | each digit's low half, zone F | each digit's byte copied, aligned on the decimal point | yes |
 | A receiving group holding its own OCCURS DEPENDING ON object | its maximum length | the object's current value | not yet |
 | `ADD X TO X Y`, and SUBTRACT and MULTIPLY with one sending item | the sending item read once for every receiver | read again for each receiver, after the one before is stored; two or more sending operands summed once, as IBM sums them | yes |
-| A signed zoned item of spaces compared with SPACES under ZWB | not equal | equal | not yet |
+| A signed zoned item compared with an alphanumeric operand (C221) | the sign byte's zone made F under ZWB, so a space reads as 0 | a sign removed from a digit; a space kept; another character read as 0 | yes |
 | ORD, CHAR and a contained program under a PROGRAM COLLATING SEQUENCE | the program's sequence | native; a contained program its own | not yet |
 | CANCEL of a program CALLed by a literal | no action under NODYNAM | the program is reset; give `CBL DYNAM` | by card |
 | ALTER in an independent segment | put back on entry | never put back | not yet |
@@ -63,7 +63,7 @@ gnucobol`, or under `--compliance extended`, `relaxed` or `loose`.
 | MAX, MIN, RANGE, REM, SUM; INTEGER, INTEGER-PART, MOD of fixed-point arguments | IBM's places | cobc's fields | not yet |
 | A zero divisor outside ON SIZE ERROR | S0CB, S0C9 or S0CF | the receiver kept as it was, and the run goes on | yes |
 | Invalid decimal data in arithmetic | S0C7 | the run goes on | not yet |
-| An OPEN or CLOSE that fails with no FILE STATUS and no declarative | a logic error on the next statement | the run ends at the OPEN | not yet |
+| An OPEN or CLOSE of an indexed or relative file that fails, with no FILE STATUS and no declarative (C451) | control returns; the next statement on the file is a logic error | the run ends at the OPEN or CLOSE, U4038 with IGZ0035S | yes |
 | Zero to a negative power, with or without ON SIZE ERROR (C334) | a size error; without the phrase U4038 with IGZ0050S | zero, and the run goes on | yes |
 | A function argument outside what it takes, such as `CHAR(0)` (C452) | U4038 with LE's message | CHAR the sequence's first character, a function of characters none, any other zero, RANDOM the seed's magnitude; the run goes on | yes |
 | C16, C54, C99, C112, C181, C333, C391 ([dialect.md](dialect.md) §5.5) | ironwork's chosen result | cobc's | not yet |

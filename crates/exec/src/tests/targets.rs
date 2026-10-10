@@ -258,3 +258,62 @@ fn a_gnucobol_target_moves_and_accepts_characters_into_numbers_as_cobc_does() {
         assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{name}: {}", ran.err);
     }
 }
+
+/// Signed zoned items whose sign byte holds a digit, a space or another character, compared with
+/// alphanumeric operands.
+const SIGN_BYTE_COMPARED: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. SIGNCMP.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 W PIC S9(3) VALUE ZERO.\n",
+    "       01 WG REDEFINES W PIC X(3).\n",
+    "       01 L PIC S9(3) SIGN LEADING VALUE -123.\n",
+    "       01 LG REDEFINES L PIC X(3).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           IF L = '123' DISPLAY 'SIGNED' END-IF\n",
+    "           MOVE SPACES TO WG\n",
+    "           IF W = SPACES DISPLAY 'SPACES' END-IF\n",
+    "           MOVE '12 ' TO WG\n",
+    "           IF W = '12 ' DISPLAY 'TRAILING SPACE' END-IF\n",
+    "           MOVE ' 23' TO LG\n",
+    "           IF L = ' 23' DISPLAY 'LEADING SPACE' END-IF\n",
+    "           MOVE '12$' TO WG\n",
+    "           IF W = '120' DISPLAY 'OTHER ZERO' END-IF\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn a_gnucobol_target_keeps_a_space_in_the_sign_byte_and_ibm_makes_it_a_digit() {
+    // cobc 3.2's output, by default and under -std=ibm-strict.
+    for (name, vm) in [("interpreter", false), ("VM", true)] {
+        let executor = || if vm { Executor::Vm } else { Executor::Interpreter };
+        let cobc = Harness::source(SIGN_BYTE_COMPARED).flags(EXTENDED).run(executor());
+        assert_eq!((cobc.out.as_str(), cobc.ending.as_ref().ok()), ("SIGNED\nSPACES\nTRAILING SPACE\nLEADING SPACE\nOTHER ZERO\n", Some(&Ending::StopRun)), "{name}: {}", cobc.err);
+        assert_eq!(Harness::source(SIGN_BYTE_COMPARED).run(executor()).out, "SIGNED\n", "{name}");
+    }
+}
+
+/// `statement` on an indexed or relative file with no FILE STATUS, no declarative and no data set.
+fn vsam_failure(organization: &str, statement: &str) -> String {
+    format!(
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. VSAMFAIL.\n       ENVIRONMENT DIVISION.\n       INPUT-OUTPUT SECTION.\n       FILE-CONTROL.\n           SELECT F ASSIGN TO NOFILE\n               {organization}.\n       DATA DIVISION.\n       FILE SECTION.\n       FD F.\n       01 R.\n          05 K PIC X(4).\n       PROCEDURE DIVISION.\n           DISPLAY 'BEFORE'\n           {statement}\n           DISPLAY 'AFTER'\n           STOP RUN.\n"
+    )
+}
+
+#[test]
+fn a_failing_vsam_open_or_close_ends_the_run_for_a_gnucobol_target_and_returns_for_ibm() {
+    // cobc 3.2: `file does not exist (status = 35)` at the OPEN and `file not open (status = 42)`
+    // at the CLOSE, the run ended there.
+    for (organization, statement, status) in [("ORGANIZATION IS INDEXED RECORD KEY IS K", "OPEN INPUT F", "35"), ("ORGANIZATION IS RELATIVE", "CLOSE F", "42")] {
+        let source = vsam_failure(organization, statement);
+        for (name, vm) in [("interpreter", false), ("VM", true)] {
+            let executor = || if vm { Executor::Vm } else { Executor::Interpreter };
+            let cobc = Harness::source(&source).flags(EXTENDED).run(executor());
+            assert_eq!(cobc.out, "BEFORE\n", "{statement} {name}: {}", cobc.err);
+            assert!(cobc.ending.as_ref().is_err_and(|a| a.message.starts_with("IGZ0035S") && a.message.contains(&format!("status code was {status}"))), "{statement} {name}: {:?}", cobc.ending);
+            let ibm = Harness::source(&source).run(executor());
+            assert_eq!((ibm.out.as_str(), ibm.ending.as_ref().ok()), ("BEFORE\nAFTER\n", Some(&Ending::StopRun)), "{statement} {name}: {}", ibm.err);
+        }
+    }
+}
