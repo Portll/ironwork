@@ -1421,6 +1421,30 @@ key from another record, a WORKING-STORAGE record or another file's, at the offs
 in its own record, applied to each record sorted, under every dialect; extended does the same where
 those bytes fall within the SD's record area, the key read as its own item's class and usage.
 
+### IWX0108-W DISPLAY with several lists of items
+
+`IWX0108-W DISPLAY with items after its screen phrases (GnuCOBOL; Enterprise COBOL has no screen):
+each list of items is displayed in turn, at the place its own phrases give or at the cursor`, at the
+first item after the phrases.
+
+    DISPLAY ' Operation: ' AT 0124 WITH FOREGROUND-COLOR 7  OPERATION AT 0136
+
+is read as one positioned DISPLAY (IWX0020) for each list of items and the phrases after it, in
+order, as cobc 3.2 shows them: a list with no AT of its own starts at the cursor, where the list
+before it ended. Within a list the items go one after another from the list's AT, as a single
+DISPLAY's do (C462), where cobc places only the last of them there.
+
+### IWX0109-W SWITCH-n
+
+`IWX0109-W SWITCH-{n} (GnuCOBOL's name for its switch {n}; Enterprise COBOL writes UPSI-{n}): it is
+read as UPSI-{n}, which the UPSI run-time option sets`, at the name.
+
+cobc 3.2 spells a SPECIAL-NAMES switch SWITCH-n under its default dialect and UPSI-n under
+`-std=ibm`, and both are its run-time switch n. Extended reads SWITCH-0 to SWITCH-7 as UPSI-0 to
+UPSI-7, with the mnemonic-name and the ON and OFF STATUS condition-names after it. SWITCH-8 to
+SWITCH-36 have no UPSI switch and are refused with IWS0122-S. Strict, as Enterprise COBOL, knows
+UPSI-0 to UPSI-7 only.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

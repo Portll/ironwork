@@ -169,6 +169,11 @@ fn upsi_switch(word: &str) -> Option<u8> {
     }
 }
 
+/// The number of GnuCOBOL's switch environment-name `word`, SWITCH-0 to SWITCH-36, names.
+fn gnucobol_switch(word: &str) -> Option<u8> {
+    word.strip_prefix("SWITCH-")?.parse::<u8>().ok().filter(|n| *n <= 36)
+}
+
 /// `mantissa` times ten to `exponent`, as a fixed-point numeric literal of at most 31 digits.
 fn fixed_point(mantissa: &str, exponent: i32) -> Option<String> {
     let (sign, body) = match mantissa.strip_prefix('-') {
@@ -1017,6 +1022,16 @@ impl Parser<'_> {
             }
             if let Some(number) = self.word().and_then(upsi_switch) {
                 let pos = self.pos();
+                self.at += 1;
+                clauses.switches.push(self.switch(number, pos)?);
+                continue;
+            }
+            if let Some(number) = self.word().and_then(gnucobol_switch).filter(|_| self.extended) {
+                let pos = self.pos();
+                if number > 7 {
+                    return Err(crate::messages::IWS0122.at(pos, format!("SWITCH-{number}: GnuCOBOL's switches 8 to 36 have no UPSI switch to stand for them; extended reads SWITCH-0 to SWITCH-7")));
+                }
+                self.messages.push(crate::messages::IWX0109.at(pos, format!("SWITCH-{number} (GnuCOBOL's name for its switch {number}; Enterprise COBOL writes UPSI-{number}): it is read as UPSI-{number}, which the UPSI run-time option sets")));
                 self.at += 1;
                 clauses.switches.push(self.switch(number, pos)?);
                 continue;
@@ -2522,6 +2537,16 @@ impl Parser<'_> {
                     items.push(self.operand()?);
                 }
                 let mut screen = self.screen_phrases(positioned)?;
+                if self.extended && screen.is_some() && self.starts_operand() && !no_advancing_ahead(self) {
+                    self.messages.push(crate::messages::IWX0108.at(self.pos(), "DISPLAY with items after its screen phrases (GnuCOBOL; Enterprise COBOL has no screen): each list of items is displayed in turn, at the place its own phrases give or at the cursor"));
+                    while self.starts_operand() && !no_advancing_ahead(self) {
+                        self.before.push(Stmt::Display { items: std::mem::take(&mut items), upon: None, no_advancing: false, screen: screen.take(), pos });
+                        while self.starts_operand() && !no_advancing_ahead(self) && !erase_ahead(self) && !matches!(self.word(), Some("LINE" | "POSITION")) {
+                            items.push(self.operand()?);
+                        }
+                        screen = Some(self.screen_phrases(None)?.unwrap_or_else(|| Box::new(ScreenPhrases { pos, ..ScreenPhrases::default() })));
+                    }
+                }
                 let mut upon = if self.accept_word("UPON") {
                     let name = self.name("a mnemonic name")?;
                     let device = self.mnemonics.iter().find(|(m, _)| *m == name).map_or_else(|| name.clone(), |(_, e)| e.clone());

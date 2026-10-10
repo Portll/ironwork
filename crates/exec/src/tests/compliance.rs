@@ -2664,3 +2664,61 @@ fn under_extended_a_word_may_hold_latin_1_letters() {
     let strict = diagnostics_under(LATIN_WORDS, numeric::Compliance::Strict);
     assert!(strict.iter().any(|d| (d.0, d.2, d.3) == (5, Some("IWS0025"), Severity::Error)), "{strict:?}");
 }
+
+/// A DISPLAY of several lists of items, each with its own AT or none.
+const DISPLAY_LISTS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. LISTS.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 D PIC X(4) VALUE 'DDDD'.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY 'AB' AT 0105 D AT 0301 WITH HIGHLIGHT 'EF'\n",
+    "           DISPLAY 'GH' AT 0510 'IJ' 'KL' AT 0601\n",
+    "           ACCEPT OMITTED\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn under_extended_a_display_of_several_lists_places_each_alike_on_both_executors() {
+    // cobc 3.2's screen, but for 'IJ', which cobc writes at the cursor and C462 at 0601 with 'KL'.
+    let walked = Harness::source(DISPLAY_LISTS).flags(EXTENDED).screens("ENTER\n").run(Executor::Interpreter);
+    let screen = "    AB\n\nDDDDEF\n\n         GH\nIJKL\n";
+    let expected = format!("--- screen 1 ---\n{screen}--- screen 2 ---\n{screen}");
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (expected.as_str(), Some(&Ending::Goback)), "{}", walked.err);
+    let vm = Harness::source(DISPLAY_LISTS).flags(EXTENDED).screens("ENTER\n").run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    let warned: Vec<_> = diagnostics_under(DISPLAY_LISTS, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0108")).map(|d| d.0).collect();
+    assert_eq!(warned, [7, 8]);
+}
+
+/// GnuCOBOL's SWITCH-n in SPECIAL-NAMES, with STATUS and without.
+const GNUCOBOL_SWITCHES: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. SWITCHES.\n",
+    "       ENVIRONMENT DIVISION.\n",
+    "       CONFIGURATION SECTION.\n",
+    "       SPECIAL-NAMES.\n",
+    "           SWITCH-1 IS S1 ON STATUS IS S1-ON OFF S1-OFF\n",
+    "           SWITCH-2 ON IS S2-ON.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           IF S1-ON DISPLAY 'S1 ON' ELSE DISPLAY 'S1 OFF' END-IF\n",
+    "           IF S2-ON DISPLAY 'S2 ON' ELSE DISPLAY 'S2 OFF' END-IF\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn under_extended_switch_n_is_upsi_n() {
+    for vm in [false, true] {
+        let executor = || if vm { Executor::Vm } else { Executor::Interpreter };
+        let off = Harness::source(GNUCOBOL_SWITCHES).flags(EXTENDED).run(executor());
+        assert_eq!((off.out.as_str(), off.ending.as_ref().ok()), ("S1 OFF\nS2 OFF\n", Some(&Ending::StopRun)), "{}", off.err);
+        let on = Harness::source(GNUCOBOL_SWITCHES).flags(EXTENDED).parm("/UPSI(01000000)").run(executor());
+        assert_eq!((on.out.as_str(), on.ending.as_ref().ok()), ("S1 ON\nS2 OFF\n", Some(&Ending::StopRun)), "{}", on.err);
+    }
+    let warned: Vec<_> = diagnostics_under(GNUCOBOL_SWITCHES, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0109")).map(|d| d.0).collect();
+    assert_eq!(warned, [6, 7]);
+    let libraries = syntax::copy::Libraries::default().with_compliance(numeric::Compliance::Extended);
+    let refused = syntax::parse_all_with(&GNUCOBOL_SWITCHES.replace("SWITCH-2", "SWITCH-9"), &libraries).unwrap_err();
+    assert_eq!((refused.pos.line, refused.id), (7, Some("IWS0122")), "{refused}");
+}

@@ -822,6 +822,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWS0108 | S | `an inline PERFORM ended by a period with no END-PERFORM: Micro Focus's, not Enterprise COBOL's; --compliance extended reads the period as ending it` |
 | IWS0120 | E | `a period was required before level number {level}: one was assumed` |
 | IWS0121 | S | `INSPECT {literal} {phrase}: a literal is not a receiving item` |
+| IWS0122 | S | `SWITCH-{n}: GnuCOBOL's switches 8 to 36 have no UPSI switch to stand for them; extended reads SWITCH-0 to SWITCH-7` |
 | IWX0001 | W | `free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}` |
 | IWX0002 | W | `constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry` |
 | IWX0003 | W | `<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =` |
@@ -919,6 +920,8 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0105 | W | `{clause} {name} names an item in the records of {file} and another outside them (GnuCOBOL; Enterprise COBOL requires the name qualified): it is read as {name} OF {record}` |
 | IWX0106 | W | `ACCEPT OMITTED (GnuCOBOL; Enterprise COBOL has no screen ACCEPT): a screen ACCEPT with no field, which waits for the next key` |
 | IWX0107 | W | `{name} is not in the records of {file} (GnuCOBOL; Enterprise COBOL takes a {verb} key from the file's records): each record is keyed on bytes {from} to {to}, where {name} lies in its own record` |
+| IWX0108 | W | `DISPLAY with items after its screen phrases (GnuCOBOL; Enterprise COBOL has no screen): each list of items is displayed in turn, at the place its own phrases give or at the cursor` |
+| IWX0109 | W | `SWITCH-{n} (GnuCOBOL's name for its switch {n}; Enterprise COBOL writes UPSI-{n}): it is read as UPSI-{n}, which the UPSI run-time option sets` |
 
 ## Run-time refusals
 

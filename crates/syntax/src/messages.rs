@@ -848,6 +848,7 @@ catalogue! {
     IWS0108 Severe "an inline PERFORM ended by a period with no END-PERFORM: Micro Focus's, not Enterprise COBOL's; --compliance extended reads the period as ending it";
     IWS0120 Error "a period was required before level number {level}: one was assumed";
     IWS0121 Severe "INSPECT {literal} {phrase}: a literal is not a receiving item";
+    IWS0122 Severe "SWITCH-{n}: GnuCOBOL's switches 8 to 36 have no UPSI switch to stand for them; extended reads SWITCH-0 to SWITCH-7";
     IWX0001 Warning "free-form source (Micro Focus and GnuCOBOL; Enterprise COBOL reads fixed form alone): {why the file is read in free form}";
     IWX0002 Warning "constant entry (Micro Focus and GnuCOBOL; Enterprise COBOL has no level 78 and no CONSTANT clause): {name} stands for its value wherever it is used after this entry";
     IWX0003 Warning "<> (Micro Focus and GnuCOBOL; Enterprise COBOL writes NOT =) is read as NOT =";
@@ -945,6 +946,8 @@ catalogue! {
     IWX0105 Warning "{clause} {name} names an item in the records of {file} and another outside them (GnuCOBOL; Enterprise COBOL requires the name qualified): it is read as {name} OF {record}";
     IWX0106 Warning "ACCEPT OMITTED (GnuCOBOL; Enterprise COBOL has no screen ACCEPT): a screen ACCEPT with no field, which waits for the next key";
     IWX0107 Warning "{name} is not in the records of {file} (GnuCOBOL; Enterprise COBOL takes a {verb} key from the file's records): each record is keyed on bytes {from} to {to}, where {name} lies in its own record";
+    IWX0108 Warning "DISPLAY with items after its screen phrases (GnuCOBOL; Enterprise COBOL has no screen): each list of items is displayed in turn, at the place its own phrases give or at the cursor";
+    IWX0109 Warning "SWITCH-{n} (GnuCOBOL's name for its switch {n}; Enterprise COBOL writes UPSI-{n}): it is read as UPSI-{n}, which the UPSI run-time option sets";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.
