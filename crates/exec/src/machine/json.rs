@@ -355,7 +355,8 @@ impl<'p> Machine<'p, '_, '_> {
             None => BAD_ENCODING,
             Some((bytes, unit)) => {
                 let fits = bytes.len() <= receiver.len;
-                let written = text::write_document(&mut self.unit.mem, receiver, &bytes, unit);
+                let space = if self.options.emulates_cobc() { self.json_encode(g, " ", national)?.map(|(s, _)| s) } else { None };
+                let written = text::write_document(&mut self.unit.mem, receiver, &bytes, unit, space.as_deref());
                 if let Some(count) = &g.count {
                     self.set_integer(count, (written / unit) as i64, g.pos)?;
                 }

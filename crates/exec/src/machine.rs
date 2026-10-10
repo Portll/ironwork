@@ -1374,7 +1374,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 let x = self.eval_fixed_at(a, inner, inner, dmax, pos)?;
                 if *op == BinOp::Pow {
                     let n = self.integer(b, pos)?;
-                    return arith::pow(x, n, last, arith, pos);
+                    return arith::pow(x, n, last, arith, self.options.emulates_cobc(), pos);
                 }
                 let y = self.eval_fixed_at(b, inner, inner, dmax, pos)?;
                 if arith::divides_by_zero(*op, &y) {
@@ -1426,7 +1426,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Expr::Neg(inner) => Ok(arith::float_neg(self.eval_float(inner, p, pos)?)),
             Expr::Bin(a, op, b) => {
                 let (x, y) = (self.eval_float(a, p, pos)?, self.eval_float(b, p, pos)?);
-                arith::float_binop(x, *op, y, p, pos)
+                arith::float_binop(x, *op, y, p, self.options.emulates_cobc(), pos)
             }
         }
     }
@@ -1492,7 +1492,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     let p = self.options.arith.float_intermediate();
                     let current = self.eval_float(&Expr::Operand(Operand::Ref(t.r.clone())), p, pos)?;
                     let (x, y) = if receiver_first { (current, value) } else { (value, current) };
-                    arith::float_binop(x, op, y, p, pos).map(Val::Float)
+                    arith::float_binop(x, op, y, p, self.options.emulates_cobc(), pos).map(Val::Float)
                 }
                 (_, outcome) => outcome,
             };

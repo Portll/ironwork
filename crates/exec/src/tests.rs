@@ -12,6 +12,7 @@ mod classes;
 mod collating;
 mod communication;
 mod compliance;
+mod targets;
 mod corresponding;
 mod data;
 mod data_division;

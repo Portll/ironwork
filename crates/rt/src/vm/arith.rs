@@ -144,7 +144,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
                     let current = self.value(Operand::Load(step.target))?;
                     let current = arith::float_operand(current, p, pos)?;
                     let (x, y) = if receiver_first { (current, value) } else { (value, current) };
-                    arith::float_binop(x, op, y, p, pos).map(Val::Float)
+                    arith::float_binop(x, op, y, p, self.p.options.options.emulates_cobc(), pos).map(Val::Float)
                 }
                 (_, outcome) => outcome,
             };

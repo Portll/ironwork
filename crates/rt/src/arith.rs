@@ -63,13 +63,14 @@ pub fn fixed_binop(x: Fixed, op: BinOp, y: Fixed, dmax: u32, arith: Arith, pos: 
 
 /// `x` to the integer power `n` at `dmax` places, as Enterprise COBOL takes an integral exponent in
 /// fixed point (assumption C334): `x` multiplied by itself |n| - 1 times, 1 for an `n` of 0, and for
-/// a negative `n` 1 divided by that power. Zero to a negative power is IGZ0050S; a power that
-/// truncates to zero under a negative `n` is IGZ0222S. An exponent of more than nine digits keeps
-/// its last nine. Past 31 the power is taken by squaring, so an exponent costs its bits, not its value.
-pub fn pow(x: Fixed, n: i64, dmax: u32, arith: Arith, pos: Pos) -> R<Fixed> {
+/// a negative `n` 1 divided by that power. Zero to a negative power is IGZ0050S, and zero compiled
+/// for GnuCOBOL (`cobc`), as cobc gives it; a power that truncates to zero under a negative `n` is
+/// IGZ0222S. An exponent of more than nine digits keeps its last nine. Past 31 the power is taken by
+/// squaring, so an exponent costs its bits, not its value.
+pub fn pow(x: Fixed, n: i64, dmax: u32, arith: Arith, cobc: bool, pos: Pos) -> R<Fixed> {
     let n = n % 1_000_000_000;
     if n < 0 && x.magnitude.is_zero() {
-        return Err(Abend::zero_power(pos));
+        return if cobc { Ok(Fixed::new(0, Places::new(1, 0))) } else { Err(Abend::zero_power(pos)) };
     }
     let mul = |a: Fixed, b: Fixed| a.mul(b, dmax, arith).map_err(|e| fixed_error(e, pos));
     let one = Fixed::new(1, Places::new(1, 0));
@@ -115,28 +116,31 @@ pub fn float_neg(v: Hfp) -> Hfp {
     if v.fraction == 0 { v } else { Hfp { negative: !v.negative, ..v } }
 }
 
-pub fn float_binop(x: Hfp, op: BinOp, y: Hfp, p: Precision, pos: Pos) -> R<Hfp> {
+/// `cobc`: compiled for GnuCOBOL, where zero to a negative power is zero.
+pub fn float_binop(x: Hfp, op: BinOp, y: Hfp, p: Precision, cobc: bool, pos: Pos) -> R<Hfp> {
     let mask = ProgramMask::default();
     let result = match op {
         BinOp::Add => x.add(y, mask),
         BinOp::Sub => x.sub(y, mask),
         BinOp::Mul => x.mul(y, p, mask),
         BinOp::Div => x.div(y, mask),
-        BinOp::Pow => return float_pow(x, y, p, pos),
+        BinOp::Pow => return float_pow(x, y, p, cobc, pos),
     };
     result.map_err(|c| Abend::check(c, pos))
 }
 
 /// x ** y in floating point of precision `p`, nearest to the exact power (assumption C334). Zero
 /// to a positive power is zero, to the power zero 1, and to a negative power IGZ0050S, which ON SIZE
-/// ERROR takes as a size error; a negative base to a power that is not an integer is taken as its
-/// absolute value (Language Reference SC27-8713-03, pp. 296-297, Table 32).
-pub fn float_pow(x: Hfp, y: Hfp, p: Precision, pos: Pos) -> R<Hfp> {
+/// ERROR takes as a size error, or zero compiled for GnuCOBOL (`cobc`); a negative base to a power
+/// that is not an integer is taken as its absolute value (Language Reference SC27-8713-03,
+/// pp. 296-297, Table 32).
+pub fn float_pow(x: Hfp, y: Hfp, p: Precision, cobc: bool, pos: Pos) -> R<Hfp> {
     let (base, power) = (Real::from_hfp(x), Real::from_hfp(y));
     let value = if base.is_zero() {
         match power.compare(Real::ZERO) {
             Ordering::Greater => Real::ZERO,
             Ordering::Equal => Real::ONE,
+            Ordering::Less if cobc => Real::ZERO,
             Ordering::Less => return Err(Abend::zero_power(pos)),
         }
     } else {

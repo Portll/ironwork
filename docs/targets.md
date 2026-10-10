@@ -56,14 +56,15 @@ gnucobol`, or under `--compliance extended`, `relaxed` or `loose`.
 | ORD, CHAR and a contained program under a PROGRAM COLLATING SEQUENCE | the program's sequence | native; a contained program its own | not yet |
 | CANCEL of a program CALLed by a literal | no action under NODYNAM | the program is reset; give `CBL DYNAM` | by card |
 | ALTER in an independent segment | put back on entry | never put back | not yet |
-| The rest of a JSON GENERATE receiver | kept | spaces | not yet |
+| The rest of a JSON or XML GENERATE receiver | kept | spaces, in the document's encoding | yes |
 | INSPECT of a national item | national characters | bytes | not yet |
 | An intermediate result of more than 30 digits | cut to 30 (31) | every digit kept | not yet |
 | MEAN, MEDIAN, NUMVAL and COMBINED-DATETIME | floating point, rounded | exact decimal, truncated | not yet |
 | MAX, MIN, RANGE, REM, SUM; INTEGER, INTEGER-PART, MOD of fixed-point arguments | IBM's places | cobc's fields | not yet |
 | Invalid decimal data, and a zero divisor outside ON SIZE ERROR | S0C7, S0CB, S0C9 | the run goes on | not yet |
 | An OPEN or CLOSE that fails with no FILE STATUS and no declarative | a logic error on the next statement | the run ends at the OPEN | not yet |
-| A function argument outside what it takes; zero to a negative power | U4038 with LE's message | a value, and the run goes on | not yet |
+| Zero to a negative power, with or without ON SIZE ERROR (C334) | a size error; without the phrase U4038 with IGZ0050S | zero, and the run goes on | yes |
+| A function argument outside what it takes, such as `CHAR(0)` (C452) | U4038 with LE's message | CHAR the sequence's first character, a function of characters none, any other zero, RANDOM the seed's magnitude; the run goes on | yes |
 | C16, C54, C99, C112, C181, C333, C391 ([dialect.md](dialect.md) §5.5) | ironwork's chosen result | cobc's | not yet |
 
 "Not yet" rows give IBM's result under every target. Each is a task under ironwork-roadmap 29.3,

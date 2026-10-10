@@ -154,7 +154,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             Expr::Pow(base, exponent) => {
                 let x = self.eval_number_at(*base, inner, inner, pos)?.fixed();
                 let n = self.int(exponent, pos)?;
-                Ok(Number::Fixed(arith::pow(x, n, last, arith, pos)?))
+                Ok(Number::Fixed(arith::pow(x, n, last, arith, self.p.options.options.emulates_cobc(), pos)?))
             }
         }
     }
@@ -258,7 +258,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             Expr::Bin(a, op, b) => {
                 let x = self.eval_float(*a, p, pos)?;
                 let y = self.eval_float(*b, p, pos)?;
-                Ok(arith::float_binop(x, *op, y, p, pos)?)
+                Ok(arith::float_binop(x, *op, y, p, self.p.options.options.emulates_cobc(), pos)?)
             }
             Expr::Pow(base, exponent) => {
                 let x = self.eval_float(*base, p, pos)?;
@@ -271,7 +271,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                     IntExpr::Fixed { expr, .. } => self.eval_float(*expr, p, pos)?,
                     IntExpr::Walk(_) => return Err(not_yet("a JSON walk subscript as an exponent")),
                 };
-                Ok(arith::float_binop(x, BinOp::Pow, y, p, pos)?)
+                Ok(arith::float_binop(x, BinOp::Pow, y, p, self.p.options.options.emulates_cobc(), pos)?)
             }
         }
     }

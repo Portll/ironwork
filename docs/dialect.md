@@ -243,7 +243,7 @@ cobc option removes one, it is named.
 | ORD, CHAR and a contained program under a PROGRAM COLLATING SEQUENCE | ordinals in the program's sequence; a contained program takes its container's | ORD and CHAR native; a contained program has its own (libcob/intrinsic.c, cobc/codegen.c) | test programs |
 | CANCEL of a program CALLed by a literal | no action under NODYNAM, IBM's default (Language Reference, CANCEL) | the program is reset; `-fstatic-call` does not change it. Give ironwork `CBL DYNAM` to compare | CCVS85 IC203A; corpus |
 | ALTER in an independent segment | the altered GO TOs are put back each time the segment is entered from one of another priority (Language Reference, Procedures) | never put back: `-std=ibm-strict` sets `section-segments: ignore`; `-fsection-segments=ok` passes | CCVS85 SG102A, SG103A, SG201A, SG203A |
-| The rest of a JSON GENERATE receiver | kept as it was (Language Reference, JSON GENERATE) | filled with spaces (libcob/mlio.c) | corpus |
+| The rest of a JSON GENERATE receiver | kept as it was (Language Reference, JSON GENERATE); under `gnucobol` spaces in the document's encoding, as cobc's | filled with spaces (libcob/mlio.c) | corpus |
 | INSPECT of a national item | counts national characters | counts bytes (libcob/strings.c) | corpus |
 | An intermediate result of more than 30 digits | cut to 30 (31 under ARITH(EXTEND)) (Programming Guide, Truncated intermediate results; C1) | every digit kept | probe |
 | MEAN, MEDIAN, NUMVAL and COMBINED-DATETIME | floating-point results, rounded into the receiver (C111, chosen; Programming Guide on NUMVAL; C6) | exact decimal, truncated | corpus; test programs |
@@ -253,8 +253,8 @@ cobc option removes one, it is named.
 | Invalid decimal data, and a zero divisor outside ON SIZE ERROR | the program check: S0C7, S0CB or S0C9 | runs on, the receiver unchanged by the division; under `-debug` invalid data stops the run | test programs; corpus |
 | A main program whose control runs past its last statement | U4038 with IGZ0037S, placed at the last paragraph (Language Reference, Transfer of control; C456); under `gnucobol` the run ends as GOBACK ends it, as cobc's does | ends normally, return code RETURN-CODE | probe; 4.6% of corpus programs have no STOP RUN, GOBACK or EXIT PROGRAM |
 | An OPEN or CLOSE of an indexed or relative file that fails, with no FILE STATUS and no declarative | control returns, and the next statement on the file is a logic error, U4038 with IGZ0020S (Programming Guide, Handling errors in VSAM files; C451) | the run ends at the OPEN: `libcob: error: file does not exist (status = 35)` | probe |
-| An intrinsic function's argument outside what it takes, such as `FUNCTION CHAR(0)` and `FUNCTION RANDOM(-1)` | U4038 with Language Environment's message, IGZ0162S and IGZ0163S for these (C452) | a value, and the run goes on: CHAR(0) gives a space | probe |
-| Zero to a negative power, with no ON SIZE ERROR | the run ends abnormally (Language Reference, SIZE ERROR phrases), U4038 with IGZ0050S, in fixed point as in floating point (C334) | 0, and the run goes on | probe |
+| An intrinsic function's argument outside what it takes, such as `FUNCTION CHAR(0)` and `FUNCTION RANDOM(-1)` | U4038 with Language Environment's message, IGZ0162S and IGZ0163S for these (C452); under `gnucobol` cobc's value | a value, and the run goes on: CHAR(0) gives X'00', the first character of the sequence, a numeric function zero and a function of characters none | probe |
+| Zero to a negative power, with no ON SIZE ERROR | the run ends abnormally (Language Reference, SIZE ERROR phrases), U4038 with IGZ0050S, in fixed point as in floating point (C334); under `gnucobol` zero, as cobc's | 0, and the run goes on, with no size error even under ON SIZE ERROR | probe |
 
 ### 5.3 cobc bugs
 
@@ -287,7 +287,7 @@ The survey's ironwork bugs each changed results under `ibm`. All are fixed, and 
 | C333, a BY VALUE argument to a parameter received BY REFERENCE | the parameter gets storage of its own holding the value, and the called program runs | the value is read as an address, and the program faults | the Language Reference requires BY VALUE on both sides (p. 322) and gives no result; what the value addresses has no counterpart in ironwork's storage |
 | C391, the integer places of MAX and MIN | as many as the widest argument's: MAX(N M), N `999` 5, M `9(5)` 4, moved to an alphanumeric item gives `00005` | the winning argument's own field: `005` | that field keeps the winning argument's decimal places too, which IBM documents (C390), so switching the integer places alone gives cobc's digits only where the arguments' decimal places agree |
 | No assumption: DISPLAY of LENGTH OF | its value's 9 digits | a fixed size's LENGTH OF folded to a literal (`4`), a variable one `+0000000004` | unrecorded; it needs an assumption first |
-| No assumption: the rest of an XML GENERATE receiver | kept as it was | filled with spaces (libcob/mlio.c) | unrecorded; C119 does not say it |
+| No assumption: the rest of an XML GENERATE receiver | kept as it was; under `gnucobol` spaces, as cobc's (with JSON GENERATE's, [targets.md](targets.md)) | filled with spaces (libcob/mlio.c) | unrecorded; C119 does not say it |
 
 ### 5.6 Programs one compiler refuses
 

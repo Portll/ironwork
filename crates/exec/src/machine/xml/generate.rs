@@ -265,7 +265,8 @@ impl<'p> Machine<'p, '_, '_> {
         let substituted = matches!(encoding, Encoding::Page(page) if document.chars().any(|c| page.encode_char(c).is_none()));
         let (bytes, unit) = (encoding.encode(&document), if national { 2 } else { 1 });
         let fits = bytes.len() <= receiver.len;
-        let written = rt::json::write_document(&mut self.unit.mem, receiver, &bytes, unit);
+        let space = self.options.emulates_cobc().then(|| encoding.encode(" "));
+        let written = rt::json::write_document(&mut self.unit.mem, receiver, &bytes, unit, space.as_deref());
         if let Some(count) = &x.count {
             self.set_integer(count, (written / unit) as i64, x.pos)?;
         }

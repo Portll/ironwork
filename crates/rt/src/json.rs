@@ -33,10 +33,18 @@ pub fn encoded(document: &str, national: bool, ccsid: Option<u16>) -> Option<(Ve
 }
 
 /// Writes as much of a JSON or XML GENERATE document as fits in the receiver in whole character
-/// positions of `unit` bytes, and returns how many bytes that is.
-pub fn write_document(mem: &mut [u8], receiver: Loc, bytes: &[u8], unit: usize) -> usize {
+/// positions of `unit` bytes, and returns how many bytes that is. The rest of the receiver is kept,
+/// as Enterprise COBOL keeps it, or with `space`, the document encoding's space, filled with it, as
+/// cobc fills it.
+pub fn write_document(mem: &mut [u8], receiver: Loc, bytes: &[u8], unit: usize, space: Option<&[u8]>) -> usize {
     let written = if bytes.len() <= receiver.len { bytes.len() } else { receiver.len - receiver.len % unit };
     store::write(mem, Loc { len: written, ..receiver }, &bytes[..written]);
+    if let Some(space) = space.filter(|s| !s.is_empty()) {
+        let rest = &mut mem[receiver.offset + written..receiver.offset + receiver.len];
+        for (k, byte) in rest.iter_mut().enumerate() {
+            *byte = space[k % space.len()];
+        }
+    }
     written
 }
 

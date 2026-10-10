@@ -128,8 +128,29 @@ pub fn refmod(value: Val, pos: Pos, bounds: impl FnOnce() -> R<(i64, Option<i64>
     Ok(if unit == 2 { Val::National(part) } else { Val::Bytes(part) })
 }
 
-/// A function of its arguments' values. `side` is TRIM's LEADING or TRAILING.
+/// The conditions Language Environment signals for an argument outside what a function takes
+/// (assumption C452).
+const ARGUMENT_CONDITIONS: &[&str] = &[
+    "IGZ0029S", "IGZ0030S", "IGZ0100S", "IGZ0159S", "IGZ0160S", "IGZ0161S", "IGZ0162S", "IGZ0215S", "IGZ0216S", "IGZ0217S", "IGZ0218S", "IGZ0348S", "IGZ0372S",
+    "IGZ0373S", "IGZ0374S",
+];
+
+/// A function of its arguments' values. `side` is TRIM's LEADING or TRAILING. Compiled for
+/// GnuCOBOL, an argument outside what the function takes gives what cobc gives instead of the
+/// condition: no characters, CHAR the sequence's first character, and zero (C452).
 pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args: &mut Vec<Val>, pos: Pos) -> R<Val> {
+    let facts = x.facts();
+    match checked(x, name, side, args, pos) {
+        Err(a) if facts.options().emulates_cobc() && ARGUMENT_CONDITIONS.iter().any(|id| a.message.starts_with(id)) => Ok(match name {
+            "CHAR" => Val::Bytes(facts.character(1).into_iter().collect()),
+            _ if super::CHARACTER_VALUED.contains(&name) => Val::Bytes(Vec::new()),
+            _ => integer(0, 1),
+        }),
+        result => result,
+    }
+}
+
+fn checked(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args: &mut Vec<Val>, pos: Pos) -> R<Val> {
     let facts = x.facts();
     let page = facts.page();
     let arity = |n: RangeInclusive<usize>| {
@@ -278,7 +299,7 @@ pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args
         "RANDOM" => {
             arity(0..=1)?;
             let seed = if x.written() == 0 { None } else { Some(x.integer(0, pos)?) };
-            Val::Float(random(x.random(), seed, pos)?)
+            Val::Float(random(x.random(), seed, facts.options().emulates_cobc(), pos)?)
         }
         _ => more(x, name, args, pos)?,
     })
@@ -336,9 +357,11 @@ fn float_function(facts: &dyn ProgramFacts, name: &str, args: &[Val], pos: Pos) 
 }
 
 /// FUNCTION RANDOM: the next number of the run unit's sequence, as long HFP. A seed starts a
-/// new sequence (Language Reference SC27-8713-03, p. 629); the generator is assumption C54.
-fn random(state: &mut Option<u32>, seed: Option<i64>, pos: Pos) -> R<Hfp> {
+/// new sequence (Language Reference SC27-8713-03, p. 629); the generator is assumption C54. A
+/// negative seed is IGZ0163S, and compiled for GnuCOBOL (`cobc`) the seed of its magnitude.
+fn random(state: &mut Option<u32>, seed: Option<i64>, cobc: bool, pos: Pos) -> R<Hfp> {
     const MODULUS: u64 = 2_147_483_647;
+    let seed = if cobc { seed.map(|n| n.saturating_abs()) } else { seed };
     let current = match (seed, *state) {
         (Some(n), _) if n < 0 => return Err(out_of_range("IGZ0163S", "Argument-1 for function RANDOM was less than zero.".into(), n, pos)),
         (Some(n), _) => n as u64 % (MODULUS - 1) + 1,

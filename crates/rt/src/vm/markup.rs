@@ -212,9 +212,9 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
 
     /// The document written into the receiver, as much of it as fits in whole character
     /// positions, and COUNT IN; whether it all fits.
-    fn write_document(&mut self, receiver: Loc, bytes: &[u8], unit: usize, count: Option<(PlaceId, StorePlan)>, pos: Pos) -> R<bool> {
+    fn write_document(&mut self, receiver: Loc, (bytes, space): (&[u8], Option<Vec<u8>>), unit: usize, count: Option<(PlaceId, StorePlan)>, pos: Pos) -> R<bool> {
         let fits = bytes.len() <= receiver.len;
-        let written = json::write_document(&mut self.unit.mem, receiver, bytes, unit);
+        let written = json::write_document(&mut self.unit.mem, receiver, bytes, unit, space.as_deref());
         if let Some((place, _)) = count {
             self.set_register(place, (written / unit) as i64, pos)?;
         }
@@ -292,7 +292,8 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             Ccsid::Operand(o) => ccsid_of(self.value(o)?),
         };
         let Some((bytes, unit)) = json::encoded(&document, national, ccsid) else { return Ok(json::BAD_ENCODING) };
-        let fits = self.write_document(receiver, &bytes, unit, g.count, pos)?;
+        let space = self.p.options.options.emulates_cobc().then(|| json::encoded(" ", national, ccsid)).flatten().map(|(s, _)| s);
+        let fits = self.write_document(receiver, (&bytes, space), unit, g.count, pos)?;
         Ok(if fits { 0 } else { json::RECEIVER_TOO_SMALL })
     }
 
@@ -427,7 +428,8 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         }
         let substituted = matches!(encoding, Encoding::Page(page) if document.chars().any(|c| page.encode_char(c).is_none()));
         let (bytes, unit) = (encoding.encode(&document), if national { 2 } else { 1 });
-        let fits = self.write_document(receiver, &bytes, unit, x.count, pos)?;
+        let space = self.p.options.options.emulates_cobc().then(|| encoding.encode(" "));
+        let fits = self.write_document(receiver, (&bytes, space), unit, x.count, pos)?;
         Ok(if !fits {
             RECEIVER_TOO_SMALL
         } else if w.illegal {
