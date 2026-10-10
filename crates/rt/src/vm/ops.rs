@@ -226,6 +226,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 if matches!(dest.kind, Kind::Binary { .. } | Kind::Zoned { .. })
                     && !matches!(plan, MovePlan::Refused(_))
                     && super::place::plain(&self.p.places[p as usize])
+                    && !(self.p.options.options.emulates_cobc() && store::holds_characters(src, dest, store::bytes(&self.unit.mem, src)))
                     && let Some(n) = store::read_integer(&self.facts(), &self.unit.mem, src)
                 {
                     let value = Fixed::new(i128::from(n), places_of(src.kind));

@@ -114,3 +114,77 @@ fn a_gnucobol_target_gives_cobcs_values_for_arguments_out_of_range_and_ibm_ends_
         assert!(ibm.ending.as_ref().is_err_and(|a| a.message.starts_with("IGZ0162S")), "{name}: {:?}", ibm.ending);
     }
 }
+
+/// Divisions by zero outside ON SIZE ERROR: DIVIDE GIVING, COMPUTE with two receivers, REMAINDER,
+/// INTO, and floating point.
+const ZERO_DIVISOR: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. ZERODIV.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 A PIC 9(3) VALUE 5.\n",
+    "       01 B PIC 9(3) VALUE 0.\n",
+    "       01 Q PIC 9(3) VALUE 7.\n",
+    "       01 R PIC 9(3) VALUE 8.\n",
+    "       01 P PIC 9(3) VALUE 9.\n",
+    "       01 F COMP-2 VALUE 3.\n",
+    "       01 Z COMP-2 VALUE 0.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DIVIDE A BY B GIVING Q\n",
+    "           DISPLAY 'DIVIDE ' Q\n",
+    "           COMPUTE Q P = A / B\n",
+    "           DISPLAY 'COMPUTE ' Q ' ' P\n",
+    "           DIVIDE A BY B GIVING Q REMAINDER R\n",
+    "           DISPLAY 'REMAINDER ' Q ' ' R\n",
+    "           DIVIDE B INTO A\n",
+    "           DISPLAY 'INTO ' A\n",
+    "           COMPUTE F = F / Z\n",
+    "           IF F = 3 DISPLAY 'FLOAT KEPT' END-IF\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn a_zero_divisor_leaves_its_receivers_for_a_gnucobol_target_and_ends_the_run_for_ibm() {
+    // cobc 3.2's output: each receiver keeps its value and the run goes on.
+    let expected = "DIVIDE 007\nCOMPUTE 007 009\nREMAINDER 007 008\nINTO 005\nFLOAT KEPT\n";
+    let walked = Harness::source(ZERO_DIVISOR).flags(EXTENDED).run(Executor::Interpreter);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{}", walked.err);
+    let vm = Harness::source(ZERO_DIVISOR).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+    for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+        let ibm = Harness::source(ZERO_DIVISOR).run(executor);
+        assert!(ibm.ending.as_ref().is_err_and(|a| a.message.starts_with("CEE3211S")), "{name}: {:?}", ibm.ending);
+    }
+}
+
+/// Zoned items holding letters MOVEd to zoned items of other sizes and scales.
+const ZONED_CHARACTERS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. ZONEDCH.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 G1.\n",
+    "          05 Z1 PIC 9(4).\n",
+    "       01 G6.\n",
+    "          05 Z6 PIC 9(6).\n",
+    "       01 G2.\n",
+    "          05 Z2 PIC 9(2).\n",
+    "       01 GD.\n",
+    "          05 ZD PIC 9(2)V99.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE 'A1B2' TO G1\n",
+    "           MOVE Z1 TO Z6 Z2 ZD\n",
+    "           DISPLAY '[' G6 '][' G2 '][' GD ']'\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn a_gnucobol_target_copies_a_zoned_senders_characters_and_ibm_moves_its_digits() {
+    // cobc 3.2 copies each digit's byte, aligned on the decimal point, '0' where there is none.
+    for (name, executor, again) in [("interpreter", Executor::Interpreter, Executor::Interpreter), ("VM", Executor::Vm, Executor::Vm)] {
+        let cobc = Harness::source(ZONED_CHARACTERS).flags(EXTENDED).run(executor);
+        assert_eq!(cobc.out, "[00A1B2][B2][B200]\n", "{name}: {}", cobc.err);
+        let ibm = Harness::source(ZONED_CHARACTERS).run(again);
+        assert_eq!(ibm.out, "[001122][22][2200]\n", "{name}: {}", ibm.err);
+    }
+}

@@ -49,7 +49,7 @@ gnucobol`, or under `--compliance extended`, `relaxed` or `loose`.
 | ACCEPT into an item longer than a line | the next records fill it | one line, the rest spaces | not yet |
 | ACCEPT into a numeric item | the characters as they come | moved as an alphanumeric MOVE does | not yet |
 | MOVE of an alphanumeric item to a numeric one | an unsigned integer (C240) | sign, point and spaces read | not yet |
-| MOVE of a zoned item to a zoned one | each digit's low half, zone F (C260) | the bytes copied | not yet |
+| MOVE of a zoned item holding other characters than digits to a zoned one (C260) | each digit's low half, zone F | each digit's byte copied, aligned on the decimal point | yes |
 | A receiving group holding its own OCCURS DEPENDING ON object | its maximum length | the object's current value | not yet |
 | `ADD X TO X Y` | the sum kept for every receiver | X read again for Y | not yet |
 | A signed zoned item of spaces compared with SPACES under ZWB | not equal | equal | not yet |
@@ -61,7 +61,8 @@ gnucobol`, or under `--compliance extended`, `relaxed` or `loose`.
 | An intermediate result of more than 30 digits | cut to 30 (31) | every digit kept | not yet |
 | MEAN, MEDIAN, NUMVAL and COMBINED-DATETIME | floating point, rounded | exact decimal, truncated | not yet |
 | MAX, MIN, RANGE, REM, SUM; INTEGER, INTEGER-PART, MOD of fixed-point arguments | IBM's places | cobc's fields | not yet |
-| Invalid decimal data, and a zero divisor outside ON SIZE ERROR | S0C7, S0CB, S0C9 | the run goes on | not yet |
+| A zero divisor outside ON SIZE ERROR | S0CB, S0C9 or S0CF | the receiver kept as it was, and the run goes on | yes |
+| Invalid decimal data in arithmetic | S0C7 | the run goes on | not yet |
 | An OPEN or CLOSE that fails with no FILE STATUS and no declarative | a logic error on the next statement | the run ends at the OPEN | not yet |
 | Zero to a negative power, with or without ON SIZE ERROR (C334) | a size error; without the phrase U4038 with IGZ0050S | zero, and the run goes on | yes |
 | A function argument outside what it takes, such as `CHAR(0)` (C452) | U4038 with LE's message | CHAR the sequence's first character, a function of characters none, any other zero, RANDOM the seed's magnitude; the run goes on | yes |

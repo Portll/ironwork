@@ -1496,7 +1496,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 }
                 (_, outcome) => outcome,
             };
-            let Some(value) = arith::size_error(outcome, handler.is_some())? else {
+            let Some(value) = arith::size_error(outcome, handler.is_some(), self.options.emulates_cobc())? else {
                 size_error = true;
                 continue;
             };

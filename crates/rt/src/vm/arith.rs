@@ -77,6 +77,8 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
         let value = match outcome {
             Ok(value) => value,
             Err(a) if plan.handled && a.size_error() => return Ok(Step::Arm(1)),
+            // Compiled for GnuCOBOL, a zero divisor leaves the receiver as it was, as cobc does.
+            Err(a) if self.p.options.options.emulates_cobc() && a.divides_by_zero() => return Ok(Step::Next),
             Err(a) => return Err(a.into()),
         };
         let counted = match value {
@@ -148,7 +150,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
                 }
                 (_, outcome) => outcome,
             };
-            let Some(value) = arith::size_error(outcome, plan.handled)? else {
+            let Some(value) = arith::size_error(outcome, plan.handled, self.p.options.options.emulates_cobc())? else {
                 size_error = true;
                 continue;
             };

@@ -52,6 +52,11 @@ impl Abend {
     pub fn size_error(&self) -> bool {
         self.code.size_error()
     }
+
+    /// A divide check: a fixed-point, decimal or floating-point division by zero.
+    pub fn divides_by_zero(&self) -> bool {
+        matches!(self.code, AbendCode::Check(ProgramCheck::FixedPointDivide | ProgramCheck::DecimalDivide | ProgramCheck::HfpDivide))
+    }
 }
 
 /// A severity-3 Language Environment condition the runtime signals and a statement may take before

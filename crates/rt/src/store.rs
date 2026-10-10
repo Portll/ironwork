@@ -687,6 +687,9 @@ fn moved_unchecked(facts: &dyn ProgramFacts, src: Loc, dest: Loc) -> bool {
 /// or sign are not decimal, its bytes as stored, after INVDATA(CLEANSIGN), which `assign` carries
 /// to the receiver unchecked.
 pub fn move_sender(facts: &dyn ProgramFacts, mem: &[u8], src: Loc, dest: Loc, pos: Pos) -> R<Val> {
+    if facts.options().emulates_cobc() && holds_characters(src, dest, bytes(mem, src)) {
+        return Ok(Val::Bytes(bytes(mem, src).to_vec()));
+    }
     match read(facts, mem, src, pos) {
         Err(Abend { code: AbendCode::Check(ProgramCheck::Data), .. }) if moved_unchecked(facts, src, dest) => {
             let stored = bytes(mem, src);
@@ -695,6 +698,18 @@ pub fn move_sender(facts: &dyn ProgramFacts, mem: &[u8], src: Loc, dest: Loc, po
         }
         value => value,
     }
+}
+
+/// Whether a zoned sender with no separate sign, moved to a zoned receiver with none, holds a byte
+/// that is no digit character outside its sign position: cobc, which reads characters, copies it.
+pub fn holds_characters(src: Loc, dest: Loc, b: &[u8]) -> bool {
+    let in_place = |kind: Kind| matches!(kind, Kind::Zoned { sign: None | Some(SignClause { separate: false, .. }), .. });
+    let Kind::Zoned { signed, sign, .. } = src.kind else { return false };
+    if !in_place(src.kind) || !in_place(dest.kind) || b.is_empty() {
+        return false;
+    }
+    let sign_at = if matches!(sign, Some(SignClause { position: SignPosition::Leading, .. })) { 0 } else { b.len() - 1 };
+    b.iter().enumerate().any(|(i, &x)| (x >> 4 != 0x0F || x & 0x0F > 9) && !(signed && i == sign_at))
 }
 
 /// A zoned or packed item's digits as half-bytes, most significant first, and its sign half-byte
@@ -721,14 +736,24 @@ fn digit_halves(kind: Kind, b: &[u8]) -> (Vec<u8>, Option<u8>) {
 /// A zoned or packed sender whose digits or sign are not decimal, moved to a zoned or packed
 /// receiver as PACK and UNPK move it: each receiver digit takes the sender's digit of the same
 /// power of ten, zero where there is none, and the data exception comes where the receiver is next
-/// read as a number (C260).
+/// read as a number (C260). Compiled for GnuCOBOL, a zoned receiver with no separate sign takes the
+/// digit bytes of a zoned sender with none as stored, '0' where there is none, as cobc copies them.
 fn carry_digits<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, H, L>, dest: Loc, src: Loc, sender: &[u8], pos: Pos) -> R<()> {
     if packed_copy(facts, src, dest) {
         unit.write(dest.offset, sender);
         return Ok(());
     }
-    let (halves, sign) = digit_halves(src.kind, sender);
     let power = |loc: Loc| i64::from(scaling(facts, loc)) - i64::from(places_of(loc.kind).dec);
+    let in_place = |kind: Kind| matches!(kind, Kind::Zoned { sign: None | Some(SignClause { separate: false, .. }), .. });
+    if facts.options().emulates_cobc() && in_place(src.kind) && in_place(dest.kind) {
+        let (m, n) = (sender.len() as i64, dest.len as i64);
+        let shift = m - n + power(src) - power(dest);
+        let zero = facts.page().encode_char('0').unwrap_or(0xF0);
+        let copied: Vec<u8> = (0..n).map(|j| usize::try_from(j + shift).ok().and_then(|i| sender.get(i)).copied().unwrap_or(zero)).collect();
+        unit.write(dest.offset, &copied);
+        return Ok(());
+    }
+    let (halves, sign) = digit_halves(src.kind, sender);
     let (m, n) = (halves.len() as i64, dest.kind.digits_scale().map_or(0, |(d, _)| d) as i64);
     let shift = m - n + power(src) - power(dest);
     let aligned: Vec<u8> = (0..n).map(|j| usize::try_from(j + shift).ok().and_then(|i| halves.get(i)).copied().unwrap_or(0)).collect();

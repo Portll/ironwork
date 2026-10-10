@@ -162,10 +162,11 @@ pub fn remainder(x: Fixed, y: Fixed, quotient_scale: u32, dmax: u32, arith: Arit
 }
 
 /// A receiver's result when `handled` (ON or NOT ON SIZE ERROR is written): a zero divisor or zero
-/// to a negative power is then a size error, None, and the receiver keeps its value.
-pub fn size_error(outcome: R<Val>, handled: bool) -> R<Option<Val>> {
+/// to a negative power is then a size error, None, and the receiver keeps its value. Compiled for
+/// GnuCOBOL (`cobc`), a zero divisor leaves the receiver as it was without the phrase too, as cobc does.
+pub fn size_error(outcome: R<Val>, handled: bool, cobc: bool) -> R<Option<Val>> {
     match outcome {
-        Err(a) if handled && a.size_error() => Ok(None),
+        Err(a) if handled && a.size_error() || cobc && a.divides_by_zero() => Ok(None),
         other => other.map(Some),
     }
 }
