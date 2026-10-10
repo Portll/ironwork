@@ -256,8 +256,9 @@ fn share_configuration(outer: &Environment, inner: &mut Environment) {
     if inner.currency.is_empty() {
         inner.currency.clone_from(&outer.currency);
     }
-    if inner.collating_sequence.is_none() {
+    if inner.collating_sequence.is_none() && outer.collating_sequence.is_some() {
         inner.collating_sequence.clone_from(&outer.collating_sequence);
+        inner.collating_sequence_inherited = true;
     }
     for (name, alphabet) in &outer.alphabets {
         if !inner.alphabets.iter().any(|(n, _)| n == name) {

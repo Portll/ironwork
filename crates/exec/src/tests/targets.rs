@@ -505,3 +505,49 @@ fn a_gnucobol_target_tallies_a_national_items_characters_in_bytes_and_ibm_in_cha
         }
     }
 }
+
+/// ORD, CHAR, ORD-MAX and ORD-MIN, a comparison and a contained program's comparison under a
+/// PROGRAM COLLATING SEQUENCE, each checked by an order no character set changes.
+const ORDINALS_UNDER_A_SEQUENCE: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. ORDSEQ.\n",
+    "       ENVIRONMENT DIVISION.\n",
+    "       CONFIGURATION SECTION.\n",
+    "       OBJECT-COMPUTER. X PROGRAM COLLATING SEQUENCE IS REV.\n",
+    "       SPECIAL-NAMES.\n",
+    "           ALPHABET REV IS 'Z' 'Y' 'X' 'A' 'B'.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 N PIC 9(3).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           IF FUNCTION ORD('Z') > FUNCTION ORD('A')\n",
+    "               DISPLAY 'ORD NATIVE' ELSE DISPLAY 'ORD SEQUENCE'\n",
+    "           END-IF\n",
+    "           IF FUNCTION CHAR(1) = X'00'\n",
+    "               DISPLAY 'CHAR NATIVE' ELSE DISPLAY 'CHAR SEQUENCE'\n",
+    "           END-IF\n",
+    "           COMPUTE N = FUNCTION ORD-MAX('A' 'Z' 'B') DISPLAY N\n",
+    "           COMPUTE N = FUNCTION ORD-MIN('A' 'Z' 'B') DISPLAY N\n",
+    "           IF 'Z' < 'A' DISPLAY 'Z LT A' END-IF\n",
+    "           CALL 'INNER'\n",
+    "           STOP RUN.\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. INNER.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           IF 'Z' < 'A' DISPLAY 'INNER Z LT A'\n",
+    "           ELSE DISPLAY 'INNER NATIVE' END-IF\n",
+    "           GOBACK.\n",
+    "       END PROGRAM INNER.\n",
+    "       END PROGRAM ORDSEQ.\n",
+);
+
+#[test]
+fn a_gnucobol_target_gives_ord_and_char_natively_and_a_contained_program_its_own_sequence() {
+    // cobc 3.2's output, by default and under -std=ibm-strict.
+    for (flags, expected) in [(EXTENDED, "ORD NATIVE\nCHAR NATIVE\n003\n002\nZ LT A\nINNER NATIVE\n"), (&[][..], "ORD SEQUENCE\nCHAR SEQUENCE\n003\n002\nZ LT A\nINNER Z LT A\n")] {
+        for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+            let ran = Harness::source(ORDINALS_UNDER_A_SEQUENCE).flags(flags).run(executor);
+            assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{flags:?} {name}: {}", ran.err);
+        }
+    }
+}

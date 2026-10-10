@@ -53,7 +53,7 @@ gnucobol`, or under `--compliance extended`, `relaxed` or `loose`.
 | A receiving group holding its own OCCURS DEPENDING ON object | its maximum length | the object's current value | not yet |
 | `ADD X TO X Y`, and SUBTRACT and MULTIPLY with one sending item | the sending item read once for every receiver | read again for each receiver, after the one before is stored; two or more sending operands summed once, as IBM sums them | yes |
 | A signed zoned item compared with an alphanumeric operand (C221) | the sign byte's zone made F under ZWB, so a space reads as 0 | a sign removed from a digit; a space kept; another character read as 0 | yes |
-| ORD, CHAR and a contained program under a PROGRAM COLLATING SEQUENCE | the program's sequence | native; a contained program its own | not yet |
+| ORD, CHAR and a contained program under a PROGRAM COLLATING SEQUENCE | the program's sequence | native, ironwork's being EBCDIC's ([dialect.md](dialect.md) §5.1); ORD-MAX and ORD-MIN the program's; a contained program its own | yes |
 | CANCEL of a program CALLed by a literal | no action under NODYNAM | the program is reset; give `CBL DYNAM` | by card |
 | ALTER in an independent segment | put back on entry | never put back | not yet |
 | The rest of a JSON or XML GENERATE receiver | kept | spaces, in the document's encoding | yes |

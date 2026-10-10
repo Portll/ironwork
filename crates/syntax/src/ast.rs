@@ -974,6 +974,8 @@ pub struct Environment {
     pub alphabets: Vec<(String, Alphabet)>,
     /// OBJECT-COMPUTER PROGRAM COLLATING SEQUENCE.
     pub collating_sequence: Option<String>,
+    /// Whether the collating sequence is the containing program's.
+    pub collating_sequence_inherited: bool,
     /// I-O-CONTROL SAME RECORD AREA and SAME AREA clauses, each with the files it names.
     pub same_record_areas: Vec<Vec<String>>,
     pub same_areas: Vec<Vec<String>>,

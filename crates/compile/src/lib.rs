@@ -321,6 +321,10 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     if options.intdate == numeric::IntDate::Lilian {
         program.paragraphs.iter_mut().for_each(|p| ceecbldy_to_ceedays(&mut p.statements, &mut errors));
     }
+    // cobc gives a contained program its own collating sequence, native unless it names one.
+    if options.emulates_cobc() && program.environment.collating_sequence_inherited {
+        program.environment.collating_sequence = None;
+    }
     for (name, alphabet) in &program.environment.alphabets {
         if program.environment.collating_sequence.as_ref() != Some(name)
             && let Err((message, m)) = collating::Sequence::of(alphabet, options.code_page(), options.quote)

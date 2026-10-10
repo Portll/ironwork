@@ -137,12 +137,12 @@ const ARGUMENT_CONDITIONS: &[&str] = &[
 
 /// A function of its arguments' values. `side` is TRIM's LEADING or TRAILING. Compiled for
 /// GnuCOBOL, an argument outside what the function takes gives what cobc gives instead of the
-/// condition: no characters, CHAR the sequence's first character, and zero (C452).
+/// condition: no characters, CHAR X'00', the native sequence's first character, and zero (C452).
 pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args: &mut Vec<Val>, pos: Pos) -> R<Val> {
     let facts = x.facts();
     match checked(x, name, side, args, pos) {
         Err(a) if facts.options().emulates_cobc() && ARGUMENT_CONDITIONS.iter().any(|id| a.message.starts_with(id)) => Ok(match name {
-            "CHAR" => Val::Bytes(facts.character(1).into_iter().collect()),
+            "CHAR" => Val::Bytes(vec![0]),
             _ if super::CHARACTER_VALUED.contains(&name) => Val::Bytes(Vec::new()),
             _ => integer(0, 1),
         }),
@@ -165,14 +165,16 @@ fn checked(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args: &mu
         "CHAR" => {
             arity(1..=1)?;
             let n = x.integer(0, pos)?;
-            let c = facts.character(n).ok_or_else(|| out_of_range("IGZ0162S", "Argument-1 for function CHAR was less than 1 or greater than the number of positions in the program collating sequence.".into(), n, pos))?;
+            let native = |n: i64| u8::try_from(n - 1).ok();
+            let c = if facts.options().emulates_cobc() { native(n) } else { facts.character(n) }.ok_or_else(|| out_of_range("IGZ0162S", "Argument-1 for function CHAR was less than 1 or greater than the number of positions in the program collating sequence.".into(), n, pos))?;
             Val::Bytes(vec![c])
         }
         "ORD" => {
             arity(1..=1)?;
             let b = bytes_of(&args[0])?;
             let first = *b.first().ok_or_else(|| Abend::ironwork("FUNCTION ORD of an empty argument", pos))?;
-            Val::Num(Fixed::new(facts.ordinal(first) as i128, Places::new(3, 0)))
+            let ordinal = if facts.options().emulates_cobc() { u16::from(first) + 1 } else { facts.ordinal(first) };
+            Val::Num(Fixed::new(i128::from(ordinal), Places::new(3, 0)))
         }
         "NATIONAL-OF" => {
             arity(1..=2)?;
