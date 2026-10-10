@@ -948,6 +948,7 @@ catalogue! {
     IWX0107 Warning "{name} is not in the records of {file} (GnuCOBOL; Enterprise COBOL takes a {verb} key from the file's records): each record is keyed on bytes {from} to {to}, where {name} lies in its own record";
     IWX0108 Warning "DISPLAY with items after its screen phrases (GnuCOBOL; Enterprise COBOL has no screen): each list of items is displayed in turn, at the place its own phrases give or at the cursor";
     IWX0109 Warning "SWITCH-{n} (GnuCOBOL's name for its switch {n}; Enterprise COBOL writes UPSI-{n}): it is read as UPSI-{n}, which the UPSI run-time option sets";
+    IWX0110 Warning "FUNCTION {name} argument {n} ({item}): {parameter} differs from it in digits alone, both COMP-5 of one size (GnuCOBOL passes BY REFERENCE whatever the PICTURE; Enterprise COBOL requires the argument's): the parameter reads and sets the argument's bytes";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

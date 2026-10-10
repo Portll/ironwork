@@ -2722,3 +2722,44 @@ fn under_extended_switch_n_is_upsi_n() {
     let refused = syntax::parse_all_with(&GNUCOBOL_SWITCHES.replace("SWITCH-2", "SWITCH-9"), &libraries).unwrap_err();
     assert_eq!((refused.pos.line, refused.id), (7, Some("IWS0122")), "{refused}");
 }
+
+/// A user-defined function whose PIC S9(8) COMP-5 parameter takes a SIGNED-INT, S9(9) COMP-5.
+const COMP5_ARGUMENT: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       FUNCTION-ID. HALVE.\n",
+    "       DATA DIVISION.\n",
+    "       LINKAGE SECTION.\n",
+    "       01 X PIC S9(8) COMP-5.\n",
+    "       01 R PIC S9(8) COMP-5.\n",
+    "       PROCEDURE DIVISION USING X RETURNING R.\n",
+    "           DIVIDE X BY 2 GIVING R\n",
+    "           GOBACK.\n",
+    "       END FUNCTION HALVE.\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. HALVING.\n",
+    "       ENVIRONMENT DIVISION.\n",
+    "       CONFIGURATION SECTION.\n",
+    "       REPOSITORY.\n",
+    "           FUNCTION HALVE.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 N SIGNED-INT VALUE 123456789.\n",
+    "       01 D PIC 9(9).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE FUNCTION HALVE(N) TO D\n",
+    "           DISPLAY D\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn under_extended_a_comp_5_argument_may_differ_from_its_parameter_in_digits() {
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let o = Harness::source(COMP5_ARGUMENT).flags(EXTENDED).run(executor);
+        assert_eq!((o.out.as_str(), o.ending), ("061728394\n", Ok(Ending::Goback)), "{}", o.err);
+    }
+    let warned: Vec<_> = diagnostics_under(COMP5_ARGUMENT, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0110")).map(|d| d.0).collect();
+    assert_eq!(warned, [22]);
+    let packed = COMP5_ARGUMENT.replace("01 X PIC S9(8) COMP-5.", "01 X PIC S9(8) COMP-3.");
+    let refused = diagnostics_under(&packed, numeric::Compliance::Extended);
+    assert!(refused.iter().any(|d| (d.0, d.2) == (22, Some("IWC0026"))), "{refused:?}");
+}

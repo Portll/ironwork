@@ -1456,6 +1456,18 @@ is a program named after its file without the extension, as cobc 3.2 names it un
 it begins with statements, they are its PROCEDURE DIVISION. A source compiled from no named file,
 and any source under strict, is refused where IDENTIFICATION DIVISION was expected.
 
+### IWX0110-W A COMP-5 argument whose digits differ
+
+`IWX0110-W FUNCTION {name} argument {n} ({item}): {parameter} differs from it in digits alone, both
+COMP-5 of one size (GnuCOBOL passes BY REFERENCE whatever the PICTURE; Enterprise COBOL requires the
+argument's): the parameter reads and sets the argument's bytes`, at the argument.
+
+Enterprise COBOL passes a user-defined function's data-item argument BY REFERENCE and requires its
+PICTURE and USAGE to be the parameter's (IWC0026-S). cobc 3.2 passes the item whatever its
+description, and GnuCOBOL sources pass a SIGNED-INT to a PIC S9(8) COMP-5 parameter. Where both are
+COMP-5 of one size, sign and scale, each holds the other's values in the same bytes, so extended
+passes the argument with this warning; any other difference stays refused.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

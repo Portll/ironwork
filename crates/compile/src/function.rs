@@ -193,7 +193,7 @@ pub fn conformance(layout: &Layout, item: usize, alphabetic: bool, decimal_point
 
 /// The invocation of `udf` at `f`: its argument count, and each data-item argument against its
 /// formal parameter.
-pub fn check_invocation(udf: &Udf, f: &FunctionCall, layout: &Layout, alphabetic: &[Pos], decimal_point_comma: bool, errors: &mut Vec<Error>) {
+pub fn check_invocation(udf: &Udf, f: &FunctionCall, layout: &Layout, alphabetic: &[Pos], decimal_point_comma: bool, extended: bool, errors: &mut Vec<Error>) {
     let name = &f.name;
     if f.args.len() != udf.params.len() {
         errors.push(syntax::messages::IWC0021.at(f.pos, format!("FUNCTION {name} takes {} arguments, not {}", udf.params.len(), f.args.len())));
@@ -227,9 +227,24 @@ pub fn check_invocation(udf: &Udf, f: &FunctionCall, layout: &Layout, alphabetic
         if let Ok(Resolved::Item(i)) = layout.resolve(&r.name, &r.qualifiers, r.pos)
             && let Some(why) = conformance(layout, i, alphabetic.contains(&layout.items[i].pos), decimal_point_comma, formal)
         {
-            errors.push(syntax::messages::IWC0026.at(r.pos, format!("FUNCTION {name} argument {} ({}): {why}", k + 1, r.name)));
+            if extended && same_native_binary(&layout.items[i], formal) {
+                let message = format!("FUNCTION {name} argument {} ({}): {} differs from it in digits alone, both COMP-5 of one size (GnuCOBOL passes BY REFERENCE whatever the PICTURE; Enterprise COBOL requires the argument's): the parameter reads and sets the argument's bytes", k + 1, r.name, formal.name);
+                errors.push(syntax::messages::IWX0110.at(r.pos, message));
+            } else {
+                errors.push(syntax::messages::IWC0026.at(r.pos, format!("FUNCTION {name} argument {} ({}): {why}", k + 1, r.name)));
+            }
         }
     }
+}
+
+/// Two COMP-5 items of one size, sign and scale: each holds any value of the other in the same
+/// bytes, whatever their digits.
+fn same_native_binary(it: &layout::Item, formal: &Formal) -> bool {
+    let comp5 = |kind: Kind| match kind {
+        Kind::Binary { scale, signed, native: numeric::Native::Comp5, .. } => Some((scale, signed)),
+        _ => None,
+    };
+    comp5(it.kind).is_some() && comp5(it.kind) == comp5(formal.kind) && it.size == formal.size && it.scaling == formal.scaling
 }
 
 /// A numeric item an arithmetic statement can send or receive: not an index or a numeric-edited
