@@ -58,7 +58,7 @@ gnucobol`, or under `--compliance extended`, `relaxed` or `loose`.
 | ALTER in an independent segment (C52) | put back on entry | never put back | yes |
 | The rest of a JSON or XML GENERATE receiver | kept | spaces, in the document's encoding | yes |
 | INSPECT of a national item (C230) | national characters | TALLYING FOR CHARACTERS in bytes, two to a character | yes |
-| An intermediate result of more than 30 digits | cut to 30 (31) | every digit kept | not yet |
+| An intermediate result of more than 30 digits (C1) | cut to 30 (31) | every digit kept, to 46 | yes |
 | MEAN, MEDIAN, NUMVAL and COMBINED-DATETIME | floating point, rounded | exact decimal, truncated | not yet |
 | MAX, MIN, RANGE, REM, SUM; INTEGER, INTEGER-PART, MOD of fixed-point arguments | IBM's places | cobc's fields | not yet |
 | A zero divisor outside ON SIZE ERROR | S0CB, S0C9 or S0CF | the receiver kept as it was, and the run goes on | yes |

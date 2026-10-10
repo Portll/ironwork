@@ -1392,7 +1392,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                     let binary = self.binary_division(a, b)?;
                     return Err(arith::zero_divide(binary, pos));
                 }
-                arith::fixed_binop(x, *op, y, last, arith, pos)
+                arith::fixed_binop(x, *op, y, last, numeric::precision::Carry::of(arith, self.options.emulates_cobc()), pos)
             }
         }
     }
@@ -1507,7 +1507,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                         let binary = self.binary_division(&receiver, shared)?;
                         Err(arith::zero_divide(binary, pos))
                     } else {
-                        arith::fixed_binop(x, op, y, dmax, self.options.arith, pos).map(Val::Num)
+                        arith::fixed_binop(x, op, y, dmax, numeric::precision::Carry::of(self.options.arith, self.options.emulates_cobc()), pos).map(Val::Num)
                     }
                 }
                 (Some((op, receiver_first)), Ok(Val::Float(value))) => {
@@ -1525,7 +1525,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             size_error |= store::store_value(&self.facts(), self.unit, loc, value, t.rounded, handler.is_some(), pos)?;
         }
         if let (Some((t, _, _)), Some((x, y)), Some(q_loc)) = (remainder, operands, quotient_target)
-            && let Some(r) = arith::remainder(x, y, places_of(q_loc.kind).dec, dmax, self.options.arith, pos)?
+            && let Some(r) = arith::remainder(x, y, places_of(q_loc.kind).dec, dmax, numeric::precision::Carry::of(self.options.arith, self.options.emulates_cobc()), pos)?
         {
             let r_loc = self.locate(&t.r)?;
             size_error |= store::store_value(&self.facts(), self.unit, r_loc, Val::Num(r), false, handler.is_some(), pos)?;

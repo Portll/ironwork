@@ -5,8 +5,7 @@
 
 use crate::lir::Const;
 use crate::vocab::BinOp;
-use numeric::Arith;
-use numeric::precision::{Fixed, Places, carried, product_places, quotient_places, sum_places};
+use numeric::precision::{Carry, Fixed, Places, carried, product_places, quotient_places, sum_places};
 use std::cmp::Ordering;
 
 /// A constant as `operand_number` takes it while it fits an `i64` count of its last decimal place,
@@ -53,20 +52,20 @@ impl Number {
 /// truncated quotient, kept to the places carried; None where a step leaves `i128`, the result does
 /// not fit an `i64`, or the divisor is zero, which `Fixed` reports.
 #[inline]
-pub fn int_binop(x: Number, op: BinOp, y: Number, dmax: u32, arith: Arith) -> Option<Number> {
+pub fn int_binop(x: Number, op: BinOp, y: Number, dmax: u32, carry: Carry) -> Option<Number> {
     let (Number::Int(x, px), Number::Int(y, py)) = (x, y) else { return None };
-    let to = result_places(px, op, py, dmax, arith)?;
+    let to = result_places(px, op, py, dmax, carry)?;
     binop(x, px, op, y, py, to).map(|n| Number::Int(n, to))
 }
 
-/// The places `x op y` carries at `dmax` under `arith`, from its operands' places alone; None for
-/// an exponentiation.
+/// The places `x op y` carries at `dmax`, keeping `carry`'s digits, from its operands' places alone;
+/// None for an exponentiation.
 #[inline]
-pub fn result_places(px: Places, op: BinOp, py: Places, dmax: u32, arith: Arith) -> Option<Places> {
+pub fn result_places(px: Places, op: BinOp, py: Places, dmax: u32, carry: Carry) -> Option<Places> {
     Some(match op {
-        BinOp::Add | BinOp::Sub => carried(sum_places(px, py), dmax, arith),
-        BinOp::Mul => carried(product_places(px, py), dmax, arith),
-        BinOp::Div => carried(quotient_places(px, py, dmax), dmax, arith),
+        BinOp::Add | BinOp::Sub => carried(sum_places(px, py), dmax, carry),
+        BinOp::Mul => carried(product_places(px, py), dmax, carry),
+        BinOp::Div => carried(quotient_places(px, py, dmax), dmax, carry),
         BinOp::Pow => return None,
     })
 }
@@ -188,6 +187,7 @@ fn quotient(m: u128, d: u128) -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use numeric::Arith;
     use crate::arith;
     use crate::vocab::Pos;
 
@@ -212,8 +212,8 @@ mod tests {
             let (dmax, arith) = ((next() % 4) as u32, if next() % 2 == 0 { Arith::Compat } else { Arith::Extend });
             for op in [BinOp::Add, BinOp::Sub, BinOp::Mul] {
                 let (a, b) = (Number::Int(x, px), Number::Int(y, py));
-                let expected = arith::fixed_binop(a.fixed(), op, b.fixed(), dmax, arith, Pos::default()).unwrap();
-                if let Some(r) = int_binop(a, op, b, dmax, arith) {
+                let expected = arith::fixed_binop(a.fixed(), op, b.fixed(), dmax, arith.into(), Pos::default()).unwrap();
+                if let Some(r) = int_binop(a, op, b, dmax, arith.into()) {
                     fast += 1;
                     assert_eq!(r.fixed(), expected, "{x} {op:?} {y} at {px:?} {py:?}, dmax {dmax}, {arith:?}");
                 }
@@ -243,8 +243,8 @@ mod tests {
             let (dmax, arith) = ((next() % 10) as u32, if next() % 2 == 0 { Arith::Compat } else { Arith::Extend });
             for (k, op) in [BinOp::Add, BinOp::Sub, BinOp::Mul, BinOp::Div].into_iter().enumerate() {
                 let (a, b) = (Number::Int(x, px), Number::Int(y, py));
-                let expected = arith::fixed_binop(a.fixed(), op, b.fixed(), dmax, arith, Pos::default());
-                match (int_binop(a, op, b, dmax, arith), expected) {
+                let expected = arith::fixed_binop(a.fixed(), op, b.fixed(), dmax, arith.into(), Pos::default());
+                match (int_binop(a, op, b, dmax, arith.into()), expected) {
                     (Some(r), Ok(expected)) => {
                         fast[k] += 1;
                         assert_eq!(r.fixed(), expected, "{x} {op:?} {y} at {px:?} {py:?}, dmax {dmax}, {arith:?}");

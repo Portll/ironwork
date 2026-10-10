@@ -95,10 +95,10 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 }
                 let x = self.operand_number(Operand::Load(*var), plan.dmax, pos)?;
                 let y = self.eval_number(*by, plan.dmax, pos)?;
-                let arith = p.options.options.arith;
-                let next = match int_binop(x, BinOp::Add, y, plan.dmax, arith) {
+                let carry = self.carry(p.options.options.arith);
+                let next = match int_binop(x, BinOp::Add, y, plan.dmax, carry) {
                     Some(next) => next.fixed(),
-                    None => crate::arith::fixed_binop(x.fixed(), BinOp::Add, y.fixed(), plan.dmax, arith, pos)?,
+                    None => crate::arith::fixed_binop(x.fixed(), BinOp::Add, y.fixed(), plan.dmax, carry, pos)?,
                 };
                 store::store_fixed(&self.facts(), self.unit, dest, &next, false, pos)?;
             }

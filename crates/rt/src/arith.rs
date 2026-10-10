@@ -10,7 +10,7 @@ use crate::storage::Val;
 use crate::vocab::{BinOp, Figurative, Pos};
 use numeric::Arith;
 use numeric::float;
-use numeric::precision::{ArithError, Fixed, Places};
+use numeric::precision::{ArithError, Carry, Fixed, Places};
 use std::cmp::Ordering;
 use zarch::check::{ProgramCheck, ProgramMask};
 use zarch::hfp::{Hfp, Precision};
@@ -49,13 +49,14 @@ pub fn zero_divide(binary: bool, pos: Pos) -> Abend {
     Abend::check(if binary { ProgramCheck::FixedPointDivide } else { ProgramCheck::DecimalDivide }, pos)
 }
 
-/// ADD, SUBTRACT, MULTIPLY or DIVIDE at `dmax` places. Exponentiation is `pow`.
-pub fn fixed_binop(x: Fixed, op: BinOp, y: Fixed, dmax: u32, arith: Arith, pos: Pos) -> R<Fixed> {
+/// ADD, SUBTRACT, MULTIPLY or DIVIDE at `dmax` places, the intermediate result keeping `carry`'s
+/// digits. Exponentiation is `pow`.
+pub fn fixed_binop(x: Fixed, op: BinOp, y: Fixed, dmax: u32, carry: Carry, pos: Pos) -> R<Fixed> {
     let result = match op {
-        BinOp::Add => x.add(y, dmax, arith),
-        BinOp::Sub => x.sub(y, dmax, arith),
-        BinOp::Mul => x.mul(y, dmax, arith),
-        BinOp::Div => x.div(y, dmax, arith),
+        BinOp::Add => x.add(y, dmax, carry),
+        BinOp::Sub => x.sub(y, dmax, carry),
+        BinOp::Mul => x.mul(y, dmax, carry),
+        BinOp::Div => x.div(y, dmax, carry),
         BinOp::Pow => return Err(Abend::ironwork("exponentiation of a receiver by a shared result", pos)),
     };
     result.map_err(|e| fixed_error(e, pos))
@@ -72,7 +73,8 @@ pub fn pow(x: Fixed, n: i64, dmax: u32, arith: Arith, cobc: bool, pos: Pos) -> R
     if n < 0 && x.magnitude.is_zero() {
         return if cobc { Ok(Fixed::new(0, Places::new(1, 0))) } else { Err(Abend::zero_power(pos)) };
     }
-    let mul = |a: Fixed, b: Fixed| a.mul(b, dmax, arith).map_err(|e| fixed_error(e, pos));
+    let carry = Carry::of(arith, cobc);
+    let mul = |a: Fixed, b: Fixed| a.mul(b, dmax, carry).map_err(|e| fixed_error(e, pos));
     let one = Fixed::new(1, Places::new(1, 0));
     let magnitude = n.unsigned_abs();
     let power = if magnitude <= 31 {
@@ -97,7 +99,7 @@ pub fn pow(x: Fixed, n: i64, dmax: u32, arith: Arith, cobc: bool, pos: Pos) -> R
         let message = "IGZ0222S No significant digits remain in a fixed-point exponentiation operation due to excessive decimal positions specified in the operands or receivers.";
         return Err(Abend { code: crate::abend::AbendCode::user(4038), message: message.into(), pos, file: None });
     }
-    one.div(power, dmax, arith).map_err(|e| fixed_error(e, pos))
+    one.div(power, dmax, carry).map_err(|e| fixed_error(e, pos))
 }
 
 /// An operand's value in floating point of precision `p`.
@@ -151,13 +153,13 @@ pub fn float_pow(x: Hfp, y: Hfp, p: Precision, cobc: bool, pos: Pos) -> R<Hfp> {
 
 /// DIVIDE's REMAINDER: the dividend less the product of the divisor and the quotient cut to the
 /// quotient receiver's `quotient_scale`. None for a zero divisor, which leaves the remainder as it was.
-pub fn remainder(x: Fixed, y: Fixed, quotient_scale: u32, dmax: u32, arith: Arith, pos: Pos) -> R<Option<Fixed>> {
+pub fn remainder(x: Fixed, y: Fixed, quotient_scale: u32, dmax: u32, carry: Carry, pos: Pos) -> R<Option<Fixed>> {
     if y.magnitude.is_zero() {
         return Ok(None);
     }
-    let q = x.div(y, dmax, arith).map_err(|_| Abend::ironwork("remainder", pos))?;
+    let q = x.div(y, dmax, carry).map_err(|_| Abend::ironwork("remainder", pos))?;
     let q = fixed(q.negative, align(&q, quotient_scale, false).unwrap_or_default(), Places::new(q.places.int, quotient_scale));
-    let r = q.mul(y, dmax, arith).and_then(|p| x.sub(p, dmax, arith)).map_err(|_| Abend::ironwork("remainder", pos))?;
+    let r = q.mul(y, dmax, carry).and_then(|p| x.sub(p, dmax, carry)).map_err(|_| Abend::ironwork("remainder", pos))?;
     Ok(Some(r))
 }
 

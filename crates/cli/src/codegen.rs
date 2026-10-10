@@ -230,6 +230,11 @@ struct At {
 }
 
 impl Gen<'_> {
+    /// The digits an intermediate result keeps under `arith`: ARITH's, or cobc's.
+    fn carry(&self, arith: numeric::Arith) -> numeric::precision::Carry {
+        numeric::precision::Carry::of(arith, self.p.options.options.emulates_cobc())
+    }
+
     /// The program's generated code, and whether it has a `direct` function.
     fn program(mut self) -> (String, bool) {
         let (k, p) = (self.k, self.p);
@@ -303,7 +308,7 @@ impl Gen<'_> {
                 let mut body = self.locates(prepass)?;
                 let (x, px) = self.count_of(*var)?;
                 let (y, py) = self.expr(*by, plan.dmax, plan.dmax)?;
-                let to = result_places(px, BinOp::Add, py, plan.dmax, self.p.options.options.arith)?;
+                let to = result_places(px, BinOp::Add, py, plan.dmax, self.carry(self.p.options.options.arith))?;
                 let _ = write!(body, "    let dest = {}?;\n    let next = binop({x}, {}, BinOp::Add, {y}, {}, {})?;\n    s.store(dest, {}, {}, (next, {}), false, false)\n", dest.expr, places(px), places(py), places(to), dest.len, kind(dest.kind)?, places(to));
                 (body, false)
             }
@@ -386,7 +391,7 @@ impl Gen<'_> {
                 let current = (format!("s.digits(at, {}, {})?", target.len, kind(target.kind)?), places_of(target.kind));
                 let value = ("value".to_owned(), pv);
                 let ((x, px), (y, py)) = if receiver_first { (current, value) } else { (value, current) };
-                let to = result_places(px, op, py, plan.dmax, plan.arith)?;
+                let to = result_places(px, op, py, plan.dmax, self.carry(plan.arith))?;
                 (format!("binop({x}, {}, BinOp::{op:?}, {y}, {}, {})?", places(px), places(py), places(to)), to)
             }
             None => ("value".to_owned(), pv),
@@ -505,7 +510,7 @@ impl Gen<'_> {
             }
             Expr::Bin(a, op, b) => {
                 let ((x, px), (y, py)) = (self.expr(*a, inner, inner)?, self.expr(*b, inner, inner)?);
-                let to = result_places(px, *op, py, last, self.p.options.options.arith)?;
+                let to = result_places(px, *op, py, last, self.carry(self.p.options.options.arith))?;
                 (format!("binop({x}, {}, BinOp::{op:?}, {y}, {}, {})?", places(px), places(py), places(to)), to)
             }
             Expr::Pow(..) => return None,

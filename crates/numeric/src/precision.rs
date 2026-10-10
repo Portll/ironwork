@@ -69,10 +69,29 @@ impl Dmax {
     }
 }
 
+/// How many digits an intermediate result keeps: ARITH's 30 or 31, or for cobc, which keeps every
+/// digit, the 46 that a 256-bit product of such a result and a 31-digit operand still holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Carry(pub u32);
+
+impl Carry {
+    pub const COBC: Self = Self(46);
+
+    pub fn of(arith: Arith, cobc: bool) -> Self {
+        if cobc { Self::COBC } else { arith.into() }
+    }
+}
+
+impl From<Arith> for Carry {
+    fn from(arith: Arith) -> Self {
+        Self(arith.intermediate_digits())
+    }
+}
+
 /// The places carried for an intermediate result `ir`. `dmax` is the most decimal places among
 /// the statement's receivers and its operands other than divisors and exponents.
-pub fn carried(ir: Places, dmax: u32, arith: Arith) -> Places {
-    let n = arith.intermediate_digits();
+pub fn carried(ir: Places, dmax: u32, carry: impl Into<Carry>) -> Places {
+    let n = carry.into().0;
     if ir.total() <= n {
         ir
     } else if ir.dec <= dmax {
@@ -149,7 +168,7 @@ impl Fixed {
         Self::signed(!self.negative, self.magnitude, self.places)
     }
 
-    pub fn add(self, other: Self, dmax: u32, arith: Arith) -> Result<Self, ArithError> {
+    pub fn add(self, other: Self, dmax: u32, carry: impl Into<Carry>) -> Result<Self, ArithError> {
         let dec = self.places.dec.max(other.places.dec);
         let (a, b) = (self.aligned(dec)?, other.aligned(dec)?);
         let (negative, magnitude) = match (self.negative == other.negative, a >= b) {
@@ -158,24 +177,24 @@ impl Fixed {
             (false, false) => (other.negative, b - a),
         };
         let ir = sum_places(self.places, other.places);
-        Ok(Self::signed(negative, magnitude, Places::new(ir.int, dec)).fit(carried(ir, dmax, arith)))
+        Ok(Self::signed(negative, magnitude, Places::new(ir.int, dec)).fit(carried(ir, dmax, carry)))
     }
 
-    pub fn sub(self, other: Self, dmax: u32, arith: Arith) -> Result<Self, ArithError> {
-        self.add(other.negated(), dmax, arith)
+    pub fn sub(self, other: Self, dmax: u32, carry: impl Into<Carry>) -> Result<Self, ArithError> {
+        self.add(other.negated(), dmax, carry)
     }
 
-    pub fn mul(self, other: Self, dmax: u32, arith: Arith) -> Result<Self, ArithError> {
+    pub fn mul(self, other: Self, dmax: u32, carry: impl Into<Carry>) -> Result<Self, ArithError> {
         let ir = product_places(self.places, other.places);
         let magnitude = self.magnitude.checked_mul(other.magnitude).ok_or(ArithError::BeyondModel)?;
-        Ok(Self::signed(self.negative != other.negative, magnitude, ir).fit(carried(ir, dmax, arith)))
+        Ok(Self::signed(self.negative != other.negative, magnitude, ir).fit(carried(ir, dmax, carry)))
     }
 
-    pub fn div(self, divisor: Self, dmax: u32, arith: Arith) -> Result<Self, ArithError> {
+    pub fn div(self, divisor: Self, dmax: u32, carry: impl Into<Carry>) -> Result<Self, ArithError> {
         if divisor.magnitude.is_zero() {
             return Err(ArithError::DivideByZero);
         }
-        let to = carried(quotient_places(self.places, divisor.places, dmax), dmax, arith);
+        let to = carried(quotient_places(self.places, divisor.places, dmax), dmax, carry);
         let shift = (divisor.places.dec + to.dec) as i64 - self.places.dec as i64;
         let (numerator, denominator) = if shift >= 0 {
             (self.magnitude.checked_mul(pow10(shift as u32)), Some(divisor.magnitude))

@@ -59,7 +59,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             (Some((op, receiver_first, receiver)), Ok(value)) => {
                 let current = self.operand_number(Operand::Load(step.target), plan.dmax, pos)?;
                 let (x, y) = if receiver_first { (current, value) } else { (value, current) };
-                match int_binop(x, op, y, plan.dmax, plan.arith) {
+                match int_binop(x, op, y, plan.dmax, self.carry(plan.arith)) {
                     Some(r) => Ok(r),
                     None => {
                         let (x, y) = (x.fixed(), y.fixed());
@@ -67,7 +67,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
                             let binary = self.binary_division(receiver, shared)?;
                             Err(arith::zero_divide(binary, pos))
                         } else {
-                            arith::fixed_binop(x, op, y, plan.dmax, plan.arith, pos).map(Number::Fixed)
+                            arith::fixed_binop(x, op, y, plan.dmax, self.carry(plan.arith), pos).map(Number::Fixed)
                         }
                     }
                 }
@@ -132,7 +132,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
                     let current = self.operand_number(Operand::Load(step.target), plan.dmax, pos)?;
                     let value = Number::of(value);
                     let (x, y) = if receiver_first { (current, value) } else { (value, current) };
-                    match int_binop(x, op, y, plan.dmax, plan.arith) {
+                    match int_binop(x, op, y, plan.dmax, self.carry(plan.arith)) {
                         Some(r) => Ok(Val::Num(r.fixed())),
                         None => {
                             let (x, y) = (x.fixed(), y.fixed());
@@ -140,7 +140,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
                                 let binary = self.binary_division(receiver, shared)?;
                                 Err(arith::zero_divide(binary, pos))
                             } else {
-                                arith::fixed_binop(x, op, y, plan.dmax, plan.arith, pos).map(Val::Num)
+                                arith::fixed_binop(x, op, y, plan.dmax, self.carry(plan.arith), pos).map(Val::Num)
                             }
                         }
                     }
@@ -161,7 +161,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             size_error |= self.store_result(loc, value, step.rounded, plan.handled, pos)?;
         }
         if let (Some(r), Some((x, y)), Some(q)) = (&plan.remainder, operands, quotient)
-            && let Some(rest) = arith::remainder(x, y, places_of(q.kind).dec, plan.dmax, plan.arith, pos)?
+            && let Some(rest) = arith::remainder(x, y, places_of(q.kind).dec, plan.dmax, self.carry(plan.arith), pos)?
         {
             let loc = self.loc(r.target)?;
             size_error |= store::store_value(&self.facts(), self.unit, loc, Val::Num(rest), false, plan.handled, pos)?;

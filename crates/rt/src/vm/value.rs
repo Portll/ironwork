@@ -146,6 +146,11 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         self.eval_number_at(e, dmax, dmax, pos)
     }
 
+    /// The digits an intermediate result keeps under `arith`: ARITH's, or cobc's.
+    pub(super) fn carry(&self, arith: numeric::Arith) -> numeric::precision::Carry {
+        numeric::precision::Carry::of(arith, self.p.options.options.emulates_cobc())
+    }
+
     /// `eval_fixed_at`, its value held as an integer while it is one.
     pub(super) fn eval_number_at(&mut self, e: ExprId, last: u32, inner: u32, pos: Pos) -> R<Number> {
         let arith = self.p.options.options.arith;
@@ -158,7 +163,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             Expr::Bin(a, op, b) => {
                 let x = self.eval_number_at(*a, inner, inner, pos)?;
                 let y = self.eval_number_at(*b, inner, inner, pos)?;
-                if let Some(r) = int_binop(x, *op, y, last, arith) {
+                if let Some(r) = int_binop(x, *op, y, last, self.carry(arith)) {
                     return Ok(r);
                 }
                 let (x, y) = (x.fixed(), y.fixed());
@@ -166,7 +171,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                     let binary = self.binary_division(*a, *b)?;
                     return Err(arith::zero_divide(binary, pos).into());
                 }
-                Ok(Number::Fixed(arith::fixed_binop(x, *op, y, last, arith, pos)?))
+                Ok(Number::Fixed(arith::fixed_binop(x, *op, y, last, self.carry(arith), pos)?))
             }
             Expr::Pow(base, exponent) => {
                 let x = self.eval_number_at(*base, inner, inner, pos)?.fixed();

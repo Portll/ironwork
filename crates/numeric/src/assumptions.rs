@@ -420,7 +420,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: INTERMEDIATE_TABLE,
-        claim: "An operation's intermediate result has i integer and d decimal places: for + and -, one integer place more than the operand with more, and the more decimal places; for *, the sum of each; for /, the dividend's integer places and the divisor's decimal places together, and the dividend's decimal places less the divisor's or dmax, whichever is more. Up to 30 digits (31 under ARITH(EXTEND)) i and d are carried; beyond that, N-d and d when d <= dmax, else i and N-i when i+dmax <= N, else N-dmax and dmax; digits beyond are truncated (Programming Guide SC27-8714-03, pp. 794-795)",
+        claim: "An operation's intermediate result has i integer and d decimal places: for + and -, one integer place more than the operand with more, and the more decimal places; for *, the sum of each; for /, the dividend's integer places and the divisor's decimal places together, and the dividend's decimal places less the divisor's or dmax, whichever is more. Up to 30 digits (31 under ARITH(EXTEND)) i and d are carried; beyond that, N-d and d when d <= dmax, else i and N-i when i+dmax <= N, else N-dmax and dmax; digits beyond are truncated (Programming Guide SC27-8714-03, pp. 794-795). Compiled for GnuCOBOL, N is 46: cobc 3.2 keeps every digit of an intermediate result, and 46 is the most a 256-bit product of one and a 31-digit operand holds",
         basis: Basis::Documented,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[S(Arithmetic)]],

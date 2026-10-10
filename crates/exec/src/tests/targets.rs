@@ -584,3 +584,39 @@ fn a_gnucobol_target_keeps_an_altered_go_to_in_an_independent_segment_and_ibm_pu
         }
     }
 }
+
+/// Products of two 18-digit operands, 36 digits, divided and subtracted.
+const LONG_INTERMEDIATES: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. BIGINT.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 A PIC 9(18) VALUE 999999999999999999.\n",
+    "       01 B PIC 9(18) VALUE 999999999999999999.\n",
+    "       01 C PIC 9(18) VALUE 123456789012345678.\n",
+    "       01 R PIC 9(18).\n",
+    "       01 Q PIC 9(9)V9(9).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           COMPUTE R = A * B / C\n",
+    "           DISPLAY R\n",
+    "           COMPUTE R = (A * B) / (C * 1000)\n",
+    "           DISPLAY R\n",
+    "           COMPUTE Q = A * B / C / 1000000000000\n",
+    "           DISPLAY Q\n",
+    "           COMPUTE R = A * B - (A - 1) * B\n",
+    "           DISPLAY R\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn a_gnucobol_target_keeps_an_intermediate_past_31_digits_and_ibm_cuts_it() {
+    // cobc 3.2's output by default, then under -std=ibm-strict; IBM cuts A * B to 30 digits.
+    let flags = |target: numeric::Target| target.flags().to_vec();
+    for (flags, expected) in [(flags(numeric::Target::Gnucobol), "100000072900000706\n008100000072900000\n008100000.072900000\n999999999999999999\n"), (flags(numeric::Target::GnucobolIbmStrict), "100000072900000706\n008100000072900000\n008100000072900000\n999999999999999999\n"), (Vec::new(), "000008100000072883\n000000008100000072\n000000008100000072\n999999999999999999\n")] {
+        let flags: Vec<&str> = flags.iter().map(String::as_str).collect();
+        for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+            let ran = Harness::source(LONG_INTERMEDIATES).flags(&flags).run(executor);
+            assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{flags:?} {name}: {}", ran.err);
+        }
+    }
+}
