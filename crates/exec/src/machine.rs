@@ -1473,7 +1473,18 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
             Some((_, dividend, divisor)) => Some((self.eval_fixed(dividend, dmax, pos)?, self.eval_fixed(divisor, dmax, pos)?)),
             None => None,
         };
-        for (t, shared, with, outcome) in results {
+        for (k, (t, shared, with, outcome)) in results.into_iter().enumerate() {
+            // cobc reads a single sending item again for each receiver, after the one before it
+            // is stored (ADD X TO X Y).
+            let outcome = match outcome {
+                Ok(Val::Float(_)) if k > 0 && with.is_some() && self.options.emulates_cobc() && matches!(shared, Expr::Operand(Operand::Ref(_))) => {
+                    self.eval_float(shared, self.options.arith.float_intermediate(), pos).map(Val::Float)
+                }
+                Ok(Val::Num(_)) if k > 0 && with.is_some() && self.options.emulates_cobc() && matches!(shared, Expr::Operand(Operand::Ref(_))) => {
+                    self.eval_fixed_at(shared, places.inner, places.inner, dmax, pos).map(Val::Num)
+                }
+                outcome => outcome,
+            };
             let loc = self.locate(&t.r)?;
             quotient_target.get_or_insert(loc);
             let outcome = match (with, outcome) {

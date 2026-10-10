@@ -120,7 +120,11 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
         };
         let mut size_error = false;
         let mut quotient: Option<Loc> = None;
-        for (step, shared, own, outcome) in results {
+        for (k, (step, shared, own, outcome)) in results.into_iter().enumerate() {
+            // cobc reads a single sending item again for each receiver, after the one before it
+            // is stored (ADD X TO X Y).
+            let again = k > 0 && own.is_some() && outcome.is_ok() && self.p.options.options.emulates_cobc() && matches!(self.p.exprs[shared as usize], Expr::Operand(Operand::Load(_)));
+            let outcome = if again { self.evaluated(plan, step, pos)?.3 } else { outcome };
             let loc = self.loc(step.target)?;
             quotient.get_or_insert(loc);
             let outcome = match (own, outcome) {

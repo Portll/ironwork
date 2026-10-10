@@ -51,7 +51,7 @@ gnucobol`, or under `--compliance extended`, `relaxed` or `loose`.
 | MOVE of an alphanumeric item to a numeric one | an unsigned integer (C240) | sign, point and spaces read | not yet |
 | MOVE of a zoned item holding other characters than digits to a zoned one (C260) | each digit's low half, zone F | each digit's byte copied, aligned on the decimal point | yes |
 | A receiving group holding its own OCCURS DEPENDING ON object | its maximum length | the object's current value | not yet |
-| `ADD X TO X Y` | the sum kept for every receiver | X read again for Y | not yet |
+| `ADD X TO X Y`, and SUBTRACT and MULTIPLY with one sending item | the sending item read once for every receiver | read again for each receiver, after the one before is stored; two or more sending operands summed once, as IBM sums them | yes |
 | A signed zoned item of spaces compared with SPACES under ZWB | not equal | equal | not yet |
 | ORD, CHAR and a contained program under a PROGRAM COLLATING SEQUENCE | the program's sequence | native; a contained program its own | not yet |
 | CANCEL of a program CALLed by a literal | no action under NODYNAM | the program is reset; give `CBL DYNAM` | by card |

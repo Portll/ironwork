@@ -188,3 +188,40 @@ fn a_gnucobol_target_copies_a_zoned_senders_characters_and_ibm_moves_its_digits(
         assert_eq!(ibm.out, "[001122][22][2200]\n", "{name}: {}", ibm.err);
     }
 }
+
+/// Receivers that are also the sending item, with one sending item and with two, and a COMPUTE.
+const RECEIVER_ORDER: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. RECORDER.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 X PIC 9(3) VALUE 5.\n",
+    "       01 Y PIC 9(3) VALUE 1.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           ADD X TO X Y\n",
+    "           DISPLAY 'ADD ' X ' ' Y\n",
+    "           MOVE 5 TO X MOVE 1 TO Y\n",
+    "           SUBTRACT X FROM X Y\n",
+    "           DISPLAY 'SUB ' X ' ' Y\n",
+    "           MOVE 5 TO X MOVE 2 TO Y\n",
+    "           MULTIPLY X BY X Y\n",
+    "           DISPLAY 'MUL ' X ' ' Y\n",
+    "           MOVE 5 TO X MOVE 1 TO Y\n",
+    "           COMPUTE X Y = X + 1\n",
+    "           DISPLAY 'COMPUTE ' X ' ' Y\n",
+    "           MOVE 5 TO X MOVE 1 TO Y\n",
+    "           ADD X 1 TO X Y\n",
+    "           DISPLAY 'ADD2 ' X ' ' Y\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn a_gnucobol_target_reads_one_sending_item_again_for_each_receiver_and_ibm_keeps_it() {
+    // cobc 3.2: one sending item is read again after each store; two are summed once.
+    let cobc = "ADD 010 011\nSUB 000 001\nMUL 025 050\nCOMPUTE 006 006\nADD2 011 007\n";
+    let ibm = "ADD 010 006\nSUB 000 004\nMUL 025 010\nCOMPUTE 006 006\nADD2 011 007\n";
+    for (name, executor, again) in [("interpreter", Executor::Interpreter, Executor::Interpreter), ("VM", Executor::Vm, Executor::Vm)] {
+        assert_eq!(Harness::source(RECEIVER_ORDER).flags(EXTENDED).run(executor).out, cobc, "{name}");
+        assert_eq!(Harness::source(RECEIVER_ORDER).run(again).out, ibm, "{name}");
+    }
+}
