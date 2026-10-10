@@ -929,6 +929,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0110 | W | `FUNCTION {name} argument {n} ({item}): {parameter} differs from it in digits alone, both COMP-5 of one size (GnuCOBOL passes BY REFERENCE whatever the PICTURE; Enterprise COBOL requires the argument's): the parameter reads and sets the argument's bytes` |
 | IWX0111 | W | `FUNCTION {name}: {figurative} as an argument (GnuCOBOL; Enterprise COBOL takes a figurative constant as an argument only inside an arithmetic expression): it is read as the literal '{character}'` |
 | IWX0112 | W | `UNSTRING FUNCTION {name} (GnuCOBOL; Enterprise COBOL's UNSTRING sends a data item): the function's value is the sending field` |
+| IWX0113 | W | `DISPLAY FUNCTION LENGTH({item}) (GnuCOBOL; Enterprise COBOL uses an integer function only in an arithmetic expression): it shows {n}, the length the program fixes, as cobc 3.2 shows it` |
 
 ## Run-time refusals
 

@@ -955,6 +955,7 @@ catalogue! {
     IWX0110 Warning "FUNCTION {name} argument {n} ({item}): {parameter} differs from it in digits alone, both COMP-5 of one size (GnuCOBOL passes BY REFERENCE whatever the PICTURE; Enterprise COBOL requires the argument's): the parameter reads and sets the argument's bytes";
     IWX0111 Warning "FUNCTION {name}: {figurative} as an argument (GnuCOBOL; Enterprise COBOL takes a figurative constant as an argument only inside an arithmetic expression): it is read as the literal '{character}'";
     IWX0112 Warning "UNSTRING FUNCTION {name} (GnuCOBOL; Enterprise COBOL's UNSTRING sends a data item): the function's value is the sending field";
+    IWX0113 Warning "DISPLAY FUNCTION LENGTH({item}) (GnuCOBOL; Enterprise COBOL uses an integer function only in an arithmetic expression): it shows {n}, the length the program fixes, as cobc 3.2 shows it";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

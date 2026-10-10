@@ -2960,3 +2960,32 @@ fn floating_point_literals_are_floating_point_operands_alike_on_both_executors()
     let error = syntax::parse(&wide).unwrap_err();
     assert_eq!((error.pos.line, error.id), (9, Some("IWR0091")), "{error}");
 }
+
+/// DISPLAY of FUNCTION LENGTH of items whose lengths the program fixes.
+const DISPLAY_LENGTHS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. DISPLEN.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 X PIC X(10) VALUE 'abc'.\n",
+    "       01 P PIC S9(7) COMP-3.\n",
+    "       01 U PIC N(4).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY 'X ' FUNCTION LENGTH(X) ' bytes'\n",
+    "           DISPLAY 'P ' FUNCTION LENGTH(P) ' bytes'\n",
+    "           DISPLAY 'U ' FUNCTION LENGTH(U)\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn under_extended_display_of_a_fixed_length_shows_its_digits() {
+    // cobc 3.2's output.
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let o = Harness::source(DISPLAY_LENGTHS).flags(EXTENDED).run(executor);
+        assert_eq!((o.out.as_str(), o.ending), ("X 10 bytes\nP 4 bytes\nU 4\n", Ok(Ending::Goback)), "{}", o.err);
+    }
+    let warned: Vec<_> = diagnostics_under(DISPLAY_LENGTHS, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0113")).map(|d| d.0).collect();
+    assert_eq!(warned, [9, 10, 11]);
+    let strict = diagnostics_under(DISPLAY_LENGTHS, numeric::Compliance::Strict);
+    assert_eq!(strict.iter().filter(|d| d.2 == Some("IWC0101")).count(), 3, "{strict:?}");
+}

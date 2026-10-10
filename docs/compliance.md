@@ -1491,6 +1491,18 @@ is, as the sending field; the delimiters, receivers, POINTER, TALLYING and OVERF
 item. A value with no characters, TRIM of spaces, fills nothing, and overflows only when POINTER is
 written, as cobc 3.2 does. Strict refuses a function there as an identifier was expected.
 
+### IWX0113-W DISPLAY FUNCTION LENGTH of an item
+
+`IWX0113-W DISPLAY FUNCTION LENGTH({item}) (GnuCOBOL; Enterprise COBOL uses an integer function only
+in an arithmetic expression): it shows {n}, the length the program fixes, as cobc 3.2 shows it`, at
+the function.
+
+cobc 3.2 folds FUNCTION LENGTH of a data item whose length the program fixes, with no OCCURS
+DEPENDING ON in it, to a literal, and DISPLAY shows its digits: `DISPLAY FUNCTION LENGTH(NAME)`
+of a PIC X(10) item shows 10. Extended shows the same; a national item's length is its characters.
+DISPLAY of any other integer or numeric function, whose presentation cobc takes from its own
+intermediate fields, stays refused with IWC0101-S, as under strict.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

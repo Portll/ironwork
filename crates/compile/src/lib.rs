@@ -399,6 +399,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     corresponding::expand(&mut program, &layout, &mut errors);
     if options.compliance == numeric::Compliance::Extended {
         pointer_moves::rewrite(&mut program, &layout, &mut errors);
+        display_lengths(&mut program, &layout, &mut errors);
     }
     condition_subjects(&mut program, &layout);
     dbcs_values(&layout, &mut errors);
@@ -1187,6 +1188,37 @@ fn based_items(program: &mut Program, declared: usize, errors: &mut Vec<Error>) 
     }
     program.linkage.extend(moved);
     declared_left
+}
+
+/// GnuCOBOL's DISPLAY of FUNCTION LENGTH of a data item whose length the program fixes: cobc 3.2
+/// folds it to a literal and shows its digits, which the DISPLAY here shows in its place (IWX0113).
+fn display_lengths(program: &mut Program, layout: &layout::Layout, errors: &mut Vec<Error>) {
+    fn statements(stmts: &mut [Stmt], layout: &layout::Layout, errors: &mut Vec<Error>) {
+        for s in stmts {
+            for body in crate::oo::bodies_mut(s) {
+                statements(body, layout, errors);
+            }
+            let Stmt::Display { items, .. } = s else { continue };
+            for item in items.iter_mut() {
+                let Operand::Function(f) = &*item else { continue };
+                let [Expr::Operand(Operand::Ref(r))] = f.args.as_slice() else { continue };
+                if f.name != "LENGTH" || f.refmod.is_some() || r.refmod.is_some() {
+                    continue;
+                }
+                let Ok(layout::Resolved::Item(i)) = layout.resolve(&r.name, &r.qualifiers, r.pos) else { continue };
+                let it = &layout.items[i];
+                if !it.odo.is_empty() {
+                    continue;
+                }
+                let length = if matches!(it.kind, layout::Kind::National | layout::Kind::Dbcs { .. }) { it.size / 2 } else { it.size };
+                errors.push(syntax::messages::IWX0113.at(f.pos, format!("DISPLAY FUNCTION LENGTH({}) (GnuCOBOL; Enterprise COBOL uses an integer function only in an arithmetic expression): it shows {length}, the length the program fixes, as cobc 3.2 shows it", r.name)));
+                *item = Operand::Literal(Literal::Number(length.to_string()));
+            }
+        }
+    }
+    for p in &mut program.paragraphs {
+        statements(&mut p.statements, layout, errors);
+    }
 }
 
 /// A table with no upper bound, outside the LINKAGE SECTION, where Enterprise COBOL describes one
