@@ -42,6 +42,17 @@ pub fn accept<H: Clone, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUn
             Some(record) => Val::Bytes(record),
             None => return at_end(facts, unit, dest, name, pos).map(|()| false),
         },
+        // Compiled for GnuCOBOL, one line, moved to a numeric item as cobc moves characters.
+        AcceptFrom::Sysin if facts.options().emulates_cobc() && dest.kind.digits_scale().is_some() => match sysin_record(facts, unit, pos)? {
+            Some(record) => Val::Bytes(record),
+            None => return at_end(facts, unit, dest, name, pos).map(|()| false),
+        },
+        AcceptFrom::Sysin if facts.options().emulates_cobc() => {
+            let Some(mut line) = sysin_record(facts, unit, pos)? else { return at_end(facts, unit, dest, name, pos).map(|()| false) };
+            line.resize(dest.len, facts.page().encode_char(' ').unwrap_or(0x40));
+            unit.write_input(dest.offset, &line);
+            return Ok(false);
+        }
         AcceptFrom::Sysin => {
             let space = facts.page().encode_char(' ').unwrap_or(0x40);
             let mut area = Vec::with_capacity(dest.len);

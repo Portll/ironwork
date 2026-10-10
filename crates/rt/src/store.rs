@@ -615,6 +615,14 @@ pub fn assign<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_, 
             {
                 carry_digits(facts, unit, dest, s, &b, pos)?;
             }
+            Val::Bytes(b) if facts.options().emulates_cobc()
+                && !src.is_some_and(|s| is_decimal(s.kind) || matches!(s.kind, Kind::NumericEdited { .. }))
+                && scaling(facts, dest) == 0
+                && let Some((digits, scale)) = dest.kind.digits_scale() =>
+            {
+                let v = cobc_characters_value(&facts.page().decode(&b), digits, scale, facts.decimal_point());
+                store_fixed(facts, unit, dest, &v, false, pos)?;
+            }
             Val::Bytes(b) if integer_digits(facts, dest).is_some() && !matches!(src.map(|s| s.kind), Some(Kind::NumericEdited { .. })) => {
                 move_digit_halves(facts, unit, dest, &b, pos)?;
             }
@@ -758,6 +766,50 @@ fn carry_digits<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_
     let shift = m - n + power(src) - power(dest);
     let aligned: Vec<u8> = (0..n).map(|j| usize::try_from(j + shift).ok().and_then(|i| halves.get(i)).copied().unwrap_or(0)).collect();
     store_digit_halves(facts, unit, dest, &aligned, sign, pos)
+}
+
+/// Characters moved to a number of `digits` with `scale` decimal places as cobc moves them
+/// (libcob/move.c, cob_move_alphanum_to_display): spaces before one sign skipped, the digits
+/// aligned on the decimal point and the leftmost dropped, then spaces and the digit separator
+/// passed over until the receiver is filled. Another character met before then, or a second
+/// decimal point, gives zero.
+pub fn cobc_characters_value(text: &str, digits: u32, scale: u32, point: char) -> Fixed {
+    let separator = if point == ',' { '.' } else { ',' };
+    let zero = Fixed::new(0, Places::new(digits, scale));
+    let chars: Vec<char> = text.chars().collect();
+    let mut at = chars.iter().position(|c| !c.is_whitespace()).unwrap_or(chars.len());
+    let negative = chars.get(at) == Some(&'-');
+    if matches!(chars.get(at), Some('+' | '-')) {
+        at += 1;
+    }
+    let before = chars[at..].iter().take_while(|&&c| c != point).filter(|c| c.is_ascii_digit()).count();
+    let integer = (digits - scale) as usize;
+    let mut skip = before.saturating_sub(integer);
+    while skip > 0 && at < chars.len() {
+        skip -= usize::from(chars[at].is_ascii_digit());
+        at += 1;
+    }
+    let mut out = vec![0u8; digits as usize];
+    let (mut slot, mut points) = (integer.saturating_sub(before), 0);
+    while at < chars.len() && slot < out.len() {
+        match chars[at] {
+            c if c.is_ascii_digit() => {
+                out[slot] = c as u8 - b'0';
+                slot += 1;
+            }
+            c if c == point => {
+                points += 1;
+                if points > 1 {
+                    return zero;
+                }
+            }
+            c if c.is_whitespace() || c == separator => {}
+            _ => return zero,
+        }
+        at += 1;
+    }
+    let magnitude = out.iter().fold(0u128, |v, &d| v * 10 + u128::from(d));
+    fixed(negative && magnitude != 0, U256::from_u128(magnitude), Places::new(digits, scale))
 }
 
 /// An alphanumeric sender moved to a zoned or packed integer: the low half of each of its last bytes

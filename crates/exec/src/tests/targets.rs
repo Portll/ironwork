@@ -225,3 +225,36 @@ fn a_gnucobol_target_reads_one_sending_item_again_for_each_receiver_and_ibm_keep
         assert_eq!(Harness::source(RECEIVER_ORDER).run(again).out, ibm, "{name}");
     }
 }
+
+/// Characters MOVEd to numeric items, and lines ACCEPTed into them.
+const CHARACTERS_TO_NUMBERS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. CHARNUM.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 A PIC X(8).\n",
+    "       01 N PIC 9(3).\n",
+    "       01 S PIC S9(3)V99.\n",
+    "       01 P PIC S9(5) COMP-3.\n",
+    "       01 LONG PIC X(12).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE '1,234.5' TO A MOVE A TO N S DISPLAY N ' ' S\n",
+    "           MOVE '3.5-' TO A MOVE A TO N S DISPLAY N ' ' S\n",
+    "           MOVE '- 4' TO A MOVE A TO N S DISPLAY N ' ' S\n",
+    "           MOVE '1a2' TO A MOVE A TO N S DISPLAY N ' ' S\n",
+    "           MOVE '-12.5' TO A MOVE A TO P DISPLAY P\n",
+    "           ACCEPT LONG DISPLAY '[' LONG ']'\n",
+    "           ACCEPT S DISPLAY S\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn a_gnucobol_target_moves_and_accepts_characters_into_numbers_as_cobc_does() {
+    // cobc 3.2's output: the digits aligned on the point, zero where another character comes
+    // before the receiver is full, and ACCEPT one line, moved as MOVE moves it.
+    let expected = "234 +234.50\n003 +000.00\n004 -004.00\n000 +000.00\n-00012\n[abc         ]\n-003.50\n";
+    for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+        let ran = Harness::source(CHARACTERS_TO_NUMBERS).flags(EXTENDED).sysin("abc\n-3.5\n").run(executor);
+        assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{name}: {}", ran.err);
+    }
+}

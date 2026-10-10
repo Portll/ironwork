@@ -147,7 +147,7 @@ fn job_and_fuzz_compile_their_programs_under_the_level() {
     let fuzzed = fuzz("extended", &["--compliance", "extended"]);
     assert_eq!(fuzzed.status.code(), Some(0), "{}", text(&fuzzed.stderr));
     let manifest = fs::read_to_string(dir.join("extended/manifest.json")).unwrap();
-    assert!(manifest.contains("\"code\":\"S0C"), "{manifest}");
+    assert!(manifest.contains("\"counts\":{\"abend\":0,\"clean\":60,\"refused\":0,\"runs\":60"), "{manifest}");
     fs::remove_dir_all(dir).unwrap();
 }
 

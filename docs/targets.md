@@ -46,9 +46,9 @@ gnucobol`, or under `--compliance extended`, `relaxed` or `loose`.
 | The RETURN-CODE special register's size | `S9(4) BINARY` | a fullword | not yet |
 | DISPLAY of a zoned item holding other characters than digits | the bytes | each rewritten as 0 | not yet |
 | A binary item larger than its PICTURE | cut under TRUNC(STD) | kept, as TRUNC(BIN); give `CBL TRUNC(BIN)` | by card |
-| ACCEPT into an item longer than a line | the next records fill it | one line, the rest spaces | not yet |
-| ACCEPT into a numeric item | the characters as they come | moved as an alphanumeric MOVE does | not yet |
-| MOVE of an alphanumeric item to a numeric one | an unsigned integer (C240) | sign, point and spaces read | not yet |
+| ACCEPT into an item longer than a line (C261) | the next records fill it | one line, the rest spaces | yes |
+| ACCEPT into a numeric item | the characters as they come | the line moved as an alphanumeric MOVE moves it | yes |
+| MOVE of an alphanumeric item to a numeric one (C240) | an unsigned integer, each character's low half | one sign and the digits aligned on the decimal point; another character before the receiver is full gives zero | yes |
 | MOVE of a zoned item holding other characters than digits to a zoned one (C260) | each digit's low half, zone F | each digit's byte copied, aligned on the decimal point | yes |
 | A receiving group holding its own OCCURS DEPENDING ON object | its maximum length | the object's current value | not yet |
 | `ADD X TO X Y`, and SUBTRACT and MULTIPLY with one sending item | the sending item read once for every receiver | read again for each receiver, after the one before is stored; two or more sending operands summed once, as IBM sums them | yes |
