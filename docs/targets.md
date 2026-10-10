@@ -62,7 +62,7 @@ gnucobol`, or under `--compliance extended`, `relaxed` or `loose`.
 | MEAN, MEDIAN, NUMVAL and COMBINED-DATETIME | floating point, rounded | exact decimal, truncated | not yet |
 | MAX, MIN, RANGE, REM, SUM; INTEGER, INTEGER-PART, MOD of fixed-point arguments | IBM's places | cobc's fields | not yet |
 | A zero divisor outside ON SIZE ERROR | S0CB, S0C9 or S0CF | the receiver kept as it was, and the run goes on | yes |
-| Invalid decimal data in arithmetic | S0C7 | the run goes on | not yet |
+| Invalid decimal data in arithmetic, comparisons, MOVE and DISPLAY | S0C7 | read as libcob reads it: a zoned character worth the low half of its ASCII code, a packed digit its half-byte's value, HIGH-VALUE and LOW-VALUE as plus and minus 10 to the item's size; the run goes on | yes |
 | An OPEN or CLOSE of an indexed or relative file that fails, with no FILE STATUS and no declarative (C451) | control returns; the next statement on the file is a logic error | the run ends at the OPEN or CLOSE, U4038 with IGZ0035S | yes |
 | Zero to a negative power, with or without ON SIZE ERROR (C334) | a size error; without the phrase U4038 with IGZ0050S | zero, and the run goes on | yes |
 | A function argument outside what it takes, such as `CHAR(0)` (C452) | U4038 with LE's message | CHAR the sequence's first character, a function of characters none, any other zero, RANDOM the seed's magnitude; the run goes on | yes |

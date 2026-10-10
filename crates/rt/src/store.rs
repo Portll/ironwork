@@ -127,7 +127,7 @@ pub fn digits(bytes: &[u8], kind: Kind, options: impl FnOnce() -> Options) -> Op
         Kind::Binary { digits, signed, native, .. } => i64::try_from(Binary { digits: digits as u8, signed, native }.load(bytes)).ok(),
         Kind::Packed { signed, .. } | Kind::Zoned { signed, .. } => {
             let options = options();
-            if options.invdata.is_some_and(|i| i.cleansign) {
+            if options.invdata.is_some_and(|i| i.cleansign) || options.emulates_cobc() && cobc_reads_otherwise(bytes, kind) {
                 return None;
             }
             let read = match kind {
@@ -154,12 +154,107 @@ pub fn read_stored(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> 
         Kind::Index => Val::Num(Fixed::new(i32::from_be_bytes(bytes.try_into().unwrap()) as i128, Places::new(9, 0))),
         Kind::Float(p) => Val::Float(Hfp::from_bytes(p, bytes)),
         Kind::Binary { digits, signed, native, .. } => Val::Num(Fixed::new(Binary { digits: digits as u8, signed, native }.load(bytes), places)),
-        Kind::Packed { signed, .. } => {
-            let d = codec::packed(bytes, signed, options.numproc).map_err(|c| Abend::check(c, pos))?;
+        Kind::Packed { .. } | Kind::Zoned { .. } => {
+            let d = decimal_value(facts, bytes, loc.kind).map_err(|c| Abend::check(c, pos))?;
             Val::Num(fixed(d.negative, U256::from_u128(d.magnitude), places))
         }
-        Kind::Zoned { signed, sign, .. } => Val::Num(zoned_value(options.numproc, bytes, signed, sign, places, pos)?),
     })
+}
+
+/// A zoned or packed item's value as Enterprise COBOL's PACK and ZAP read it; for cobc, as libcob
+/// reads it where the two differ.
+fn decimal_value(facts: &dyn ProgramFacts, bytes: &[u8], kind: Kind) -> Result<Decimal, ProgramCheck> {
+    let options = facts.options();
+    if options.emulates_cobc()
+        && cobc_reads_otherwise(bytes, kind)
+        && let Some(d) = cobc_decimal(facts.page(), bytes, kind)
+    {
+        return Ok(d);
+    }
+    match kind {
+        Kind::Zoned { signed, sign, .. } => codec::zoned(bytes, signed, sign, options.numproc),
+        Kind::Packed { signed, .. } => codec::packed(bytes, signed, options.numproc),
+        _ => Err(ProgramCheck::Data),
+    }
+}
+
+/// Whether libcob reads a zoned or packed item otherwise than PACK and ZAP: a zoned byte that is no
+/// digit outside a signed item's overpunched sign, a separate sign other than + or -, a packed
+/// digit above 9, or a packed sign B, or D in an unsigned item.
+pub fn cobc_reads_otherwise(bytes: &[u8], kind: Kind) -> bool {
+    let digit = |b: &u8| (0xF0..=0xF9).contains(b);
+    match kind {
+        Kind::Packed { signed, .. } => {
+            let Some((&last, body)) = bytes.split_last() else { return false };
+            body.iter().any(|b| b >> 4 > 9 || b & 0x0F > 9) || last >> 4 > 9 || !matches!(last & 0x0F, 0xA | 0xC | 0xE | 0xF) && !(signed && last & 0x0F == 0xD)
+        }
+        Kind::Zoned { signed, sign, .. } => {
+            let leading = matches!(sign, Some(SignClause { position: SignPosition::Leading, .. }));
+            match sign {
+                Some(SignClause { separate: true, .. }) => {
+                    let Some((s, body)) = (if leading { bytes.split_first() } else { bytes.split_last() }) else { return false };
+                    !matches!(s, 0x4E | 0x60) || !body.iter().all(digit)
+                }
+                _ if !signed => !bytes.iter().all(digit),
+                _ => {
+                    let at = if leading { 0 } else { bytes.len().saturating_sub(1) };
+                    bytes.iter().enumerate().any(|(i, b)| if i == at { b >> 4 < 0xA || b & 0x0F > 9 } else { !digit(b) })
+                }
+            }
+        }
+        _ => false,
+    }
+}
+
+/// A zoned or packed item read as libcob reads it (cob_decimal_set_display
+/// and cob_decimal_set_packed, libcob/numeric.c). A zoned character other than a digit is worth the
+/// low half of its ASCII code, a space 0 and `*` 10; an item starting with HIGH-VALUE is 10 to the
+/// power of its size and one starting with LOW-VALUE its negative; the sign is negative under a
+/// separate '-', an overpunch of B or D, or a character from 'p' to '~'. A packed digit half-byte
+/// is worth its own value up to 15, and the sign is negative only for D.
+pub fn cobc_decimal(page: &CodePage, bytes: &[u8], kind: Kind) -> Option<Decimal> {
+    match kind {
+        Kind::Packed { digits, signed, .. } => {
+            let (&last, body) = bytes.split_last()?;
+            let nibbles: Vec<u8> = body.iter().flat_map(|b| [b >> 4, b & 0x0F]).chain([last >> 4]).collect();
+            let digits = nibbles[nibbles.len().saturating_sub(digits as usize)..].iter();
+            Some(Decimal { negative: signed && last & 0x0F == 0x0D, magnitude: digits.fold(0, |m, &n| m * 10 + u128::from(n)) })
+        }
+        Kind::Zoned { signed, sign, .. } => {
+            let leading = matches!(sign, Some(SignClause { position: SignPosition::Leading, .. }));
+            let (body, mut negative) = match sign {
+                Some(SignClause { separate: true, .. }) if leading => (bytes.get(1..)?, bytes[0] == 0x60),
+                Some(SignClause { separate: true, .. }) => (bytes.get(..bytes.len().checked_sub(1)?)?, bytes[bytes.len() - 1] == 0x60),
+                _ => (bytes, false),
+            };
+            let power = || 10u128.checked_pow(u32::try_from(body.len()).ok()?);
+            match body.first()? {
+                0xFF => return Some(Decimal { negative: false, magnitude: power()? }),
+                0x00 => return Some(Decimal { negative: true, magnitude: power()? }),
+                _ => {}
+            }
+            let sign_at = (signed && !sign.is_some_and(|s| s.separate)).then(|| if leading { 0 } else { body.len() - 1 });
+            let mut magnitude = 0u128;
+            for (i, &b) in body.iter().enumerate() {
+                let ascii = || page.decode(&[b]).chars().next().map_or(u32::from(b), u32::from);
+                let digit = match b {
+                    0xF0..=0xF9 => b & 0x0F,
+                    _ if Some(i) == sign_at && b >> 4 >= 0xA && b & 0x0F <= 9 => {
+                        negative = matches!(b >> 4, 0xB | 0xD);
+                        b & 0x0F
+                    }
+                    _ => {
+                        let code = ascii();
+                        negative |= Some(i) == sign_at && code & 0xF0 == 0x70;
+                        (code & 0x0F) as u8
+                    }
+                };
+                magnitude = magnitude * 10 + u128::from(digit);
+            }
+            Some(Decimal { negative, magnitude })
+        }
+        _ => None,
+    }
 }
 
 /// INVDATA(CLEANSIGN): a zoned or packed item whose sign half-byte is not a sign code (0 to 9) is
@@ -698,6 +793,13 @@ pub fn move_sender(facts: &dyn ProgramFacts, mem: &[u8], src: Loc, dest: Loc, po
     if facts.options().emulates_cobc() && holds_characters(src, dest, bytes(mem, src)) {
         return Ok(Val::Bytes(bytes(mem, src).to_vec()));
     }
+    if matches!(src.kind, Kind::Packed { .. })
+        && facts.options().emulates_cobc()
+        && matches!(dest.kind, Kind::Packed { .. } | Kind::Zoned { sign: None | Some(SignClause { separate: false, .. }), .. })
+        && cobc_reads_otherwise(bytes(mem, src), src.kind)
+    {
+        return Ok(Val::Bytes(bytes(mem, src).to_vec()));
+    }
     match read(facts, mem, src, pos) {
         Err(Abend { code: AbendCode::Check(ProgramCheck::Data), .. }) if moved_unchecked(facts, src, dest) => {
             let stored = bytes(mem, src);
@@ -777,6 +879,40 @@ fn carry_digits<H, L: Loader<H>>(facts: &dyn ProgramFacts, unit: &mut RunUnit<'_
             }
         }
         unit.write(dest.offset, &copied);
+        return Ok(());
+    }
+    if facts.options().emulates_cobc()
+        && let Kind::Packed { digits, .. } = src.kind
+        && let Some((&last, body)) = sender.split_last()
+    {
+        let nibbles: Vec<u8> = body.iter().flat_map(|b| [b >> 4, b & 0x0F]).chain([last >> 4]).collect();
+        let nibbles = &nibbles[nibbles.len().saturating_sub(digits as usize)..];
+        let (m, n) = (nibbles.len() as i64, dest.kind.digits_scale().map_or(0, |(d, _)| d) as i64);
+        let shift = m - n + power(src) - power(dest);
+        let aligned = |fill: u8| (0..n).map(move |j| usize::try_from(j + shift).ok().and_then(|i| nibbles.get(i)).copied().unwrap_or(fill));
+        let written: Vec<u8> = match dest.kind {
+            Kind::Packed { signed, .. } => {
+                let sign = match last & 0x0F {
+                    _ if !signed => 0x0F,
+                    0 => 0x0C,
+                    s => s,
+                };
+                let mut halves: Vec<u8> = aligned(0).chain([sign]).collect();
+                if halves.len() % 2 == 1 {
+                    halves.insert(0, 0);
+                }
+                halves.chunks(2).map(|h| h[0] << 4 | h[1]).collect()
+            }
+            _ => {
+                let mut zoned: Vec<u8> = aligned(0).map(|d| facts.page().encode_char(char::from(b'0' + d)).unwrap_or(0xF0 | d)).collect();
+                let at = if matches!(dest.kind, Kind::Zoned { sign: Some(SignClause { position: SignPosition::Leading, .. }), .. }) { 0 } else { zoned.len().saturating_sub(1) };
+                if matches!(dest.kind, Kind::Zoned { signed: true, .. }) && last & 0x0F == 0x0D && zoned.get(at).is_some_and(|b| (0xF0..=0xF9).contains(b)) {
+                    zoned[at] = zoned[at] & 0x0F | 0xD0;
+                }
+                zoned
+            }
+        };
+        unit.write(dest.offset, &written);
         return Ok(());
     }
     let (halves, sign) = digit_halves(src.kind, sender);

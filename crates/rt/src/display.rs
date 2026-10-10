@@ -31,6 +31,9 @@ pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos, upon_cons
         Kind::National => national(facts.page(), store::bytes(mem, loc), upon_console),
         Kind::Dbcs { .. } => facts.page().decode_dbcs(store::bytes(mem, loc)),
         Kind::Zoned { .. } | Kind::Packed { .. } | Kind::Binary { .. } if dispsign == DispSign::Cobc && !whole_native => cobc(facts, mem, loc, pos)?,
+        Kind::Packed { digits, signed, .. } if dispsign != DispSign::Cobc && facts.options().dialect_of(Switched::DisplayOfNondisplayNumeric) == Dialect::Gnucobol && let Some((negative, shown)) = cobc_bad_packed(facts, mem, loc, digits, signed) => {
+            if signed { format!("{}{shown}", if negative { '-' } else { '+' }) } else { shown }
+        }
         Kind::Packed { digits, signed, .. } | Kind::Binary { digits, signed, .. }
             if dispsign == DispSign::Cobc || facts.options().dialect_of(Switched::DisplayOfNondisplayNumeric) == Dialect::Gnucobol =>
         {
@@ -144,6 +147,7 @@ fn cobc(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> R<String> {
             };
             (negative, facts.page().decode(&shown))
         }
+        Kind::Packed { signed, .. } if let Some(bad) = cobc_bad_packed(facts, mem, loc, digits, signed) => bad,
         _ => {
             let Val::Num(f) = store::read_stored(facts, mem, loc, pos)? else { unreachable!() };
             let magnitude = f.magnitude.div_rem(pow10(digits)).1.to_u128().unwrap_or(0);
@@ -167,6 +171,19 @@ fn cobc(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos) -> R<String> {
         (true, Some(SignPosition::Trailing)) => format!("{shown}{mark}"),
         (true, _) => format!("{mark}{shown}"),
     })
+}
+
+/// A packed item holding no valid number, for cobc: whether its sign half-byte is D, and each digit
+/// half-byte shown as the character '0' plus its value, as cobc's move to a display copy shows it.
+fn cobc_bad_packed(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, digits: u32, signed: bool) -> Option<(bool, String)> {
+    let bytes = store::bytes(mem, loc);
+    if !facts.options().emulates_cobc() || !store::cobc_reads_otherwise(bytes, loc.kind) {
+        return None;
+    }
+    let (&last, body) = bytes.split_last()?;
+    let nibbles: Vec<u8> = body.iter().flat_map(|b| [b >> 4, b & 0x0F]).chain([last >> 4]).collect();
+    let shown = nibbles[nibbles.len().saturating_sub(digits as usize)..].iter().map(|&n| char::from(b'0' + n)).collect();
+    Some((signed && last & 0x0F == 0x0D, shown))
 }
 
 /// The digits that hold any value of a binary item of `len` bytes, 1 to 8: 3 for a BINARY-CHAR's

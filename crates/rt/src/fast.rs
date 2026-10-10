@@ -91,6 +91,9 @@ impl Storage<'_> {
     #[inline(always)]
     pub fn digits(&self, at: usize, len: u32, kind: Kind) -> Option<i64> {
         let bytes = &self.mem[at..at + len as usize];
+        if self.options.emulates_cobc() && store::cobc_reads_otherwise(bytes, kind) {
+            return None;
+        }
         if !self.options.invdata.is_some_and(|i| i.cleansign) {
             match kind {
                 Kind::Packed { signed, .. } if len <= 9 => return packed_count(bytes, signed || self.options.numproc != Numproc::Nopfd),

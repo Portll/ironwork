@@ -365,3 +365,67 @@ fn a_gnucobol_target_shows_and_moves_a_zoned_items_characters_as_cobc_does() {
         }
     }
 }
+
+/// Zoned and packed items holding no valid number, read by arithmetic and comparisons, moved and
+/// shown.
+const BAD_DECIMAL: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. BADDATA.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 U PIC 9(4).\n",
+    "       01 UG REDEFINES U PIC X(4).\n",
+    "       01 S PIC S9(4).\n",
+    "       01 SG REDEFINES S PIC X(4).\n",
+    "       01 D PIC 9(2)V99.\n",
+    "       01 DG REDEFINES D PIC X(4).\n",
+    "       01 E PIC S9(3) SIGN LEADING SEPARATE.\n",
+    "       01 EG REDEFINES E PIC X(4).\n",
+    "       01 L PIC S9(3) SIGN LEADING.\n",
+    "       01 LG REDEFINES L PIC X(3).\n",
+    "       01 P PIC S9(3) COMP-3.\n",
+    "       01 PG REDEFINES P PIC X(2).\n",
+    "       01 Q PIC S9(4) COMP-3.\n",
+    "       01 QG REDEFINES Q PIC X(3).\n",
+    "       01 V PIC 9(3) COMP-3.\n",
+    "       01 VG REDEFINES V PIC X(2).\n",
+    "       01 W PIC S9(5) COMP-3.\n",
+    "       01 WG REDEFINES W PIC X(3).\n",
+    "       01 Z PIC 9(5).\n",
+    "       01 B PIC 9(5) COMP.\n",
+    "       01 R PIC S9(6).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE '1 #4' TO UG ADD 1 TO U GIVING R DISPLAY R\n",
+    "           IF U = 1034 DISPLAY 'EQ 1034' END-IF\n",
+    "           MOVE '12$ ' TO SG COMPUTE R = S * 2 DISPLAY R\n",
+    "           MOVE '1*3%' TO DG COMPUTE R = D * 100 DISPLAY R\n",
+    "           MOVE HIGH-VALUES TO UG COMPUTE R = U + 0 DISPLAY R\n",
+    "           MOVE LOW-VALUES TO UG COMPUTE R = U + 0 DISPLAY R\n",
+    "           MOVE '*1 2' TO EG COMPUTE R = E + 0 DISPLAY R\n",
+    "           MOVE 'r1 ' TO LG COMPUTE R = L + 0 DISPLAY R\n",
+    "           MOVE X'1A2B' TO PG COMPUTE R = P + 0 DISPLAY R\n",
+    "           MOVE X'F1234D' TO QG COMPUTE R = Q + 0 DISPLAY R\n",
+    "           MOVE X'1C3A' TO VG DISPLAY V\n",
+    "           MOVE V TO W DISPLAY FUNCTION HEX-OF(WG)\n",
+    "           MOVE V TO Z DISPLAY Z\n",
+    "           MOVE V TO B DISPLAY B\n",
+    "           MOVE '1 #4' TO UG MOVE U TO W DISPLAY FUNCTION HEX-OF(WG)\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn a_gnucobol_target_reads_invalid_decimal_data_as_cobc_does_and_ibm_ends_the_run() {
+    // cobc 3.2's output by default, then under -std=ibm-strict.
+    for (target, expected) in [(numeric::Target::Gnucobol, "+001035\nEQ 1034\n+002480\n+002035\n+010000\n-010000\n+000102\n-000210\n+000202\n-001234\n1<3\n001C3A\n001<3\n00223\n01034C\n"), (numeric::Target::GnucobolIbmStrict, "001035+\nEQ 1034\n002480+\n002035+\n010000+\n010000-\n000102+\n000210-\n000202+\n001234-\n1<3\n001C3A\n001<3\n0000000223\n01034C\n")] {
+        let flags = target.flags();
+        let flags: Vec<&str> = flags.iter().map(String::as_str).collect();
+        for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+            let ran = Harness::source(BAD_DECIMAL).flags(&flags).run(executor);
+            assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{} {name}: {}", target.name(), ran.err);
+        }
+    }
+    for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+        let ibm = Harness::source(BAD_DECIMAL).run(executor);
+        assert!(ibm.ending.as_ref().is_err_and(|a| a.message.starts_with("CEE3207S")), "{name}: {:?}", ibm.ending);
+    }
+}
