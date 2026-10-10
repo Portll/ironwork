@@ -538,8 +538,8 @@ behaviour writes or reads Micro Focus's and GnuCOBOL's screen instead of a devic
 
 `DISPLAY ... UPON CRT` and `ACCEPT ... FROM CRT` with no other phrase use the cursor. The
 attributes (HIGHLIGHT, LOWLIGHT, REVERSE-VIDEO, BLINK, UNDERLINE, BELL, BEEP, AUTO, FULL, REQUIRED,
-PROMPT, FOREGROUND-COLOR n, BACKGROUND-COLOR n, TIMEOUT n and the like) are read and kept by name, and
-change nothing a run shows.
+NO-ECHO or NO ECHO, PROMPT, FOREGROUND-COLOR n, BACKGROUND-COLOR n, TIMEOUT n and the like) are read
+and kept by name, and change nothing a run shows.
 
 The run unit has one screen of 24 lines of 80 characters, blank at the start. A DISPLAY writes its
 items one after another from its position, after clearing what BLANK or ERASE names, and leaves the

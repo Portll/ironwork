@@ -2185,7 +2185,11 @@ impl Parser<'_> {
                 self.at += 1;
                 continue;
             }
-            let Some(word) = self.word().map(str::to_owned) else { break };
+            let Some(mut word) = self.word().map(str::to_owned) else { break };
+            if word == "NO" && self.word_at(1) == Some("ECHO") {
+                self.at += 1;
+                word = "NO-ECHO".into();
+            }
             let positional = matches!(word.as_str(), "LINE" | "COL" | "COLUMN" | "POSITION");
             if !(positional || word == "AT" || SCREEN_ATTRIBUTES.contains(&word.as_str()) || matches!(word.as_str(), "ERASE" | "BLANK" | "UPDATE" | "SECURE")) {
                 break;

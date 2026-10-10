@@ -2845,3 +2845,29 @@ fn under_extended_unstring_sends_a_function_value_alike_on_both_executors() {
     let refused = syntax::parse(UNSTRING_VALUES).unwrap_err();
     assert_eq!(refused.pos.line, 14, "{refused}");
 }
+
+/// A screen ACCEPT WITH AUTO, TIMEOUT and NO ECHO written as two words.
+const NO_ECHO: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. NOECHO.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 K PIC X(2).\n",
+    "       01 T PIC 9(2) VALUE 5.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           ACCEPT K AT LINE 1 COLUMN 1\n",
+    "               WITH AUTO TIMEOUT T NO ECHO\n",
+    "               ON EXCEPTION CONTINUE\n",
+    "           END-ACCEPT\n",
+    "           DISPLAY 'K=' K UPON SYSOUT\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn under_extended_no_echo_may_be_two_words() {
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let o = Harness::source(NO_ECHO).flags(EXTENDED).screens("string AB\nENTER\n").run(executor);
+        assert!(o.out.starts_with("K=AB\n"), "{}\n{}", o.out, o.err);
+        assert_eq!(o.ending, Ok(Ending::Goback), "{}", o.err);
+    }
+}
