@@ -1468,6 +1468,19 @@ description, and GnuCOBOL sources pass a SIGNED-INT to a PIC S9(8) COMP-5 parame
 COMP-5 of one size, sign and scale, each holds the other's values in the same bytes, so extended
 passes the argument with this warning; any other difference stays refused.
 
+### IWX0111-W SPACE or ZERO as a function's argument
+
+`IWX0111-W FUNCTION {name}: {figurative} as an argument (GnuCOBOL; Enterprise COBOL takes a
+figurative constant as an argument only inside an arithmetic expression): it is read as the literal
+'{character}'`, at the function.
+
+Enterprise COBOL refuses a figurative constant standing alone as an intrinsic function's argument
+(IWC0141-S). cobc 3.2 gives it its one character, as in `FUNCTION SUBSTITUTE(TEXT, "+", SPACE)`.
+Extended reads SPACE as ' ' and ZERO as '0' in the arguments of CONCATENATE, SUBSTITUTE,
+SUBSTITUTE-CASE, UPPER-CASE, LOWER-CASE, REVERSE and TRIM, whose arguments are all alphanumeric.
+QUOTE, whose character the QUOTE and APOST options choose, and HIGH-VALUE and LOW-VALUE, which the
+collating sequence chooses, stay refused.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

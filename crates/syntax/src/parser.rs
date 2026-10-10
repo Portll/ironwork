@@ -302,6 +302,10 @@ fn environment_display(item: Operand, written: &str, device: &str, pos: Pos) -> 
 /// screen.
 const CRT_DEVICES: &[&str] = &["CRT", "CRT-UNDER"];
 
+/// The intrinsic functions whose arguments are all alphanumeric, which GnuCOBOL gives SPACE or ZERO
+/// as its one character.
+const CHARACTER_FUNCTIONS: &[&str] = &["CONCATENATE", "SUBSTITUTE", "SUBSTITUTE-CASE", "UPPER-CASE", "LOWER-CASE", "REVERSE", "TRIM"];
+
 /// The words that begin a SCREEN SECTION entry's clauses, so a name is not taken for one.
 const SCREEN_CLAUSES: &[&str] = &[
     "LINE", "COL", "COLUMN", "VALUE", "PIC", "PICTURE", "FROM", "TO", "USING", "BLANK", "ERASE", "SECURE", "NO-ECHO", "OCCURS", "JUSTIFIED", "JUST", "SIGN", "USAGE",
@@ -4263,6 +4267,17 @@ impl Parser<'_> {
                     continue;
                 }
                 args.push(self.expr()?);
+            }
+        }
+        if self.extended && CHARACTER_FUNCTIONS.contains(&name.as_str()) {
+            for arg in &mut args {
+                let (figurative, character) = match arg {
+                    Expr::Operand(Operand::Literal(Literal::Figurative(Figurative::Space))) => ("SPACE", " "),
+                    Expr::Operand(Operand::Literal(Literal::Figurative(Figurative::Zero))) => ("ZERO", "0"),
+                    _ => continue,
+                };
+                self.messages.push(crate::messages::IWX0111.at(pos, format!("FUNCTION {name}: {figurative} as an argument (GnuCOBOL; Enterprise COBOL takes a figurative constant as an argument only inside an arithmetic expression): it is read as the literal '{character}'")));
+                *arg = Expr::Operand(Operand::Literal(Literal::Alnum(character.into())));
             }
         }
         let refmod = self.refmod()?;

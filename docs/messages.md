@@ -923,6 +923,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0108 | W | `DISPLAY with items after its screen phrases (GnuCOBOL; Enterprise COBOL has no screen): each list of items is displayed in turn, at the place its own phrases give or at the cursor` |
 | IWX0109 | W | `SWITCH-{n} (GnuCOBOL's name for its switch {n}; Enterprise COBOL writes UPSI-{n}): it is read as UPSI-{n}, which the UPSI run-time option sets` |
 | IWX0110 | W | `FUNCTION {name} argument {n} ({item}): {parameter} differs from it in digits alone, both COMP-5 of one size (GnuCOBOL passes BY REFERENCE whatever the PICTURE; Enterprise COBOL requires the argument's): the parameter reads and sets the argument's bytes` |
+| IWX0111 | W | `FUNCTION {name}: {figurative} as an argument (GnuCOBOL; Enterprise COBOL takes a figurative constant as an argument only inside an arithmetic expression): it is read as the literal '{character}'` |
 
 ## Run-time refusals
 

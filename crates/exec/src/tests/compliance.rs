@@ -2763,3 +2763,31 @@ fn under_extended_a_comp_5_argument_may_differ_from_its_parameter_in_digits() {
     let refused = diagnostics_under(&packed, numeric::Compliance::Extended);
     assert!(refused.iter().any(|d| (d.0, d.2) == (22, Some("IWC0026"))), "{refused:?}");
 }
+
+/// SPACE and ZERO as arguments of GnuCOBOL's SUBSTITUTE and of CONCATENATE.
+const FIGURATIVE_ARGUMENTS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. FIGARG.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 S PIC X(10) VALUE 'a+b+c'.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY '[' FUNCTION SUBSTITUTE(S, '+', SPACE) ']'\n",
+    "           DISPLAY '[' FUNCTION SUBSTITUTE(S, '+', ZERO) ']'\n",
+    "           DISPLAY '[' FUNCTION CONCATENATE('x', SPACE, 'y') ']'\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn under_extended_space_and_zero_are_one_character_arguments() {
+    // cobc 3.2's output.
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let o = Harness::source(FIGURATIVE_ARGUMENTS).flags(EXTENDED).run(executor);
+        assert_eq!((o.out.as_str(), o.ending), ("[a b c     ]\n[a0b0c     ]\n[x y]\n", Ok(Ending::Goback)), "{}", o.err);
+    }
+    let warned: Vec<_> = diagnostics_under(FIGURATIVE_ARGUMENTS, numeric::Compliance::Extended).into_iter().filter(|d| d.2 == Some("IWX0111")).map(|d| d.0).collect();
+    assert_eq!(warned, [7, 8, 9]);
+    let quote = FIGURATIVE_ARGUMENTS.replace("'+', ZERO)", "'+', QUOTE)");
+    let refused = diagnostics_under(&quote, numeric::Compliance::Extended);
+    assert!(refused.iter().any(|d| (d.0, d.2) == (8, Some("IWC0141"))), "{refused:?}");
+}
