@@ -200,13 +200,14 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     }
 
     /// Control reaching a paragraph of segment `priority`: an independent segment entered from
-    /// another is in its initial state, so its altered GO TOs are as written (assumption C52).
+    /// another is in its initial state, so its altered GO TOs are as written (assumption C52);
+    /// cobc never puts them back.
     fn enter_segment(&mut self, priority: u8) {
         if priority == self.segment {
             return;
         }
         self.segment = priority;
-        if priority >= 50 {
+        if priority >= 50 && !self.options.emulates_cobc() {
             let program = self.program;
             for (i, target) in self.unit.programs[self.me].altered.iter_mut().enumerate() {
                 if program.paragraphs[i].priority == priority {

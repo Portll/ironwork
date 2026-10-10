@@ -262,13 +262,13 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
     }
 
     /// `Machine::enter_segment`: an independent segment entered from another is in its initial
-    /// state, its altered GO TOs as written (assumption C52).
+    /// state, its altered GO TOs as written (assumption C52); cobc never puts them back.
     pub(super) fn enter_segment(&mut self, priority: u8) {
         if priority == self.segment {
             return;
         }
         self.segment = priority;
-        if priority >= 50 {
+        if priority >= 50 && !self.p.options.options.emulates_cobc() {
             let p = self.p;
             for (i, target) in self.unit.programs[self.me].altered.iter_mut().enumerate() {
                 if p.paragraphs[i].priority == priority {

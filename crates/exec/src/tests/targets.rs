@@ -551,3 +551,36 @@ fn a_gnucobol_target_gives_ord_and_char_natively_and_a_contained_program_its_own
         }
     }
 }
+
+/// An independent segment PERFORMed twice from the fixed one, ALTERing its own GO TO the first time.
+const SEGMENT_ALTERED: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. SEGALT.\n",
+    "       PROCEDURE DIVISION.\n",
+    "       MAIN SECTION.\n",
+    "       M-1.\n",
+    "           PERFORM S60 2 TIMES\n",
+    "           STOP RUN.\n",
+    "       S60 SECTION 60.\n",
+    "       S60-1.\n",
+    "           GO TO S60-A.\n",
+    "       S60-A.\n",
+    "           DISPLAY 'A'\n",
+    "           ALTER S60-1 TO PROCEED TO S60-B.\n",
+    "           GO TO S60-X.\n",
+    "       S60-B.\n",
+    "           DISPLAY 'B'.\n",
+    "       S60-X.\n",
+    "           EXIT.\n",
+);
+
+#[test]
+fn a_gnucobol_target_keeps_an_altered_go_to_in_an_independent_segment_and_ibm_puts_it_back() {
+    // cobc 3.2's output, by default and under -std=ibm-strict.
+    for (flags, expected) in [(EXTENDED, "A\nB\n"), (&[][..], "A\nA\n")] {
+        for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+            let ran = Harness::source(SEGMENT_ALTERED).flags(flags).run(executor);
+            assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{flags:?} {name}: {}", ran.err);
+        }
+    }
+}

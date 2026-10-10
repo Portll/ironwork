@@ -55,7 +55,7 @@ gnucobol`, or under `--compliance extended`, `relaxed` or `loose`.
 | A signed zoned item compared with an alphanumeric operand (C221) | the sign byte's zone made F under ZWB, so a space reads as 0 | a sign removed from a digit; a space kept; another character read as 0 | yes |
 | ORD, CHAR and a contained program under a PROGRAM COLLATING SEQUENCE | the program's sequence | native, ironwork's being EBCDIC's ([dialect.md](dialect.md) §5.1); ORD-MAX and ORD-MIN the program's; a contained program its own | yes |
 | CANCEL of a program CALLed by a literal | no action under NODYNAM | the program is reset; give `CBL DYNAM` | by card |
-| ALTER in an independent segment | put back on entry | never put back | not yet |
+| ALTER in an independent segment (C52) | put back on entry | never put back | yes |
 | The rest of a JSON or XML GENERATE receiver | kept | spaces, in the document's encoding | yes |
 | INSPECT of a national item (C230) | national characters | TALLYING FOR CHARACTERS in bytes, two to a character | yes |
 | An intermediate result of more than 30 digits | cut to 30 (31) | every digit kept | not yet |
