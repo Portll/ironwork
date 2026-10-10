@@ -290,11 +290,14 @@ pub fn tally<P: Copy, O>(x: &mut impl Values<P, O>, subject: &O, tallying: &[Ins
     count(x, &mut data, units, tallying, pos)
 }
 
+/// Each phrase's count; cobc counts a national item's CHARACTERS in bytes (libcob/strings.c).
 fn count<P: Copy, O>(x: &mut impl Values<P, O>, data: &mut [u8], units: Units, tallying: &[InspectPhrase<P, O>], pos: Pos) -> R<()> {
     let tallied = phrases(x, data, units, tallying, pos)?;
     let counts = strings::inspect(data, units.size(), &tallied);
-    for (phrase, count) in tallying.iter().zip(counts) {
+    let per_character = if units == Units::National && x.facts().options().emulates_cobc() { 2 } else { 1 };
+    for ((phrase, count), resolved) in tallying.iter().zip(counts).zip(&tallied) {
         let Some(counter) = phrase.counter else { continue };
+        let count = if resolved.mode == InspectMode::Characters { count * per_character } else { count };
         let dest = x.locate(counter, false)?;
         add_count(x, dest, count, "a TALLYING counter must be numeric", pos)?;
     }

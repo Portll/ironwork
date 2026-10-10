@@ -57,7 +57,7 @@ gnucobol`, or under `--compliance extended`, `relaxed` or `loose`.
 | CANCEL of a program CALLed by a literal | no action under NODYNAM | the program is reset; give `CBL DYNAM` | by card |
 | ALTER in an independent segment | put back on entry | never put back | not yet |
 | The rest of a JSON or XML GENERATE receiver | kept | spaces, in the document's encoding | yes |
-| INSPECT of a national item | national characters | bytes | not yet |
+| INSPECT of a national item (C230) | national characters | TALLYING FOR CHARACTERS in bytes, two to a character | yes |
 | An intermediate result of more than 30 digits | cut to 30 (31) | every digit kept | not yet |
 | MEAN, MEDIAN, NUMVAL and COMBINED-DATETIME | floating point, rounded | exact decimal, truncated | not yet |
 | MAX, MIN, RANGE, REM, SUM; INTEGER, INTEGER-PART, MOD of fixed-point arguments | IBM's places | cobc's fields | not yet |

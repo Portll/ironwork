@@ -464,3 +464,44 @@ fn a_gnucobol_target_keeps_return_code_in_a_fullword_and_ibm_in_a_halfword() {
         }
     }
 }
+
+/// INSPECT of a national item: tallies of ALL, CHARACTERS before and after a value, and LEADING,
+/// then REPLACING.
+const NATIONAL_INSPECTED: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. INSPN.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 NT PIC N(6) VALUE N'ABCABC'.\n",
+    "       01 NX REDEFINES NT PIC X(12).\n",
+    "       01 C PIC 9(4) VALUE 0.\n",
+    "       01 D PIC 9(4) VALUE 0.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           INSPECT NT TALLYING C FOR ALL N'B'\n",
+    "           DISPLAY C\n",
+    "           INSPECT NT TALLYING D FOR CHARACTERS\n",
+    "           DISPLAY D\n",
+    "           MOVE 0 TO C\n",
+    "           INSPECT NT TALLYING C FOR CHARACTERS BEFORE N'C'\n",
+    "           DISPLAY C\n",
+    "           MOVE 0 TO C\n",
+    "           INSPECT NT TALLYING C FOR CHARACTERS AFTER N'B'\n",
+    "           DISPLAY C\n",
+    "           MOVE 0 TO C\n",
+    "           INSPECT NT TALLYING C FOR LEADING N'A'\n",
+    "           DISPLAY C\n",
+    "           INSPECT NT REPLACING ALL N'C' BY N'Q' AFTER N'B'\n",
+    "           DISPLAY FUNCTION HEX-OF(NX)\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn a_gnucobol_target_tallies_a_national_items_characters_in_bytes_and_ibm_in_characters() {
+    // cobc 3.2's output; IBM counts national characters.
+    for (flags, expected) in [(EXTENDED, "0002\n0012\n0004\n0008\n0001\n004100420051004100420051\n"), (&[][..], "0002\n0006\n0002\n0004\n0001\n004100420051004100420051\n")] {
+        for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+            let ran = Harness::source(NATIONAL_INSPECTED).flags(flags).run(executor);
+            assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{flags:?} {name}: {}", ran.err);
+        }
+    }
+}
