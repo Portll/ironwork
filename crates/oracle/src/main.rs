@@ -1,7 +1,7 @@
-use numeric::assumptions::{self, Oracle};
+use numeric::assumptions::Oracle;
 use ironwork_oracle::hercules::{self, Case, Op, Outcome};
 use ironwork_oracle::witness::{self, basis_name, files};
-use ironwork_oracle::{Finding, Verdict, check, hex, parse_output, programs, tally};
+use ironwork_oracle::{Finding, Verdict, check, hex, parse_output, programs, summarize, tally};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -62,8 +62,8 @@ fn score(dir: &Path) -> Result<bool, String> {
     for path in files(dir)? {
         let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let output = parse_output(&text);
-        compilers.extend(output.compiler);
-        observed.extend(output.cases);
+        compilers.extend(output.compiler.clone());
+        observed.extend(output.observations());
     }
     compilers.sort();
     compilers.dedup();
@@ -102,16 +102,36 @@ fn report(findings: &[Finding]) -> bool {
     }
     let t = tally(findings);
     println!("\n{} match, {} mismatch, {} not in the output\n", t.matched, t.mismatched, t.missing);
-    println!("assumption  held  broken  basis     settled by        claim");
-    for a in assumptions::ASSUMPTIONS {
-        let (held, broken) = t.by_assumption.get(a.id).copied().unwrap_or_default();
+    let tallies = t.assumptions();
+    println!("assumption  state       held  broken  observed  basis     settled by        claim");
+    for (a, t) in &tallies {
         let oracle = match a.oracle {
             Oracle::Hercules => "Hercules",
             Oracle::EnterpriseCobol => "Enterprise COBOL",
             Oracle::Db2 => "Db2 for z/OS",
         };
-        println!("{:<11} {held:>4}  {broken:>6}  {:<9} {oracle:<17} {}", a.id, basis_name(a.basis), a.claim);
+        println!(
+            "{:<11} {:<10}  {:>4}  {:>6}  {:>8}  {:<9} {oracle:<17} {}",
+            a.id,
+            t.state().name(),
+            t.held,
+            t.broken,
+            t.observed,
+            basis_name(a.basis),
+            a.claim
+        );
     }
+    let s = summarize(&tallies);
+    println!(
+        "\n{} assumptions: {} settled ({} held, {} broken; {} of them on a recalled or chosen basis), {} observed only, {} unmeasured",
+        tallies.len(),
+        s.settled,
+        s.held,
+        s.broken,
+        s.settled_on_memory_or_choice,
+        s.observed,
+        s.unmeasured
+    );
     t.mismatched == 0
 }
 
@@ -127,7 +147,7 @@ fn smoke(dir: &Path) -> Result<bool, String> {
             return Err(format!("{} does not compile:\n{}", p.name, String::from_utf8_lossy(&compile.stderr)));
         }
         let run = Command::new(&binary).output().map_err(|e| format!("{}: {e}", binary.display()))?;
-        observed.extend(parse_output(&String::from_utf8_lossy(&run.stdout)).cases);
+        observed.extend(parse_output(&String::from_utf8_lossy(&run.stdout)).observations());
     }
     println!("GnuCOBOL is ASCII and IEEE: its results are not IBM's, and this is no oracle.");
     let findings: Vec<Finding> = check(&programs(), &observed).into_iter().filter(|f| f.verdict != Verdict::Missing).collect();

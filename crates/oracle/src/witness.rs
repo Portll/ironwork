@@ -94,7 +94,7 @@ pub fn witness(dir: &Path, runner: Option<&str>) -> Result<Witness, String> {
     for path in files(dir)? {
         let bytes = fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let text = String::from_utf8_lossy(&bytes);
-        observed.extend(parse_output(&text).cases);
+        observed.extend(parse_output(&text).observations());
         let listing = parse_listing(&text);
         let mut entry = fields([
             ("sha256", hex(&sha256(&bytes)).into()),
@@ -125,9 +125,9 @@ pub fn witness(dir: &Path, runner: Option<&str>) -> Result<Witness, String> {
     let held = tally
         .by_assumption
         .iter()
-        .map(|(id, (held, broken))| {
+        .map(|(id, t)| {
             let basis = assumptions::ASSUMPTIONS.iter().find(|a| a.id == *id).map_or("unknown", |a| basis_name(a.basis));
-            (id.to_string(), Value::Obj(fields([("held", (*held as u64).into()), ("broken", (*broken as u64).into()), ("basis", basis.into())])))
+            (id.to_string(), Value::Obj(fields([("held", (t.held as u64).into()), ("broken", (t.broken as u64).into()), ("observed", (t.observed as u64).into()), ("basis", basis.into())])))
         })
         .collect();
     let deck = fields([
@@ -223,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn a_matching_run_counts_each_assumption_as_held_and_omits_an_absent_runner() {
+    fn a_matching_run_without_a_listing_observes_each_assumption_and_omits_an_absent_runner() {
         let programs = programs();
         let (program, case) = (&programs[0], &programs[0].cases[0]);
         let dir = spool_dir("match", &format!("CASE {} 0000 {}\n", program.case_id(case), hex(&case.expect)));
@@ -235,7 +235,8 @@ mod tests {
         assert!(!json.contains("\"runner\""));
         assert!(json.contains("\"compilers\":[]"));
         for id in &case.assumptions {
-            assert!(json.contains(&format!("\"{id}\":{{\"basis\":\"")), "{id} is tallied");
+            let basis = basis_name(assumptions::get(id).basis);
+            assert!(json.contains(&format!("\"{id}\":{{\"basis\":\"{basis}\",\"broken\":0,\"held\":0,\"observed\":1}}")), "{id} is observed, not held");
         }
     }
 

@@ -14,6 +14,19 @@ pub enum Oracle {
     Db2,
 }
 
+impl Oracle {
+    /// Whether a case run on this oracle settles an assumption that declares `required`. Enterprise
+    /// COBOL runs on the machine Hercules models, so its run settles a Hercules claim; Hercules
+    /// compiles nothing, so under an Enterprise COBOL claim its run is an observation. Db2 is its
+    /// own requirement in both directions.
+    pub fn settles(self, required: Oracle) -> bool {
+        matches!(
+            (self, required),
+            (Oracle::Hercules, Oracle::Hercules) | (Oracle::Db2, Oracle::Db2) | (Oracle::EnterpriseCobol, Oracle::Hercules | Oracle::EnterpriseCobol)
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Basis {
     /// Stated in IBM's documentation and checked against its text.
@@ -3005,6 +3018,24 @@ mod tests {
         cics.option(CicsTask);
         assert!(governed_by_programs(&[calls], cics).contains(&LE_UNDER_CICS));
         assert!(governed_by_programs(&[], cics).is_empty());
+    }
+
+    #[test]
+    fn an_oracle_settles_its_own_claims_and_enterprise_cobol_settles_the_machines() {
+        use Oracle::*;
+        for (ran, required, expected) in [
+            (Hercules, Hercules, true),
+            (Hercules, EnterpriseCobol, false),
+            (Hercules, Db2, false),
+            (EnterpriseCobol, Hercules, true),
+            (EnterpriseCobol, EnterpriseCobol, true),
+            (EnterpriseCobol, Db2, false),
+            (Db2, Hercules, false),
+            (Db2, EnterpriseCobol, false),
+            (Db2, Db2, true),
+        ] {
+            assert_eq!(ran.settles(required), expected, "{ran:?} run against a {required:?} claim");
+        }
     }
 
     #[test]

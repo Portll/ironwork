@@ -8,6 +8,7 @@ pub mod hercules;
 pub mod witness;
 
 use numeric::Options;
+use numeric::assumptions::{self, Basis, Oracle};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
@@ -162,6 +163,26 @@ pub struct Output {
     pub cases: BTreeMap<String, Vec<u8>>,
 }
 
+/// A case's bytes as one run produced them, with the oracle that run is known to have been. `None`
+/// when the output names no oracle: GnuCOBOL, or job output saved without its compile listing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Observation {
+    pub bytes: Vec<u8>,
+    pub ran: Option<Oracle>,
+}
+
+impl Output {
+    /// Only a listing that names IBM Enterprise COBOL identifies the run; nothing else is inferred.
+    pub fn ran(&self) -> Option<Oracle> {
+        self.compiler.is_some().then_some(Oracle::EnterpriseCobol)
+    }
+
+    pub fn observations(self) -> BTreeMap<String, Observation> {
+        let ran = self.ran();
+        self.cases.into_iter().map(|(id, bytes)| (id, Observation { bytes, ran })).collect()
+    }
+}
+
 pub fn parse_output(text: &str) -> Output {
     let mut chunks: BTreeMap<String, Vec<(u32, Vec<u8>)>> = BTreeMap::new();
     let compiler = witness::parse_listing(text).compiler;
@@ -204,16 +225,67 @@ pub struct Finding {
     pub id: String,
     pub assumptions: Vec<&'static str>,
     pub verdict: Verdict,
+    /// The oracle the case ran on, from the output's own listing; `None` when it named none.
+    pub ran: Option<Oracle>,
+}
+
+/// One assumption's cases, split by whether the run that produced each was strong enough to
+/// settle it (`held`, `broken`) or only to observe it (`observed`): a Hercules or unnamed run under
+/// an Enterprise COBOL claim, or any run but Db2 under a Db2 claim.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AssumptionTally {
+    pub held: usize,
+    pub broken: usize,
+    pub observed: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum State {
+    Held,
+    Broken,
+    Observed,
+    Unmeasured,
+}
+
+impl State {
+    pub fn name(self) -> &'static str {
+        match self {
+            State::Held => "held",
+            State::Broken => "broken",
+            State::Observed => "observed",
+            State::Unmeasured => "unmeasured",
+        }
+    }
+}
+
+impl AssumptionTally {
+    pub fn state(self) -> State {
+        match (self.held, self.broken, self.observed) {
+            (0, 0, 0) => State::Unmeasured,
+            (0, 0, _) => State::Observed,
+            (_, 0, _) => State::Held,
+            _ => State::Broken,
+        }
+    }
 }
 
 pub struct Tally {
     pub matched: usize,
     pub mismatched: usize,
     pub missing: usize,
-    /// Per assumption id: cases that held it and cases that broke it, among those the output carried.
-    pub by_assumption: BTreeMap<&'static str, (usize, usize)>,
+    /// Per assumption id, among the cases the output carried; one with no case is absent.
+    pub by_assumption: BTreeMap<&'static str, AssumptionTally>,
 }
 
+impl Tally {
+    /// Every registered assumption, in register order; one with no cases in the output is at the
+    /// default, which `state` reads as unmeasured.
+    pub fn assumptions(&self) -> Vec<(&'static assumptions::Assumption, AssumptionTally)> {
+        assumptions::ASSUMPTIONS.iter().map(|a| (a, self.by_assumption.get(a.id).copied().unwrap_or_default())).collect()
+    }
+}
+
+/// A case the output lacks counts nowhere.
 pub fn tally(findings: &[Finding]) -> Tally {
     let mut tally = Tally { matched: 0, mismatched: 0, missing: 0, by_assumption: BTreeMap::new() };
     for f in findings {
@@ -226,27 +298,63 @@ pub fn tally(findings: &[Finding]) -> Tally {
             }
         }
         for &id in &f.assumptions {
+            let required = assumptions::get(id).oracle;
             let entry = tally.by_assumption.entry(id).or_default();
-            if f.verdict == Verdict::Match { entry.0 += 1 } else { entry.1 += 1 }
+            match (f.ran.is_some_and(|ran| ran.settles(required)), &f.verdict) {
+                (false, _) => entry.observed += 1,
+                (true, Verdict::Match) => entry.held += 1,
+                (true, _) => entry.broken += 1,
+            }
         }
     }
     tally
 }
 
-pub fn check(programs: &[Program], observed: &BTreeMap<String, Vec<u8>>) -> Vec<Finding> {
+pub fn check(programs: &[Program], observed: &BTreeMap<String, Observation>) -> Vec<Finding> {
     programs
         .iter()
         .flat_map(|p| p.cases.iter().map(move |c| (p, c)))
         .map(|(p, c)| {
             let id = p.case_id(c);
-            let verdict = match observed.get(&id) {
+            let seen = observed.get(&id);
+            let verdict = match seen {
                 None => Verdict::Missing,
-                Some(bytes) if *bytes == c.expect => Verdict::Match,
-                Some(bytes) => Verdict::Mismatch { expected: c.expect.clone(), observed: bytes.clone() },
+                Some(o) if o.bytes == c.expect => Verdict::Match,
+                Some(o) => Verdict::Mismatch { expected: c.expect.clone(), observed: o.bytes.clone() },
             };
-            Finding { id, assumptions: c.assumptions.clone(), verdict }
+            Finding { id, assumptions: c.assumptions.clone(), verdict, ran: seen.and_then(|o| o.ran) }
         })
         .collect()
+}
+
+/// Assumptions by state. `settled` is held plus broken; `settled_on_memory_or_choice` is the part
+/// of it whose basis is `Recalled` or `Chosen`, the claims a run is the first check of.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Summary {
+    pub settled: usize,
+    pub held: usize,
+    pub broken: usize,
+    pub settled_on_memory_or_choice: usize,
+    pub observed: usize,
+    pub unmeasured: usize,
+}
+
+pub fn summarize(tallies: &[(&assumptions::Assumption, AssumptionTally)]) -> Summary {
+    let mut s = Summary::default();
+    for (a, t) in tallies {
+        match t.state() {
+            State::Held | State::Broken => {
+                s.settled += 1;
+                if t.state() == State::Held { s.held += 1 } else { s.broken += 1 }
+                if matches!(a.basis, Basis::Recalled | Basis::Chosen) {
+                    s.settled_on_memory_or_choice += 1;
+                }
+            }
+            State::Observed => s.observed += 1,
+            State::Unmeasured => s.unmeasured += 1,
+        }
+    }
+    s
 }
 
 #[cfg(test)]
@@ -294,8 +402,114 @@ mod tests {
     #[test]
     fn predictions_score_against_themselves() {
         let programs = programs();
-        let observed: BTreeMap<String, Vec<u8>> =
-            programs.iter().flat_map(|p| p.cases.iter().map(move |c| (p.case_id(c), c.expect.clone()))).collect();
-        assert!(check(&programs, &observed).iter().all(|f| f.verdict == Verdict::Match));
+        let observed: BTreeMap<String, Observation> = programs
+            .iter()
+            .flat_map(|p| p.cases.iter().map(move |c| (p.case_id(c), Observation { bytes: c.expect.clone(), ran: Some(Oracle::EnterpriseCobol) })))
+            .collect();
+        let findings = check(&programs, &observed);
+        assert!(findings.iter().all(|f| f.verdict == Verdict::Match && f.ran == Some(Oracle::EnterpriseCobol)));
+        let t = tally(&findings);
+        assert_eq!((t.matched, t.mismatched, t.missing), (findings.len(), 0, 0));
+        let tallies = t.assumptions();
+        assert!(tallies.iter().all(|(_, t)| t.broken == 0 && t.observed == 0));
+        assert!(tallies.iter().any(|(_, t)| t.held > 0));
+        assert_eq!(summarize(&tallies).broken, 0);
+    }
+
+    #[test]
+    fn output_without_a_listing_names_no_oracle() {
+        let named = parse_output("1PP 5655-EC6 IBM Enterprise COBOL for z/OS  6.4.0 P230418   Date 09/27/2026\nCASE a 0000 AA\n");
+        let unnamed = parse_output("CASE a 0000 AA\n");
+        assert_eq!(named.ran(), Some(Oracle::EnterpriseCobol));
+        assert_eq!(unnamed.ran(), None);
+        assert_eq!(named.observations()["a"], Observation { bytes: vec![0xAA], ran: Some(Oracle::EnterpriseCobol) });
+        assert_eq!(unnamed.observations()["a"].ran, None);
+    }
+
+    fn finding(n: usize, assumption: &'static str, verdict: Verdict, ran: Option<Oracle>) -> Finding {
+        Finding { id: format!("T.{n}"), assumptions: vec![assumption], verdict, ran }
+    }
+
+    fn tally_of(findings: &[Finding], id: &str) -> AssumptionTally {
+        tally(findings).assumptions().into_iter().find(|(a, _)| a.id == id).map(|(_, t)| t).expect("a registered assumption")
+    }
+
+    const MACHINE: &str = assumptions::HFP_EXTENDED_LOW_HALF;
+    const COMPILER: &str = assumptions::INTERMEDIATE_TABLE;
+    const DATABASE: &str = assumptions::SQL_COMMIT_AT_NORMAL_END;
+
+    #[test]
+    fn the_test_assumptions_declare_the_oracles_the_tests_assume() {
+        assert_eq!(assumptions::get(MACHINE).oracle, Oracle::Hercules);
+        assert_eq!(assumptions::get(COMPILER).oracle, Oracle::EnterpriseCobol);
+        assert_eq!(assumptions::get(DATABASE).oracle, Oracle::Db2);
+    }
+
+    #[test]
+    fn an_assumption_with_no_cases_is_unmeasured_not_held() {
+        assert_eq!(tally_of(&[], COMPILER), AssumptionTally::default());
+        assert_eq!(AssumptionTally::default().state(), State::Unmeasured);
+        let only_missing = [finding(1, COMPILER, Verdict::Missing, Some(Oracle::EnterpriseCobol))];
+        assert_eq!(tally_of(&only_missing, COMPILER).state(), State::Unmeasured);
+        assert!(!tally(&only_missing).by_assumption.contains_key(COMPILER));
+        let s = summarize(&tally(&[]).assumptions());
+        assert_eq!(s.unmeasured, assumptions::ASSUMPTIONS.len());
+        assert_eq!((s.settled, s.held, s.broken, s.observed, s.settled_on_memory_or_choice), (0, 0, 0, 0, 0));
+    }
+
+    #[test]
+    fn a_weaker_or_unnamed_run_observes_a_compiler_claim_and_does_not_settle_it() {
+        let findings = [
+            finding(1, COMPILER, Verdict::Match, Some(Oracle::Hercules)),
+            finding(2, COMPILER, Verdict::Match, Some(Oracle::Hercules)),
+            finding(3, COMPILER, Verdict::Match, None),
+            finding(4, COMPILER, Verdict::Mismatch { expected: vec![1], observed: vec![2] }, Some(Oracle::Hercules)),
+        ];
+        let t = tally_of(&findings, COMPILER);
+        assert_eq!(t, AssumptionTally { held: 0, broken: 0, observed: 4 });
+        assert_eq!(t.state(), State::Observed);
+        let s = summarize(&tally(&findings).assumptions());
+        assert_eq!((s.settled, s.observed, s.unmeasured), (0, 1, assumptions::ASSUMPTIONS.len() - 1));
+    }
+
+    #[test]
+    fn a_run_on_the_declared_oracle_settles_the_claim() {
+        let held = [finding(1, COMPILER, Verdict::Match, Some(Oracle::EnterpriseCobol))];
+        assert_eq!(tally_of(&held, COMPILER), AssumptionTally { held: 1, broken: 0, observed: 0 });
+        assert_eq!(tally_of(&held, COMPILER).state(), State::Held);
+        let broken = [finding(1, COMPILER, Verdict::Mismatch { expected: vec![1], observed: vec![2] }, Some(Oracle::EnterpriseCobol))];
+        assert_eq!(tally_of(&broken, COMPILER).state(), State::Broken);
+        let machine_by_compiler = [finding(1, MACHINE, Verdict::Match, Some(Oracle::EnterpriseCobol))];
+        assert_eq!(tally_of(&machine_by_compiler, MACHINE).state(), State::Held);
+        let database_by_compiler = [finding(1, DATABASE, Verdict::Match, Some(Oracle::EnterpriseCobol))];
+        assert_eq!(tally_of(&database_by_compiler, DATABASE).state(), State::Observed);
+    }
+
+    #[test]
+    fn a_mix_keeps_settled_and_observed_cases_apart_and_counts_the_basis() {
+        let findings = [
+            finding(1, COMPILER, Verdict::Match, Some(Oracle::EnterpriseCobol)),
+            finding(2, COMPILER, Verdict::Mismatch { expected: vec![1], observed: vec![2] }, Some(Oracle::Hercules)),
+            finding(3, COMPILER, Verdict::Match, None),
+            finding(4, MACHINE, Verdict::Match, Some(Oracle::Hercules)),
+            finding(5, MACHINE, Verdict::Mismatch { expected: vec![1], observed: vec![2] }, Some(Oracle::Hercules)),
+            finding(6, DATABASE, Verdict::Match, Some(Oracle::EnterpriseCobol)),
+            finding(7, DATABASE, Verdict::Missing, Some(Oracle::Db2)),
+        ];
+        assert_eq!(tally_of(&findings, COMPILER), AssumptionTally { held: 1, broken: 0, observed: 2 });
+        assert_eq!(tally_of(&findings, MACHINE), AssumptionTally { held: 1, broken: 1, observed: 0 });
+        assert_eq!(tally_of(&findings, DATABASE), AssumptionTally { held: 0, broken: 0, observed: 1 });
+        let t = tally(&findings);
+        assert_eq!((t.matched, t.mismatched, t.missing), (4, 2, 1));
+        let tallies = t.assumptions();
+        assert!(tallies.windows(2).all(|w| w[0].0.id != w[1].0.id), "register order, each assumption once");
+        let s = summarize(&tallies);
+        assert_eq!((s.settled, s.held, s.broken, s.observed, s.unmeasured), (2, 1, 1, 1, assumptions::ASSUMPTIONS.len() - 3));
+        assert_eq!(assumptions::get(COMPILER).basis, Basis::Documented);
+        assert_eq!(assumptions::get(MACHINE).basis, Basis::Documented);
+        assert_eq!(s.settled_on_memory_or_choice, 0);
+        let chosen = [finding(1, assumptions::TRUNC_OPT_IS_BINARY, Verdict::Match, Some(Oracle::EnterpriseCobol))];
+        assert_eq!(assumptions::get(assumptions::TRUNC_OPT_IS_BINARY).basis, Basis::Chosen);
+        assert_eq!(summarize(&tally(&chosen).assumptions()).settled_on_memory_or_choice, 1);
     }
 }

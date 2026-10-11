@@ -1573,7 +1573,7 @@ fn the_oracle_programs_run_and_match_the_model() {
     for p in &programs {
         let (out, err, ending) = run_with(&p.source(false), &["-silent"]);
         assert!(ending.is_ok(), "{}: {ending:?}\n{err}", p.name);
-        observed.extend(oracle::parse_output(&out).cases);
+        observed.extend(oracle::parse_output(&out).observations());
     }
     let findings = oracle::check(&programs, &observed);
     let failures: Vec<String> = findings
