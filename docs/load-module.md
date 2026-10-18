@@ -389,7 +389,7 @@ a byte past its switch's list.
 
 | Field | Type | Encoding | Set by |
 |---|---|---|---|
-| `arith` | `Arith` (:54) | tag: `Compat` 0, `Extend` 1 | `ARITH`, `AR`, with `COMPAT`, `C`, `EXTEND` or `E` |
+| `arith` | `Arith` (:54) | tag: `Compat` 0, `Extend` 1, `Wide` 2 | `ARITH`, `AR`, with `COMPAT`, `C`, `EXTEND` or `E`; `Wide` is set by the compiler alone |
 | `trunc` | `Trunc` (:84) | tag: `Std` 0, `Opt` 1, `Bin` 2 | `TRUNC(STD\|OPT\|BIN)` |
 | `numproc` | `Numproc` (:92) | tag: `Nopfd` 0, `Pfd` 1 | `NUMPROC(NOPFD\|PFD)` |
 | `codepage` | `u16` | LEB128. The `check` function refuses a CCSID `CodePage::by_ccsid` does not carry, because `Options::code_page` (:816) would otherwise panic | `CODEPAGE(n)`, `CP(n)` |
@@ -607,7 +607,9 @@ hold the function 92, NUMBER-OF-CALL-PARAMETERS, which came after the bump. 1.4 
 2, `Literal`, an alphanumeric literal passed to an ANY LENGTH parameter under `--compliance
 extended` (lir.md §9.15). 1.5 adds the `UnstringValue` op, 41, an UNSTRING whose sending field is a
 function's value under `--compliance extended`, and `Const` 8, `Float`, a floating-point literal's
-value in the PROCEDURE DIVISION. It also adds the functions 93 to 95, ARGUMENT NUMERIC, its class test
+value in the PROCEDURE DIVISION, and `Arith` 2, `Wide`, the arithmetic of a program with a PICTURE of
+32 to 38 digits under `--compliance extended`, whose `Fixed` magnitudes need no new encoding as `U256`
+already holds 77 digits. It also adds the functions 93 to 95, ARGUMENT NUMERIC, its class test
 and its DISPLAY text, which an ANY NUMERIC parameter's uses become under `--compliance extended`
 (lir.md §9.9), and holds a numeric literal BY CONTENT as `Chars::Value`, not `Chars::Literal`. A 0.x module is refused, and compiling the source again is the remedy (question 1).
 

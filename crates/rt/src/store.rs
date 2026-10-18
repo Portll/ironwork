@@ -485,7 +485,7 @@ fn image_of(facts: &dyn ProgramFacts, err: &mut dyn std::io::Write, loc: Loc, va
             let cap = pow10(digits);
             let kept = m.div_rem(cap).1.to_u128().unwrap();
             let mut out = Image::zeroed(loc.len);
-            decimal::encode(out.bytes_mut(), Decimal { negative: signed && value.negative && kept != 0, magnitude: kept }).map_err(|c| Abend::check(c, pos))?;
+            codec::encode_packed(out.bytes_mut(), Decimal { negative: signed && value.negative && kept != 0, magnitude: kept }).map_err(|c| Abend::check(c, pos))?;
             if !signed {
                 *out.bytes_mut().last_mut().unwrap() |= 0x0F;
             }
@@ -1106,7 +1106,7 @@ pub fn numcheck_fault_in(options: &Options, kind: Kind, stored: &[u8], lax: Opti
         Kind::Group | Kind::Alnum { .. } => b.iter().all(digit),
         Kind::Packed { digits, signed, .. } => {
             let spare_clear = digits % 2 == 1 || b[0] >> 4 == 0;
-            decimal::tp(b).is_ok_and(|cc| cc.0 == 0) && (signed || b[b.len() - 1] & 0x0F == 0x0F) && spare_clear
+            codec::test_packed(b).is_ok_and(|cc| cc.0 == 0) && (signed || b[b.len() - 1] & 0x0F == 0x0F) && spare_clear
         }
         Kind::Binary { digits, signed, native, .. } => {
             let raw = Binary { digits: digits as u8, signed, native }.load(b);
@@ -1204,7 +1204,7 @@ pub fn nonnumeric(kind: Kind) -> bool {
 pub fn byte_class(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, test: ByteClass) -> bool {
     let bytes = bytes(mem, loc);
     match test {
-        ByteClass::Packed { signed } => decimal::tp(bytes).is_ok_and(|cc| cc.0 == 0) && (signed || bytes.last().is_some_and(|b| b & 0x0F == 0x0F)),
+        ByteClass::Packed { signed } => codec::test_packed(bytes).is_ok_and(|cc| cc.0 == 0) && (signed || bytes.last().is_some_and(|b| b & 0x0F == 0x0F)),
         ByteClass::Zoned { signed } => bytes.iter().enumerate().all(|(i, &b)| {
             let zone_ok = if i + 1 == bytes.len() && signed { matches!(b >> 4, 0xC | 0xD | 0xF) } else { b >> 4 == 0xF };
             zone_ok && b & 0x0F <= 9
@@ -1493,7 +1493,7 @@ mod tests {
                     }
                 }
                 kinds.push((Kind::Binary { digits: 3, scale, signed, native: Native::BinaryChar }, 1));
-                for digits in [1, 2, 7, 18, 19, 31] {
+                for digits in [1, 2, 7, 18, 19, 31, 32, 33, 38] {
                     kinds.push((Kind::Packed { digits, scale, signed }, digits as usize / 2 + 1));
                     for sign in [None, Some((SignPosition::Leading, false)), Some((SignPosition::Leading, true)), Some((SignPosition::Trailing, true))] {
                         let sign = sign.map(|(position, separate)| SignClause { position, separate });
@@ -1648,7 +1648,7 @@ mod tests {
                 }
             }
             kinds.push(Kind::Binary { digits: 3, scale: 0, signed, native: Native::BinaryChar });
-            for digits in [1, 6, 15, 18, 19, 31] {
+            for digits in [1, 6, 15, 18, 19, 31, 32, 38] {
                 for sign in [None, Some((SignPosition::Trailing, false)), Some((SignPosition::Leading, false)), Some((SignPosition::Leading, true)), Some((SignPosition::Trailing, true))] {
                     kinds.push(Kind::Zoned { digits, scale: 0, signed, sign: sign.map(|(position, separate)| SignClause { position, separate }) });
                 }

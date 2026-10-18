@@ -1081,8 +1081,8 @@ GnuCOBOL and Micro Focus accept numeric PICTUREs of up to 38 digits; Enterprise 
 18 under ARITH(COMPAT), its default, and 31 under ARITH(EXTEND). Under extended, a program with a
 numeric or numeric-edited PICTURE of 19 to 31 digit positions, and no CBL or PROCESS card naming
 ARITH, is compiled as though a card said ARITH(EXTEND): its literals may have 31 digits too, and its
-arithmetic has ARITH(EXTEND)'s intermediate precision, not cobc's (assumption C490). A card that
-names ARITH keeps its choice, and a PICTURE of more than 31 digits stays refused.
+intermediate results are kept as cobc keeps them, up to 46 digits (assumption C490). A card that
+names ARITH keeps its choice. A PICTURE or literal of 32 to 38 digits is IWX0130's.
 
 ### IWX0061-W A paragraph header in Area B
 
@@ -1537,6 +1537,34 @@ digits, an edited or floating-point item, or an argument omitted, not passed or 
 (C513). A MOVE from the parameter moves its value, whatever the receiver (C514). Assumption C510.
 Strict refuses the clause (IWC0350).
 
+### IWX0130-W PICTUREs and literals of 32 to 38 digits
+
+`IWX0130-W {PICTURE or literal} (GnuCOBOL; Enterprise COBOL allows 31 digits under ARITH(EXTEND),
+GnuCOBOL 38): the program is compiled with arithmetic as cobc does it, keeping up to 76 digits of an
+intermediate result`, at the first numeric PICTURE of 32 to 38 digit positions, or else at the first
+numeric literal of 32 to 38 digits.
+
+cobc 3.2 allows 38 digits in a numeric item (its COB_MAX_DIGITS) and reads literals of up to 38
+digits; Enterprise COBOL stops at 31. Under extended, a program with such a PICTURE or literal, and
+no CBL or PROCESS card naming ARITH, is compiled with the arithmetic ironwork calls wide: the
+ARITH(EXTEND) of IWX0060 with the widths cobc has. Strict refuses the PICTURE with IWC0069 and the
+literal with IWC0070 or IWC0105, and a PICTURE of more than 38 digits stays IWC0263 under both.
+
+- A zoned item of up to 38 digits and a packed item of up to 38 digits (20 bytes) read, store,
+  move, compare and show as narrower ones do, and cobc's results are the model: high-order digits
+  that do not fit are dropped, ON SIZE ERROR leaves the receiver alone, ROUNDED rounds half away
+  from zero, and a REDEFINES shows the bytes. A numeric-edited PICTURE of up to 38 digit positions
+  is read; cobc sets no limit there.
+- A binary item of more than 18 digits is refused with IWC0241, as cobc refuses it.
+- An intermediate result keeps up to 76 digits. cobc keeps every digit; an intermediate that would
+  need more than 256 bits ends the run with `an intermediate result wider than 256 bits`, as the
+  product of three 38-digit operands does. A quotient whose scaled dividend passes 256 bits is
+  found a digit at a time and still gives cobc's value.
+- NUMVAL, NUMVAL-C, NUMVAL-F, TEST-NUMVAL and TEST-NUMVAL-C of a text of more than 31 digits end
+  the run with IWR0101: their value is held to 32 significant digits. A function evaluated in
+  floating point gives a decimal of 32 significant digits (assumption C516).
+- A SQL host variable of more than 31 digits is refused, as DB2's DECIMAL has no wider type.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and
@@ -1570,7 +1598,7 @@ extended.
 - A data record extended refuses, a level-01 or level-77 entry with its subordinates, is left out,
   with `IWX0064-W {record} (--compliance loose): {why}; it is left out, and a statement naming one
   of its items compiles as a hole`. That covers an entry that does not parse (TYPEDEF, a clause
-  ironwork does not read) and one the compile refuses (a PICTURE of more than 31 digits, a reserved
+  ironwork does not read) and one the compile refuses (a PICTURE of more than 38 digits, a reserved
   word as its name). A record of a file, or a refusal naming the file (`FD F: ...`), leaves the file
   out. Only the whole record goes: an item left out of a group would move the items after it.
 - A statement naming an item that was left out then compiles as a hole, as relaxed compiles any

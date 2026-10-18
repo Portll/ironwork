@@ -66,6 +66,9 @@ pub struct Program {
     /// The user-defined functions it may invoke: those defined or prototyped before it in its
     /// source, and a function itself.
     pub prototypes: Vec<Prototype>,
+    /// Where the source's first numeric literal of more than 31 digits stands, which only
+    /// `--compliance extended` reads.
+    pub long_literal: Option<Pos>,
     /// Under `--compliance extended`, the user-defined functions its source defines or prototypes
     /// after it that its REPOSITORY paragraph names, which GnuCOBOL lets it invoke.
     pub later_functions: Vec<Prototype>,

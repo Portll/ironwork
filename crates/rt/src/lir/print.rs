@@ -776,6 +776,7 @@ impl<'a> Printer<'a> {
         match arith {
             Arith::Compat => {}
             Arith::Extend => how.push("arith extend".to_owned()),
+            Arith::Wide => how.push("arith wide".to_owned()),
         }
         if !prepass.is_empty() {
             how.push(format!("prepass {}", self.places(prepass)));

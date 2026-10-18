@@ -485,7 +485,7 @@ pub enum Count { Fixed(u32), Odo(Odo), Temp(TempId) }
 |---|---|---|
 | dmax | Largest scale among the receivers and the expressions, divisors and exponents aside, a FUNCTION operand counting its outer-dmax from its arguments' descriptions (`machine::function_dmax`, assumption C390) (machine.rs:1493-1501, 1409-1417) | `ArithPlan.dmax` |
 | dmax below the top operation | The same, a ROUNDED receiver counted with its own places when C101 is `gnucobol` or `off` (`--dialect gnucobol`, `--assume C101=...`; `numeric::precision::Dmax`) | `ArithPlan.inner_dmax` |
-| ARITH | `options.arith` (machine.rs:1420) | `ArithPlan.arith` |
+| ARITH | `options.arith` (machine.rs:1420); `Wide` under `--compliance extended` for a PICTURE of 32 to 38 digits, which keeps 76 digits of an intermediate result | `ArithPlan.arith` |
 | Fixed or float | Float for every expression when a receiver is COMP-1 or COMP-2 (Programming Guide SC27-8714-03, p. 800), else `uses_float` on each expression (machine.rs:1506, 1400-1406), which is then not run | `ArithStep.mode`, with an empty `probe` when a receiver decides it |
 | Float intermediate | `arith.float_intermediate()` (machine.rs:1507) | inside `Mode::Float` |
 | Receiver's store | `locate(t).kind`, then `store_value` and `store_fixed_checked` (machine.rs:1542-1633) | `StorePlan` |

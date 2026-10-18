@@ -309,7 +309,7 @@ catalogue! {
     IWC0260 Severe "PICTURE {picture}: P must be one string of scaling positions at the left or right end of the digits";
     IWC0261 Severe "PICTURE {picture}: {character} is not a PICTURE symbol";
     IWC0262 Severe "PICTURE {picture}: more than 134217727 character positions";
-    IWC0263 Severe "PICTURE {picture}: more than 31 digits";
+    IWC0263 Severe "PICTURE {picture}: more than 38 digits";
     IWC0264 Severe "PICTURE {picture}: mixes symbols of different categories";
     IWC0265 Severe "PICTURE {picture}: {character} cannot be in a PICTURE of {symbol}, which takes {symbol} and B only";
     IWC0266 Severe "PICTURE {picture}: more character positions than a DBCS item holds";
@@ -320,7 +320,7 @@ catalogue! {
     IWC0271 Severe "PICTURE {picture}: two floating insertion strings";
     IWC0272 Severe "PICTURE {picture}: {character} is not a numeric-edited symbol";
     IWC0273 Severe "PICTURE {picture}: more than one decimal point";
-    IWC0274 Severe "PICTURE {picture}: a numeric-edited PICTURE needs 1 to 31 digit positions";
+    IWC0274 Severe "PICTURE {picture}: a numeric-edited PICTURE needs 1 to 38 digit positions";
     IWC0275 Severe "PICTURE {picture}: bad repetition ({count})";
     IWC0276 Severe "PICTURE {picture}: a repetition with nothing to repeat";
     IWC0277 Severe "PICTURE {picture}: two different currency symbols";
@@ -959,6 +959,7 @@ catalogue! {
     IWX0112 Warning "UNSTRING FUNCTION {name} (GnuCOBOL; Enterprise COBOL's UNSTRING sends a data item): the function's value is the sending field";
     IWX0113 Warning "DISPLAY FUNCTION LENGTH({item}) (GnuCOBOL; Enterprise COBOL uses an integer function only in an arithmetic expression): it shows {n}, the length the program fixes, as cobc 3.2 shows it";
     IWX0120 Warning "ANY NUMERIC (GnuCOBOL; Enterprise COBOL's parameters have the class their entries give): {name} takes the class, digits, scale, sign and usage of the argument each CALL passes for it, and is read, never written";
+    IWX0130 Warning "{PICTURE or literal} (GnuCOBOL; Enterprise COBOL allows 31 digits under ARITH(EXTEND), GnuCOBOL 38): the program is compiled with arithmetic as cobc does it, keeping up to 76 digits of an intermediate result";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

@@ -59,6 +59,9 @@ const MAX_EDITED: u64 = 4096;
 /// Enterprise COBOL's limit on an elementary item's character positions.
 pub const MAX_POSITIONS: u64 = 134_217_727;
 
+/// The most digits a numeric PICTURE holds, which only `--compliance extended` allows past 31.
+pub const MAX_DIGITS: u64 = 38;
+
 pub fn analyse(text: &str) -> Result<Picture, Refused> {
     analyse_with(text, Notation::default())
 }
@@ -109,8 +112,8 @@ pub fn analyse_with(text: &str, notation: Notation) -> Result<Picture, Refused> 
     let (digits, scale, alnum, national) = (digits as u32, scale as u32, alnum as u32, national as u32);
     let scaled = left + right > 0;
     match (digits > 0, alnum > 0, national > 0) {
-        (true, false, false) if positions <= 31 => Ok(Picture { category: Category::Numeric, size: digits, digits, scale, signed, edit: None, scaling: right as u32, currency: None }),
-        (true, false, false) => Err((syntax::messages::IWC0263, format!("PICTURE {text}: more than 31 digits"))),
+        (true, false, false) if positions <= MAX_DIGITS => Ok(Picture { category: Category::Numeric, size: digits, digits, scale, signed, edit: None, scaling: right as u32, currency: None }),
+        (true, false, false) => Err((syntax::messages::IWC0263, format!("PICTURE {text}: more than {MAX_DIGITS} digits"))),
         (_, true, false) if !signed && !after_point && !scaled => Ok(Picture { category: Category::Alphanumeric, size: alnum + digits, digits: 0, scale: 0, signed, edit: None, scaling: 0, currency: None }),
         (false, false, true) if !signed && !after_point && !scaled => Ok(Picture { category: Category::National, size: national, digits: 0, scale: 0, signed, edit: None, scaling: 0, currency: None }),
         _ => Err((syntax::messages::IWC0264, format!("PICTURE {text}: mixes symbols of different categories"))),
@@ -238,8 +241,8 @@ fn edited(text: &str, runs: &[(char, u64)], decimal_comma: bool, currency: Optio
             _ => return bad(syntax::messages::IWC0260, misplaced),
         }
     }
-    if digits == 0 || digits + scaling.map_or(0, |(_, n, _)| n) > 31 {
-        return bad(syntax::messages::IWC0274, "a numeric-edited PICTURE needs 1 to 31 digit positions");
+    if digits == 0 || digits + scaling.map_or(0, |(_, n, _)| n) > MAX_DIGITS as u32 {
+        return bad(syntax::messages::IWC0274, "a numeric-edited PICTURE needs 1 to 38 digit positions");
     }
     let widths: u32 = syms.iter().map(|s| s.width() as u32).sum();
     let size = widths + currency.map_or(0, |v| v.chars().count() as u32 - 1);
@@ -307,7 +310,10 @@ mod tests {
     #[test]
     fn unsupported_and_invalid_pictures_say_why() {
         assert!(analyse("ZZ9.99.9").unwrap_err().1.contains("decimal point"));
-        assert!(analyse("9(32)").unwrap_err().1.contains("31 digits"));
+        assert!(analyse("9(39)").unwrap_err().1.contains("38 digits"));
+        assert_eq!(analyse("S9(5)V9(33)").unwrap().digits, 38);
+        assert_eq!(analyse("9V9(37)").unwrap().scale, 37);
+        assert!(analyse("-(37)9.99").unwrap_err().1.contains("38 digit positions"));
         assert!(analyse("XN").unwrap_err().1.contains("categories"));
         assert!(analyse("X(999999999)").unwrap_err().1.contains("repetition"));
         assert!(analyse("X(134217727)X").unwrap_err().1.contains("character positions"));
@@ -322,10 +328,10 @@ mod tests {
         assert_eq!(shape("S999PP"), Ok((Category::Numeric, 3, 3, 0, 2)));
         assert_eq!(shape("99P(6)V"), Ok((Category::Numeric, 2, 2, 0, 6)));
         assert_eq!(shape("ZZZPP"), Ok((Category::NumericEdited, 3, 3, 0, 2)));
-        for bad in ["P9P", "9P9", "PPV9", "9V9P", "99VPP", "Z.ZPP", "P(31)9"] {
+        for bad in ["P9P", "9P9", "PPV9", "9V9P", "99VPP", "Z.ZPP", "P(38)9"] {
             assert!(analyse(bad).is_err(), "{bad}");
         }
-        assert!(analyse("P(30)9").is_ok());
+        assert!(analyse("P(37)9").is_ok());
     }
 
     #[test]

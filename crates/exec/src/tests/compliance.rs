@@ -1992,7 +1992,7 @@ fn a_picture_past_18_digits_compiles_the_program_with_arith_extend_under_extende
     assert!(diagnostics_under(WIDE_PICTURES, numeric::Compliance::Strict).iter().any(|d| d.2 == Some("IWC0069")));
     let card = format!("       CBL ARITH(COMPAT)\n{WIDE_PICTURES}");
     assert!(diagnostics_under(&card, numeric::Compliance::Extended).iter().any(|d| d.2 == Some("IWC0069")));
-    let past_31 = WIDE_PICTURES.replace("9(25)V99", "9(30)V99");
+    let past_31 = WIDE_PICTURES.replace("9(25)V99", "9(37)V99");
     let shown = diagnostics_under(&past_31, numeric::Compliance::Extended);
     assert!(shown.iter().any(|d| d.0 == 6 && d.3 == Severity::Severe), "{shown:?}");
 }

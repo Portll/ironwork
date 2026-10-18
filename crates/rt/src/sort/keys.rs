@@ -301,6 +301,10 @@ fn strict(bytes: &[u8], format: Format, numproc: Numproc) -> Result<numeric::pre
     if bytes.len() < shortest {
         return Err(ProgramCheck::Data);
     }
+    let separate = format.sign().is_some_and(|s| s.separate);
+    if bytes.len() - usize::from(separate) > if format == Format::Pd { 16 } else { 31 } {
+        return Err(ProgramCheck::Specification);
+    }
     let d = match format {
         Format::Pd => codec::packed(bytes, true, numproc)?,
         _ => codec::zoned(bytes, true, format.sign(), numproc)?,

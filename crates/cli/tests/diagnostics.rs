@@ -244,7 +244,7 @@ fn a_catalogued_message_carries_its_id_in_text_and_json() {
 
     let picture = Source::new("picture-json", "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. P.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01  X PIC 9(40).\n       PROCEDURE DIVISION.\n           GOBACK.\n");
     let json = ironwork(&["check", picture.path(), "--diagnostics", "json"]);
-    let object = format!("{{\"col\":8,\"file\":\"{}\",\"id\":\"IWC0263\",\"line\":5,\"member\":null,\"message\":\"PICTURE 9(40): more than 31 digits\",\"severity\":\"S\"}}\n", picture.path().replace('\\', "\\\\"));
+    let object = format!("{{\"col\":8,\"file\":\"{}\",\"id\":\"IWC0263\",\"line\":5,\"member\":null,\"message\":\"PICTURE 9(40): more than 38 digits\",\"severity\":\"S\"}}\n", picture.path().replace('\\', "\\\\"));
     assert_eq!(stderr(&json), object);
 }
 

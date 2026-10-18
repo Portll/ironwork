@@ -11,6 +11,7 @@ use crate::calendar::{SECONDS_PER_DAY, civil};
 use crate::display::utf16_text;
 use crate::fixed::{align, compare_fixed};
 use crate::lir::TrimSide;
+use crate::refusal;
 use crate::storage::{Kind, Val};
 use crate::store::{ProgramFacts, compare_national};
 use crate::vocab::{Figurative, Pos};
@@ -208,9 +209,10 @@ fn checked(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args: &mu
                 None => x.currency(),
             };
             let text = text_of(&facts, &args[0], name, pos)?;
+            long_numval(&facts, name, &text, pos)?;
             let form = if name == "NUMVAL-C" { Form::Currency(&currency) } else { Form::Numval };
             let arith = facts.options().arith;
-            let digits = if arith == Arith::Extend { 31 } else { 18 };
+            let digits = if arith != Arith::Compat { 31 } else { 18 };
             let value = numval::parse(&text, form, digits, facts.decimal_point() == ',').map(|n| n.to_real()).unwrap_or(Real::ZERO);
             // Long floating point under ARITH(COMPAT), extended under ARITH(EXTEND) (Programming
             // Guide SC27-8714-03, p. 115).
@@ -439,6 +441,16 @@ fn cobc_field(f: Fixed) -> Fixed {
     };
     let int = digits.saturating_sub(dec);
     crate::fixed::fixed(f.negative, magnitude, Places::new(int, dec))
+}
+
+/// NUMVAL and its kin give a floating-point value, so a text of more than 31 digits, which only a
+/// program compiled with 32 to 38 digit PICTUREs can hold in a number, is refused.
+fn long_numval(facts: &dyn ProgramFacts, name: &str, text: &str, pos: Pos) -> R<()> {
+    let digits = text.chars().filter(char::is_ascii_digit).count();
+    if facts.options().arith == Arith::Wide && digits > 31 {
+        return Err(refusal::IWR0101.abend(format!("FUNCTION {name} of {digits} digits is not supported yet: its value is held to 32 significant digits"), pos));
+    }
+    Ok(())
 }
 
 /// A floating-point function's value: floating point of `p`; for cobc, which computes it in
@@ -745,7 +757,7 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
         "FACTORIAL" => {
             arity(1..=1, args)?;
             let n = whole(&args[0], name, pos)?;
-            let (most, digits) = if arith == Arith::Extend { (29, 31) } else { (28, 30) };
+            let (most, digits) = if arith != Arith::Compat { (29, 31) } else { (28, 30) };
             if !(0..=most).contains(&n) {
                 let id = if most == 29 { "IGZ0223S" } else { "IGZ0156S" };
                 return Err(out_of_range(id, format!("Argument-1 for function FACTORIAL was less than zero or greater than {most}."), n, pos));
@@ -808,7 +820,8 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
                 "TEST-NUMVAL-C" => Form::Currency(&currency),
                 _ => Form::Exponent,
             };
-            let digits = if arith == Arith::Extend { 31 } else { 18 };
+            long_numval(facts, name, &text, pos)?;
+            let digits = if arith != Arith::Compat { 31 } else { 18 };
             let comma = facts.decimal_point() == ',';
             if name == "NUMVAL-F" {
                 let value = numval::parse(&text, form, digits, comma).map(|n| n.to_real()).unwrap_or(Real::ZERO);

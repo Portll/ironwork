@@ -392,7 +392,8 @@ STORED-CHAR-LENGTH (IWX0042-W), DELETE FILE (IWX0043-W), PROGRAM-POINTER (IWX004
 inline PERFORM with AFTER (IWX0051-W), INITIALISE (IWX0052-W), FUNCTION CONCATENATE (IWX0053-W),
 COPY name.. (IWX0054-W), PROCEDURE DIVISION CHAINING (IWX0055-W), DISPLAY UPON SYSERR (IWX0056-W),
 COB-CRT-STATUS (IWX0057-W), cobc's tab stops (IWX0058-W), PICTUREs of 19 to 31 digits (IWX0060-W),
-paragraph headers in Area B (IWX0061-W) and FUNCTION SUBSTITUTE and SUBSTITUTE-CASE (IWX0062-W).
+PICTUREs and literals of 32 to 38 digits (IWX0130-W), paragraph headers in Area B (IWX0061-W) and
+FUNCTION SUBSTITUTE and SUBSTITUTE-CASE (IWX0062-W).
 `--source-format auto|fixed|free` says how a source is read; auto, the default, reads free form
 where a file shows it is. Under extended and relaxed DISPLAY shows a number as cobc's default
 dialect does, `-012.50`, and under `--dialect gnucobol` as cobc -std=ibm-strict does, `01250-`;

@@ -3,12 +3,64 @@
 
 use numeric::Numproc;
 use crate::vocab::{SignClause, SignPosition};
-use zarch::check::ProgramCheck;
+use zarch::check::{Cc, ProgramCheck};
 use zarch::decimal::{self, Decimal};
 
 /// The longest packed field DECIMAL instructions take, and the most digits a PACK of one gives.
 const PACKED_MAX: usize = 16;
-const ZONED_MAX: usize = 2 * PACKED_MAX - 1;
+/// The most digits a zoned item holds: 38, which cobc allows and `--compliance extended` reads.
+const ZONED_MAX: usize = 38;
+
+/// `decimal::decode`, and for a packed field of more than 16 bytes, which no DECIMAL instruction
+/// takes, the same reading of its digits and sign.
+pub fn decode_packed(op: &[u8]) -> Result<Decimal, ProgramCheck> {
+    if op.len() <= PACKED_MAX {
+        return decimal::decode(op);
+    }
+    if test_packed(op)?.0 != 0 {
+        return Err(ProgramCheck::Data);
+    }
+    let (last, body) = op.split_last().unwrap();
+    let magnitude = body.iter().try_fold(0u128, |m, b| m.checked_mul(100)?.checked_add(u128::from(b >> 4) * 10 + u128::from(b & 0xF))).and_then(|m| m.checked_mul(10)?.checked_add(u128::from(last >> 4)));
+    Ok(Decimal { negative: decimal::is_minus(last & 0xF), magnitude: magnitude.ok_or(ProgramCheck::Data)? })
+}
+
+/// `decimal::tp`, taking a packed field of more than 16 bytes too.
+pub fn test_packed(op: &[u8]) -> Result<Cc, ProgramCheck> {
+    if op.len() <= PACKED_MAX {
+        return decimal::tp(op);
+    }
+    let (last, body) = op.split_last().unwrap();
+    let sign_bad = !decimal::is_sign(last & 0xF);
+    let digit_bad = last >> 4 > 9 || body.iter().any(|b| b >> 4 > 9 || b & 0xF > 9);
+    Ok(Cc(u8::from(sign_bad) | u8::from(digit_bad) << 1))
+}
+
+/// `decimal::encode`, and for a packed field of more than 16 bytes its low-order digits of
+/// `value` with the sign.
+pub fn encode_packed(op: &mut [u8], value: Decimal) -> Result<Cc, ProgramCheck> {
+    if op.len() <= PACKED_MAX {
+        return decimal::encode(op, value);
+    }
+    let digits = decimal::digits_in(op.len());
+    let cap = 10u128.checked_pow(digits);
+    let kept = cap.map_or(value.magnitude, |cap| value.magnitude % cap);
+    let overflow = cap.is_some_and(|cap| value.magnitude >= cap);
+    let negative = value.negative && value.magnitude != 0 && (kept != 0 || overflow);
+    let (last, body) = op.split_last_mut().unwrap();
+    *last = ((kept % 10) as u8) << 4 | if negative { decimal::MINUS } else { decimal::PLUS };
+    let mut rest = kept / 10;
+    for byte in body.iter_mut().rev() {
+        *byte = ((rest / 10 % 10) as u8) << 4 | (rest % 10) as u8;
+        rest /= 100;
+    }
+    Ok(Cc(match (overflow, kept == 0, negative) {
+        (true, _, _) => 3,
+        (false, true, _) => 0,
+        (false, false, true) => 1,
+        (false, false, false) => 2,
+    }))
+}
 /// The most digits, each at most 15 where the data is bad, whose value fits a `u64`.
 const U64_DIGITS: usize = 18;
 
@@ -16,7 +68,7 @@ const U64_DIGITS: usize = 18;
 #[inline]
 pub fn packed(bytes: &[u8], signed: bool, numproc: Numproc) -> Result<Decimal, ProgramCheck> {
     if signed || numproc != Numproc::Nopfd {
-        return decimal::decode(bytes);
+        return decode_packed(bytes);
     }
     let mut held = [0u8; PACKED_MAX];
     let mut grown = Vec::new();
@@ -29,7 +81,7 @@ pub fn packed(bytes: &[u8], signed: bool, numproc: Numproc) -> Result<Decimal, P
     };
     p.copy_from_slice(bytes);
     *p.last_mut().unwrap() |= 0x0F;
-    decimal::decode(p)
+    decode_packed(p)
 }
 
 /// A zoned field, entering through PACK, which keeps only the sign's zone.
@@ -106,7 +158,7 @@ mod tests {
         if !signed && numproc == Numproc::Nopfd {
             *p.last_mut().unwrap() |= 0x0F;
         }
-        decimal::decode(&p)
+        decode_packed(&p)
     }
 
     fn zoned_by_pack(bytes: &[u8], signed: bool, sign: Option<SignClause>, numproc: Numproc) -> Result<Decimal, ProgramCheck> {
@@ -136,6 +188,29 @@ mod tests {
             Some(negative) => Decimal { negative, ..value },
             None => value,
         })
+    }
+
+    #[test]
+    fn a_packed_field_of_more_than_16_bytes_encodes_and_decodes_like_a_shorter_one() {
+        for len in [17usize, 18, 20] {
+            for (negative, magnitude) in [(false, 0u128), (true, 1), (false, 12_345_678_901_234_567_890_123_456_789_012_345_678), (true, 99_999_999_999_999_999_999_999_999_999_999_999_999)] {
+                if magnitude >= 10u128.pow(decimal::digits_in(len).min(38)) {
+                    continue;
+                }
+                let mut field = vec![0xEE; len];
+                let cc = encode_packed(&mut field, Decimal { negative, magnitude }).unwrap();
+                assert_eq!(cc, Cc(if magnitude == 0 { 0 } else if negative { 1 } else { 2 }), "{len} bytes");
+                assert_eq!(decode_packed(&field), Ok(Decimal { negative, magnitude }), "{field:02X?}");
+                assert_eq!(test_packed(&field), Ok(Cc(0)));
+            }
+        }
+        let mut field = vec![0; 17];
+        assert_eq!(encode_packed(&mut field, Decimal { negative: true, magnitude: 10u128.pow(33) + 7 }), Ok(Cc(3)));
+        assert_eq!(decode_packed(&field), Ok(Decimal { negative: true, magnitude: 7 }));
+        field[16] = 0x0B;
+        field[3] = 0xA0;
+        assert_eq!(test_packed(&field), Ok(Cc(2)));
+        assert_eq!(decode_packed(&field), Err(ProgramCheck::Data));
     }
 
     /// Bytes mostly of valid digits and signs, with every kind of fault mixed in, from xorshift64*.

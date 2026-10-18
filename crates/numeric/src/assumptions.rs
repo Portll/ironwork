@@ -413,6 +413,8 @@ pub const ANY_NUMERIC_LITERALS: &str = "C511";
 pub const ANY_NUMERIC_ADD_ALONE: &str = "C512";
 pub const ANY_NUMERIC_NOT_NUMERIC: &str = "C513";
 pub const ANY_NUMERIC_MOVES: &str = "C514";
+pub const WIDE_ARITHMETIC: &str = "C515";
+pub const WIDE_FUNCTIONS: &str = "C516";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2833,7 +2835,7 @@ pub const ASSUMPTIONS: &[Assumption] = &[
     },
     Assumption {
         id: WIDE_PICTURES,
-        claim: "Under --compliance extended, a program with a numeric PICTURE of 19 to 31 digit positions, which GnuCOBOL and Micro Focus accept and ARITH(COMPAT) refuses, is compiled with ARITH(EXTEND) where no CBL or PROCESS card names ARITH: its arithmetic then has Enterprise COBOL's ARITH(EXTEND) intermediate precision, not cobc's. A PICTURE of more than 31 digit positions stays refused",
+        claim: "Under --compliance extended, a program with a numeric PICTURE of 19 to 31 digit positions, which GnuCOBOL and Micro Focus accept and ARITH(COMPAT) refuses, is compiled with ARITH(EXTEND) where no CBL or PROCESS card names ARITH: its intermediate results are kept as Carry::of gives them for a program that reads cobc's forms, 46 digits. A PICTURE of 32 to 38 digit positions is read as C515 says, and one of more than 38 stays refused",
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[O(Extended), S(Arithmetic)]],
@@ -2928,6 +2930,20 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Documented,
         oracle: Oracle::Db2,
         governs: &[&[S(Sql)]],
+    },
+    Assumption {
+        id: WIDE_ARITHMETIC,
+        claim: "Under --compliance extended, a numeric PICTURE of 32 to 38 digit positions, or a numeric literal of 32 to 38 digits, which cobc 3.2 reads (38 is its maximum) and Enterprise COBOL does not (31 under ARITH(EXTEND), 18 under COMPAT), is read where no CBL or PROCESS card names ARITH, and the program is compiled with the ARITH setting Wide, which no ARITH suboption names. Strict keeps refusing the PICTURE (IWC0069) and the literal (IWC0070, IWC0105). A wide DISPLAY or COMP-3 item holds its digits as a narrower one does (a 38-digit COMP-3 takes 20 bytes), and reads and stores as cobc stores it, high-order digits dropped without ON SIZE ERROR. A binary item of more than 18 digits is refused (IWC0241), as cobc refuses it for every -std. A numeric-edited PICTURE is limited to 38 digit positions, where cobc sets no limit. An intermediate result keeps up to 76 digits, the most a 256-bit product of two 38-digit operands holds, where cobc keeps every digit; a quotient is found a digit at a time when its scaled dividend passes 256 bits, and a product or a sum that passes 256 bits ends the run (IRONWORK, 'an intermediate result wider than 256 bits'), as X * X * X does for a 38-digit X. cobc folds an expression of literals alone in 64 bits (12345678901234567890123456789012345 * 100 / 7 as literals gives -14), which ironwork does not copy: it gives the value the expression has. A PICTURE or literal of more than 38 digits stays refused (IWC0263)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), S(Arithmetic)]],
+    },
+    Assumption {
+        id: WIDE_FUNCTIONS,
+        claim: "Under --compliance extended, in a program with a PICTURE or literal of more than 31 digits (C515), NUMVAL, NUMVAL-C, NUMVAL-F, TEST-NUMVAL and TEST-NUMVAL-C of a text of more than 31 digits end the run (IWR0101), as their value is held to 32 significant digits, where cobc returns the value exactly. A function evaluated in floating point (MEAN, MEDIAN, the roots, logarithms and annuities) gives a decimal of 32 significant digits, so one of arguments that need more digits is rounded; ABS, INTEGER, INTEGER-PART, MAX, MIN, MOD, REM, SUM and SIGN of fixed-point arguments are exact",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), S(Arithmetic)]],
     },
 ];
 

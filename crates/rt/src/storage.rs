@@ -74,7 +74,7 @@ pub enum Val {
     Address(u32),
 }
 
-/// A numeric literal's value; None unless it holds 1 to 31 digits.
+/// A numeric literal's value; None unless it holds 1 to 38 digits.
 pub fn literal_fixed(text: &str) -> Option<Fixed> {
     let (negative, body) = match text.as_bytes().first() {
         Some(b'-') => (true, &text[1..]),
@@ -83,7 +83,7 @@ pub fn literal_fixed(text: &str) -> Option<Fixed> {
     };
     let (int, frac) = body.split_once('.').unwrap_or((body, ""));
     let digits = format!("{int}{frac}");
-    if digits.is_empty() || digits.len() > 31 {
+    if digits.is_empty() || digits.len() > 38 {
         return None;
     }
     let magnitude = U256::from_u128(digits.parse().ok()?);

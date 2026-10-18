@@ -70,7 +70,8 @@ impl Dmax {
 }
 
 /// How many digits an intermediate result keeps: ARITH's 30 or 31, or for cobc, which keeps every
-/// digit, the 46 that a 256-bit product of such a result and a 31-digit operand still holds.
+/// digit, the 46 that a 256-bit product of such a result and a 31-digit operand still holds, and
+/// the 76 a 256-bit product of two 38-digit operands holds when a PICTURE is wider than 31.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Carry(pub u32);
 
@@ -78,7 +79,11 @@ impl Carry {
     pub const COBC: Self = Self(46);
 
     pub fn of(arith: Arith, cobc: bool) -> Self {
-        if cobc { Self::COBC } else { arith.into() }
+        match (arith, cobc) {
+            (Arith::Wide, _) => arith.into(),
+            (_, true) => Self::COBC,
+            _ => arith.into(),
+        }
     }
 }
 
@@ -131,6 +136,21 @@ pub struct Fixed {
 #[inline]
 fn pow10(n: u32) -> U256 {
     U256::pow10(n)
+}
+
+/// The low `keep` digits of `numerator * 10^shift / denominator`, found a digit at a time where the
+/// scaled numerator is wider than 256 bits.
+fn long_quotient(numerator: U256, shift: u32, denominator: U256, keep: u32) -> Result<U256, ArithError> {
+    let cap = pow10(keep.min(76));
+    let (whole, mut rest) = numerator.div_rem(denominator);
+    let mut kept = whole.div_rem(cap).1;
+    for _ in 0..shift {
+        let (digit, next) = rest.checked_mul(U256::from_u128(10)).ok_or(ArithError::BeyondModel)?.div_rem(denominator);
+        kept = kept.checked_mul(U256::from_u128(10)).ok_or(ArithError::BeyondModel)? + digit;
+        kept = kept.div_rem(cap).1;
+        rest = next;
+    }
+    Ok(kept)
 }
 
 impl Fixed {
@@ -201,8 +221,11 @@ impl Fixed {
         } else {
             (Some(self.magnitude), divisor.magnitude.checked_mul(pow10(shift.unsigned_abs() as u32)))
         };
-        let (numerator, denominator) = (numerator.ok_or(ArithError::BeyondModel)?, denominator.ok_or(ArithError::BeyondModel)?);
-        let quotient = numerator.div_rem(denominator).0;
+        let denominator = denominator.ok_or(ArithError::BeyondModel)?;
+        let quotient = match numerator {
+            Some(numerator) => numerator.div_rem(denominator).0,
+            None => long_quotient(self.magnitude, shift as u32, denominator, to.total())?,
+        };
         let exact = Self::signed(self.negative != divisor.negative, quotient, Places::new(u32::MAX / 2, to.dec));
         Ok(exact.fit(to))
     }
@@ -323,6 +346,22 @@ mod tests {
         assert_eq!((wrapped.to_i128(), size_error), (Some(-23), true));
         let (rounded_over, size_error) = Fixed::new(999, Places::new(1, 2)).to_receiver(Places::new(1, 1), true);
         assert_eq!((rounded_over.to_i128(), size_error), (Some(0), true));
+    }
+
+    #[test]
+    fn wide_arithmetic_keeps_76_digits_and_divides_past_256_bits() {
+        assert_eq!(Carry::of(Arith::Wide, true), Carry(76));
+        assert_eq!(Carry::of(Arith::Wide, false), Carry(76));
+        assert_eq!(Carry::of(Arith::Extend, true), Carry::COBC);
+        let x = Fixed::new(12_345_678_901_234_567_890_123_456_789_012_345, Places::new(35, 0));
+        let square = x.mul(x, 0, Arith::Wide).unwrap();
+        assert_eq!(square.places, Places::new(70, 0));
+        let back = square.div(x, 8, Arith::Wide).unwrap();
+        assert_eq!((back.magnitude, back.places.dec), (x.magnitude.checked_mul(U256::pow10(8)).unwrap(), 8));
+        let third = Fixed::new(1, Places::new(1, 0)).div(Fixed::new(3, Places::new(1, 0)), 38, Arith::Wide).unwrap();
+        let wide_third = third.mul(Fixed::new(3, Places::new(1, 0)), 38, Arith::Wide).unwrap();
+        assert_eq!(wide_third.magnitude, U256::pow10(38) - U256::from_u128(1));
+        assert_eq!(x.mul(square, 0, Arith::Wide), Err(ArithError::BeyondModel));
     }
 
     #[test]

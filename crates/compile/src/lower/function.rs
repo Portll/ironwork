@@ -351,7 +351,7 @@ fn result(func: Func, args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
         Func::ArgumentNumericClass => integer(1),
         Func::CrtStatus => integer(4),
         Func::CallParameters => integer(9),
-        Func::Factorial => integer(if arith == Arith::Extend { 31 } else { 30 }),
+        Func::Factorial => integer(if arith != Arith::Compat { 31 } else { 30 }),
         // The argument's own value.
         Func::ContentOf => match args.first() {
             Some(a) if a.scaled => num(None, 0),

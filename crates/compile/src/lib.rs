@@ -349,8 +349,16 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     }
     if options.compliance == numeric::Compliance::Extended && options.arith == numeric::options::Arith::Compat && !program.options.iter().any(|o| names_arith(o)) {
         let notation = crate::picture::Notation::of(&program.environment);
-        let compat = numeric::options::Arith::Compat.max_picture_digits();
-        if let Some(e) = data_entries(&program).find(|e| picture_positions(e, notation).is_some_and(|n| n > compat)) {
+        let (compat, extend) = (numeric::options::Arith::Compat.max_picture_digits(), numeric::options::Arith::Extend.max_picture_digits());
+        let entry_of = |limit| data_entries(&program).find(|e| picture_positions(e, notation).is_some_and(|n| n > limit));
+        if let Some(e) = entry_of(extend) {
+            options.arith = numeric::options::Arith::Wide;
+            let picture = e.picture.as_deref().unwrap_or_default();
+            errors.push(syntax::messages::IWX0130.at(e.pos, format!("PICTURE {picture} (GnuCOBOL; Enterprise COBOL allows 31 digits under ARITH(EXTEND), GnuCOBOL 38): the program is compiled with arithmetic as cobc does it, keeping up to 76 digits of an intermediate result")));
+        } else if let Some(pos) = program.long_literal {
+            options.arith = numeric::options::Arith::Wide;
+            errors.push(syntax::messages::IWX0130.at(pos, "a numeric literal of more than 31 digits (GnuCOBOL; Enterprise COBOL allows 31 digits under ARITH(EXTEND), GnuCOBOL 38): the program is compiled with arithmetic as cobc does it, keeping up to 76 digits of an intermediate result"));
+        } else if let Some(e) = entry_of(compat) {
             options.arith = numeric::options::Arith::Extend;
             let picture = e.picture.as_deref().unwrap_or_default();
             errors.push(syntax::messages::IWX0060.at(e.pos, format!("PICTURE {picture} (GnuCOBOL and Micro Focus; Enterprise COBOL's ARITH(COMPAT) allows 18 digits): the program is compiled with ARITH(EXTEND), which allows 31")));
@@ -1348,6 +1356,7 @@ fn digit_limits(program: &Program, arith: numeric::options::Arith, errors: &mut 
     let option = match arith {
         numeric::options::Arith::Compat => "ARITH(COMPAT)",
         numeric::options::Arith::Extend => "ARITH(EXTEND)",
+        numeric::options::Arith::Wide => "cobc's 38 digits",
     };
     let notation = crate::picture::Notation::of(&program.environment);
     for e in data_entries(program) {
@@ -2516,7 +2525,7 @@ impl Check<'_> {
             Operand::LengthOf(r) => self.reference(&self.layout.length_of_ref(r)),
             Operand::Ref(r) | Operand::AddressOf(r) => self.reference(r),
             Operand::Literal(Literal::Number(t)) if literal_fixed(t).is_none() || literal_digits(t) > self.max_digits as usize => {
-                self.errors.push(syntax::messages::IWC0105.at(Pos::default(), format!("the literal {t} has more than {} digits", self.max_digits.min(31))));
+                self.errors.push(syntax::messages::IWC0105.at(Pos::default(), format!("the literal {t} has more than {} digits", self.max_digits)));
             }
             Operand::Literal(_) => {}
             Operand::Function(f) => {

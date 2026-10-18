@@ -154,7 +154,7 @@ codec_struct!(Options {
     vlr, vsamopenfs, numcheck, parmcheck, initcheck, optimize, compliance, dialect, program_scope, unresolved_calls, le_services,
 } default { assumed } check options_valid);
 codec_struct!(Invdata { forcenumcmp, cleansign });
-codec_enum!(Arith { Compat = 0, Extend = 1 });
+codec_enum!(Arith { Compat = 0, Extend = 1, Wide = 2 });
 codec_enum!(Trunc { Std = 0, Opt = 1, Bin = 2 });
 codec_enum!(Numproc { Nopfd = 0, Pfd = 1 });
 codec_enum!(TruncCheck { Report = 0, Silent = 1 });

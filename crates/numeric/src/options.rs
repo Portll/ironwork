@@ -56,6 +56,9 @@ pub enum Arith {
     #[default]
     Compat,
     Extend,
+    /// What `--compliance extended` compiles a program with a PICTURE of 32 to 38 digits under:
+    /// ARITH(EXTEND) with cobc's widths, which no ARITH suboption names.
+    Wide,
 }
 
 impl Arith {
@@ -63,6 +66,7 @@ impl Arith {
         match self {
             Self::Compat => 18,
             Self::Extend => 31,
+            Self::Wide => 38,
         }
     }
 
@@ -70,13 +74,14 @@ impl Arith {
         match self {
             Self::Compat => 30,
             Self::Extend => 31,
+            Self::Wide => 76,
         }
     }
 
     pub const fn float_intermediate(self) -> Precision {
         match self {
             Self::Compat => Precision::Long,
-            Self::Extend => Precision::Extended,
+            Self::Extend | Self::Wide => Precision::Extended,
         }
     }
 }

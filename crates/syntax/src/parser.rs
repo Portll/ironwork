@@ -78,6 +78,10 @@ pub fn parse(tokens: &[Token], options: Vec<String>, compliance: numeric::Compli
         parser.program(&options, &mut programs)?;
     }
     scope(&mut programs);
+    let long_literal = tokens.iter().find(|t| matches!(&t.tok, Tok::Number(n) if n.bytes().filter(u8::is_ascii_digit).count() > 31)).map(|t| t.pos);
+    for p in &mut programs {
+        p.long_literal = long_literal;
+    }
     if parser.extended {
         for p in &mut programs {
             let later = parser.functions.iter().filter(|f| !p.prototypes.iter().any(|q| q.pos == f.pos) && p.repository_functions.contains(&f.name));

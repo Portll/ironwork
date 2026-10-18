@@ -42,6 +42,7 @@ mod report;
 mod scope;
 mod sort;
 mod vm;
+mod wide_decimal;
 mod statements;
 mod switches;
 mod taint;

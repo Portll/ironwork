@@ -203,13 +203,13 @@ mod tests {
         let mut fast = 0;
         for _ in 0..20_000 {
             let mut operand = || {
-                let digits = 1 + (next() % 31) as u32;
+                let digits = 1 + (next() % 38) as u32;
                 let bits = next() % 64;
                 let n = (next() >> (63 - bits)) as i64;
                 (if next() % 2 == 0 { -n } else { n }, Places::new(digits, 0))
             };
             let ((x, px), (y, py)) = (operand(), operand());
-            let (dmax, arith) = ((next() % 4) as u32, if next() % 2 == 0 { Arith::Compat } else { Arith::Extend });
+            let (dmax, arith) = ((next() % 4) as u32, [Arith::Compat, Arith::Extend, Arith::Wide][(next() % 3) as usize]);
             for op in [BinOp::Add, BinOp::Sub, BinOp::Mul] {
                 let (a, b) = (Number::Int(x, px), Number::Int(y, py));
                 let expected = arith::fixed_binop(a.fixed(), op, b.fixed(), dmax, arith.into(), Pos::default()).unwrap();
@@ -240,7 +240,7 @@ mod tests {
                 (if next() % 2 == 0 { -n } else { n }, Places::new(digits - dec, dec))
             };
             let ((x, px), (y, py)) = (operand(), operand());
-            let (dmax, arith) = ((next() % 10) as u32, if next() % 2 == 0 { Arith::Compat } else { Arith::Extend });
+            let (dmax, arith) = ((next() % 10) as u32, [Arith::Compat, Arith::Extend, Arith::Wide][(next() % 3) as usize]);
             for (k, op) in [BinOp::Add, BinOp::Sub, BinOp::Mul, BinOp::Div].into_iter().enumerate() {
                 let (a, b) = (Number::Int(x, px), Number::Int(y, py));
                 let expected = arith::fixed_binop(a.fixed(), op, b.fixed(), dmax, arith.into(), Pos::default());

@@ -283,7 +283,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0260 | S | `PICTURE {picture}: P must be one string of scaling positions at the left or right end of the digits` |
 | IWC0261 | S | `PICTURE {picture}: {character} is not a PICTURE symbol` |
 | IWC0262 | S | `PICTURE {picture}: more than 134217727 character positions` |
-| IWC0263 | S | `PICTURE {picture}: more than 31 digits` |
+| IWC0263 | S | `PICTURE {picture}: more than 38 digits` |
 | IWC0264 | S | `PICTURE {picture}: mixes symbols of different categories` |
 | IWC0265 | S | `PICTURE {picture}: {character} cannot be in a PICTURE of {symbol}, which takes {symbol} and B only` |
 | IWC0266 | S | `PICTURE {picture}: more character positions than a DBCS item holds` |
@@ -294,7 +294,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0271 | S | `PICTURE {picture}: two floating insertion strings` |
 | IWC0272 | S | `PICTURE {picture}: {character} is not a numeric-edited symbol` |
 | IWC0273 | S | `PICTURE {picture}: more than one decimal point` |
-| IWC0274 | S | `PICTURE {picture}: a numeric-edited PICTURE needs 1 to 31 digit positions` |
+| IWC0274 | S | `PICTURE {picture}: a numeric-edited PICTURE needs 1 to 38 digit positions` |
 | IWC0275 | S | `PICTURE {picture}: bad repetition ({count})` |
 | IWC0276 | S | `PICTURE {picture}: a repetition with nothing to repeat` |
 | IWC0277 | S | `PICTURE {picture}: two different currency symbols` |
@@ -933,6 +933,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0112 | W | `UNSTRING FUNCTION {name} (GnuCOBOL; Enterprise COBOL's UNSTRING sends a data item): the function's value is the sending field` |
 | IWX0113 | W | `DISPLAY FUNCTION LENGTH({item}) (GnuCOBOL; Enterprise COBOL uses an integer function only in an arithmetic expression): it shows {n}, the length the program fixes, as cobc 3.2 shows it` |
 | IWX0120 | W | `ANY NUMERIC (GnuCOBOL; Enterprise COBOL's parameters have the class their entries give): {name} takes the class, digits, scale, sign and usage of the argument each CALL passes for it, and is read, never written` |
+| IWX0130 | W | `{PICTURE or literal} (GnuCOBOL; Enterprise COBOL allows 31 digits under ARITH(EXTEND), GnuCOBOL 38): the program is compiled with arithmetic as cobc does it, keeping up to 76 digits of an intermediate result` |
 
 ## Run-time refusals
 
@@ -959,3 +960,4 @@ severity S before the text, under the abend code IRONWORK, EXEC or JAVA.
 | IWR0074 | S | `{file}, a GLOBAL file of {declarer}, is written as a print file in one of {declarer} and {program} and not the other, which is not supported yet` |
 | IWR0078 | S | `{construct} was reached: under --compliance relaxed it compiled as a hole, since {why}` |
 | IWR0096 | S | `{what}: an ANY NUMERIC parameter reads only a numeric argument, and this one is {why}` |
+| IWR0101 | S | `FUNCTION {name} of {digits} digits is not supported yet: its value is held to 32 significant digits` |
