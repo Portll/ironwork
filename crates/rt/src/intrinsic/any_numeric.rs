@@ -35,6 +35,7 @@ fn numeric(facts: &dyn ProgramFacts, bytes: &[u8], loc: Loc) -> bool {
     let test = match loc.kind {
         Kind::Packed { signed, .. } => ByteClass::Packed { signed },
         Kind::Zoned { signed, sign: None, .. } => ByteClass::Zoned { signed },
+        Kind::Binary { digits, native: numeric::Native::Comp6, .. } => ByteClass::Comp6 { digits },
         Kind::Zoned { .. } | Kind::Binary { .. } | Kind::Index => return true,
         Kind::Group | Kind::Alnum { .. } => ByteClass::Digits,
         _ => return false,

@@ -44,7 +44,7 @@ pub fn place(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, pos: Pos, upon_cons
                     let m = f.magnitude.to_u128().unwrap_or(0);
                     zoned_digits(m, (digits as usize).max(m.to_string().len()), decimal::UNSIGNED)
                 }
-                Kind::Binary { native: Native::CompX, .. } => zoned_digits(f.magnitude.div_rem(pow10(digits)).1.to_u128().unwrap_or(0), digits as usize, decimal::UNSIGNED),
+                Kind::Binary { native: Native::CompX | Native::Comp6, .. } => zoned_digits(f.magnitude.div_rem(pow10(digits)).1.to_u128().unwrap_or(0), digits as usize, decimal::UNSIGNED),
                 Kind::Binary { .. } => zoned_digits(f.magnitude.to_u128().unwrap_or(0), whole_binary_digits(loc.len), decimal::UNSIGNED),
                 _ => zoned_digits(f.magnitude.div_rem(pow10(digits)).1.to_u128().unwrap_or(0), digits as usize, decimal::UNSIGNED),
             };

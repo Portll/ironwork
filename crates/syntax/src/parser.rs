@@ -397,6 +397,7 @@ fn usage_word(word: &str) -> Option<Usage> {
         "COMP-5" | "COMPUTATIONAL-5" => Usage::NativeBinary,
         "COMP-X" | "COMPUTATIONAL-X" => Usage::CompX,
         "BINARY-CHAR" => Usage::BinaryChar { signed: true },
+        "COMP-6" | "COMPUTATIONAL-6" => Usage::Comp6,
         "PACKED-DECIMAL" | "COMP-3" | "COMPUTATIONAL-3" => Usage::Packed,
         "COMP-1" | "COMPUTATIONAL-1" => Usage::Float1,
         "COMP-2" | "COMPUTATIONAL-2" => Usage::Float2,

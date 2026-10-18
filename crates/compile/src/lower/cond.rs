@@ -199,6 +199,7 @@ impl Lower<'_> {
             let test = match (class, self.kind_of(place)) {
                 (Class::Numeric, Kind::Packed { signed, .. }) => ByteClass::Packed { signed },
                 (Class::Numeric, Kind::Zoned { signed, sign: None, .. }) => ByteClass::Zoned { signed },
+                (Class::Numeric, Kind::Binary { digits, native: numeric::Native::Comp6, .. }) => ByteClass::Comp6 { digits },
                 (Class::Numeric, _) => ByteClass::Digits,
                 (Class::AlphabeticLower, _) => ByteClass::AlphabeticLower,
                 (Class::AlphabeticUpper, _) => ByteClass::AlphabeticUpper,

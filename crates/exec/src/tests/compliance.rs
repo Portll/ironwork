@@ -904,6 +904,81 @@ fn comp_x_and_pic_x_comp_5_are_warnings_naming_their_bytes_under_extended_and_re
     assert!(diagnostics_under(&nine, numeric::Compliance::Extended).iter().any(|d| d.2 == Some("IWC0303")));
 }
 
+/// COMP-6 items of odd and even digit counts, a wide one, and a signed PICTURE read as COMP-3.
+const COMP_6: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. COMPSIX.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  A2  PIC 99 COMP-6 VALUE 95.\n",
+    "       01  A2X REDEFINES A2 PIC X.\n",
+    "       01  A3  PIC 999 COMP-6 VALUE 195.\n",
+    "       01  A3X REDEFINES A3 PIC XX.\n",
+    "       01  A5  PIC 9(3)V99 COMP-6 VALUE 12.34.\n",
+    "       01  A5X REDEFINES A5 PIC X(3).\n",
+    "       01  A4  PIC 9(4) COMP-6.\n",
+    "       01  A4X REDEFINES A4 PIC XX.\n",
+    "       01  W32 PIC 9(32) COMP-6 VALUE 195.\n",
+    "       01  W38 PIC 9(38) COMP-6\n",
+    "           VALUE 99999999999999999999999999999999999999.\n",
+    "       01  N   PIC S9(5) VALUE -123.\n",
+    "       01  D   PIC S9(6).\n",
+    "       01  SG  PIC S99 COMP-6 VALUE -7.\n",
+    "       01  SGX REDEFINES SG PIC X.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY FUNCTION HEX-OF(A2X) ' ' FUNCTION HEX-OF(A3X)\n",
+    "                   ' ' FUNCTION HEX-OF(A5X)\n",
+    "           DISPLAY A2 ' ' A3 ' ' A5 ' ' W32\n",
+    "           MOVE N TO A4\n",
+    "           DISPLAY A4 ' ' FUNCTION HEX-OF(A4X)\n",
+    "           MOVE 123456 TO A4\n",
+    "           DISPLAY A4\n",
+    "           ADD 5 TO A4\n",
+    "           SUBTRACT 100 FROM A4\n",
+    "           DISPLAY A4\n",
+    "           MOVE 9999 TO A4\n",
+    "           ADD 1 TO A4 ON SIZE ERROR DISPLAY 'SIZE' END-ADD\n",
+    "           COMPUTE A4 = 3 - 10\n",
+    "           DISPLAY A4\n",
+    "           MOVE A5 TO D\n",
+    "           DISPLAY D\n",
+    "           MOVE 7 TO A4\n",
+    "           ADD A4 TO N\n",
+    "           DISPLAY N\n",
+    "           IF A4 = 7 AND A4 < W32 AND A4 IS NUMERIC\n",
+    "               DISPLAY 'ORDERED'\n",
+    "           END-IF\n",
+    "           ADD 1 TO W38 ON SIZE ERROR DISPLAY 'WIDE' END-ADD\n",
+    "           DISPLAY W38\n",
+    "           MOVE X'1A3B' TO A4X\n",
+    "           IF A4 IS NOT NUMERIC DISPLAY 'GARBAGE' END-IF\n",
+    "           SUBTRACT 1 FROM SG\n",
+    "           DISPLAY SG ' ' FUNCTION HEX-OF(SGX)\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn comp_6_is_unsigned_packed_digits_alike_on_both_executors() {
+    let walked = Harness::source(COMP_6).flags(EXTENDED).run(Executor::Interpreter);
+    assert!(walked.ending.is_ok(), "{:?}\n{}", walked.ending, walked.err);
+    assert_eq!(
+        walked.out,
+        "95 0195 001234\n95 195 012.34 00000000000000000000000000000195\n0123 0123\n3456\n3361\nSIZE\n0007\n+000012\n-00116\nORDERED\nWIDE\n99999999999999999999999999999999999999\nGARBAGE\n-08 00\n"
+    );
+    let vm = Harness::source(COMP_6).flags(EXTENDED).run(Executor::Vm);
+    assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
+}
+
+#[test]
+fn comp_6_is_a_warning_naming_its_bytes_under_extended_and_refused_under_strict() {
+    let warned = diagnostics_under(COMP_6, numeric::Compliance::Extended);
+    let ids: Vec<(u32, Option<&str>)> = warned.iter().filter(|d| d.2.is_some_and(|id| id.starts_with("IWX016"))).map(|d| (d.0, d.2)).collect();
+    assert_eq!(ids.len(), 7);
+    assert_eq!(ids[6], (18, Some("IWX0161")));
+    let refused = diagnostics_under(COMP_6, numeric::Compliance::Strict);
+    assert_eq!(refused.iter().filter(|d| d.2 == Some("IWC0380")).count(), 7);
+}
+
 /// FLOAT-SHORT and FLOAT-LONG items beside COMP-1 and COMP-2 ones, shown by DISPLAY.
 const GNUCOBOL_FLOATS: &str = concat!(
     "       IDENTIFICATION DIVISION.\n",

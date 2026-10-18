@@ -392,6 +392,8 @@ pub const INSPECT_TRAILING: &str = "C466";
 pub const COMP_X: &str = "C467";
 pub const PIC_X_COMP_5: &str = "C468";
 pub const GNUCOBOL_FLOATS: &str = "C469";
+pub const COMP_6: &str = "C530";
+pub const COMP_6_SIGNED: &str = "C531";
 pub const RETURNING_WITHOUT_PHRASE: &str = "C491";
 pub const LENGTH_OF_FOLDED: &str = "C492";
 pub const RETURNING_ON_STOP: &str = "C480";
@@ -2735,6 +2737,20 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[O(Extended), U(Float)]],
+    },
+    Assumption {
+        id: COMP_6,
+        claim: "Under --compliance extended, GnuCOBOL's COMP-6 is unsigned packed decimal with no sign half-byte: two digits a byte, ceil(digits / 2) bytes, the high half-byte of the first byte 0 for an odd count of digits, up to the 38 digits of cobc's PICTURE. A value it receives is stored as its absolute value, truncated to the PICTURE's digits, so MOVE -123 gives 0123 and COMPUTE of 3 - 10 gives 0007, and ON SIZE ERROR is taken where a result has more digits than the PICTURE, as cobc 3.2 gives them. DISPLAY and a MOVE to an alphanumeric item show the PICTURE's digits, and the NUMERIC class test is false where a half-byte above 9 is held, or where the spare half-byte of an odd count is not 0. A half-byte above 9 is read as its own value in arithmetic; cobc 3.2 reads it otherwise, and a MOVE to a display item shows it as a character. SYNCHRONIZED leaves it where it is. Enterprise COBOL has no COMP-6",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), U(Packed)]],
+    },
+    Assumption {
+        id: COMP_6_SIGNED,
+        claim: "Under --compliance extended, COMP-6 with a signed PICTURE is read as COMP-3, as cobc 3.2 does when it warns that it is changing COMP-6 with a sign to COMP-3. Enterprise COBOL has no COMP-6",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), U(Packed)]],
     },
     Assumption {
         id: PIC_X_COMP_5,

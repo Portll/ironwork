@@ -422,8 +422,9 @@ pub enum Compare { PackedPfd, Address, Float, Fixed, National, Alphanumeric, Ref
 
 /// `Dbcs` and `Kanji` test each two bytes: X'41' to X'FE' each, or for KANJI a first byte X'41' to
 /// X'7E', or the DBCS space X'4040'. `Set` holds a SPECIAL-NAMES class-name's characters, bit b % 8
-/// of `bits[b / 8]` for byte b, and tests that every byte is one of them.
-pub enum ByteClass { Packed { signed: bool }, Zoned { signed: bool }, Digits, Alphabetic, AlphabeticLower, AlphabeticUpper, Dbcs, Kanji, Set { bits: [u8; 32] } }
+/// of `bits[b / 8]` for byte b, and tests that every byte is one of them. `Comp6` tests a COMP-6 item's
+/// half-bytes: each of its `digits` last 0 to 9, and an odd count's spare first one 0.
+pub enum ByteClass { Packed { signed: bool }, Zoned { signed: bool }, Comp6 { digits: u32 }, Digits, Alphabetic, AlphabeticLower, AlphabeticUpper, Dbcs, Kanji, Set { bits: [u8; 32] } }
 pub enum SignTest { Positive, Negative, Zero }
 /// `Temp` is the count `SetCount` held in the top frame earlier in the statement (§9.12).
 pub enum Count { Fixed(u32), Odo(Odo), Temp(TempId) }
@@ -530,7 +531,7 @@ pub enum StorePlan {
     Packed { digits: u32, scale: u32, signed: bool },
     /// `name` labels a TRUNC(OPT) report (machine.rs:1596-1608).
     /// `native`: `No` for BINARY, COMP and COMP-4, `Comp5`, `BinaryChar` (one byte), `CompX` or
-    /// `Comp5Bytes` for PIC X(n) COMP-5 (load-module.md §5.2).
+    /// `Comp5Bytes` for PIC X(n) COMP-5, or `Comp6` for COMP-6 (load-module.md §5.2).
     Binary { digits: u32, scale: u32, signed: bool, native: Native, name: SymId },
     NumericEdited { edit: u32, digits: u32, scale: u32, blank_when_zero: bool },
     Float(Precision),

@@ -20,11 +20,14 @@ pub enum Native {
     /// PIC X(n) COMP-5 under `--compliance extended`: n bytes, unsigned, never truncated, and shown
     /// in the digits that hold its whole value.
     Comp5Bytes,
+    /// GnuCOBOL's COMP-6 under `--compliance extended`: unsigned packed decimal with no sign
+    /// half-byte, two digits a byte, truncated to the PICTURE as TRUNC(STD) does.
+    Comp6,
 }
 
 impl Native {
     pub const fn is_native(self) -> bool {
-        !matches!(self, Native::No)
+        !matches!(self, Native::No | Native::Comp6)
     }
 
     /// Whether DISPLAY, a MOVE to an alphanumeric item, JSON and XML show the digits that hold any
@@ -32,7 +35,7 @@ impl Native {
     pub fn shows_whole(self, trunc: Trunc) -> bool {
         match self {
             Native::No => trunc == Trunc::Bin,
-            Native::CompX => false,
+            Native::CompX | Native::Comp6 => false,
             Native::Comp5 | Native::BinaryChar | Native::Comp5Bytes => true,
         }
     }
@@ -44,7 +47,7 @@ pub const fn alphanumeric_digits(n: u32) -> u8 {
     [2, 4, 7, 9, 12, 14, 16, 19][n as usize - 1]
 }
 
-/// A USAGE BINARY, COMP or COMP-4 item, or COMP-5, BINARY-CHAR or COMP-X as `native` says.
+/// A USAGE BINARY, COMP or COMP-4 item, or COMP-5, BINARY-CHAR, COMP-X or COMP-6 as `native` says.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Binary {
     pub digits: u8,
@@ -56,6 +59,7 @@ impl Binary {
     pub const fn bytes(self) -> usize {
         match (self.native, self.digits) {
             (Native::BinaryChar, _) => 1,
+            (Native::Comp6, digits) => (digits as usize).div_ceil(2),
             (Native::CompX | Native::Comp5Bytes, 0..=2) => 1,
             (Native::CompX | Native::Comp5Bytes, 3..=4) => 2,
             (Native::CompX | Native::Comp5Bytes, 5..=7) => 3,
@@ -71,6 +75,10 @@ impl Binary {
 
     pub fn load(self, bytes: &[u8]) -> i128 {
         assert_eq!(bytes.len(), self.bytes());
+        if self.native == Native::Comp6 {
+            let nibbles = bytes.iter().flat_map(|b| [b >> 4, b & 0x0F]);
+            return nibbles.skip(2 * bytes.len() - self.digits as usize).fold(0u128, |acc, n| acc.wrapping_mul(10).wrapping_add(u128::from(n))) as i128;
+        }
         let raw = bytes.iter().fold(0u128, |acc, &b| acc << 8 | b as u128);
         let bits = 8 * bytes.len() as u32;
         if self.signed && raw >> (bits - 1) == 1 { raw as i128 - (1i128 << bits) } else { raw as i128 }
@@ -110,13 +118,32 @@ pub struct Stored {
 /// value. See [`crate::assumptions::TRUNC_OPT_IS_BINARY`] for what TRUNC(OPT) keeps.
 pub fn store(item: Binary, value: i128, options: &Options) -> Stored {
     let (kept, divergence) = kept(item, value, options);
-    Stored { bytes: kept.to_be_bytes()[16 - item.bytes()..].to_vec(), value: kept, divergence }
+    Stored { bytes: image(item, kept, &mut [0; 20]).to_vec(), value: kept, divergence }
+}
+
+/// The bytes an item holds for `kept`, the value `kept` gives: big-endian two's complement, or for
+/// COMP-6 two decimal digits a byte, written into the start of `out`.
+pub fn image(item: Binary, kept: i128, out: &mut [u8; 20]) -> &[u8] {
+    let len = item.bytes();
+    if item.native == Native::Comp6 {
+        let mut rest = kept.unsigned_abs();
+        for byte in out[..len].iter_mut().rev() {
+            *byte = (rest % 10) as u8 | ((rest / 10 % 10) as u8) << 4;
+            rest /= 100;
+        }
+    } else {
+        out[..len].copy_from_slice(&kept.to_be_bytes()[16 - len..]);
+    }
+    &out[..len]
 }
 
 /// The value `store` keeps, whose low-order `item.bytes()` bytes it stores, and its divergence.
 pub fn kept(item: Binary, value: i128, options: &Options) -> (i128, Option<TruncOptDivergence>) {
     let value = if item.signed { value } else { value.unsigned_abs() as i128 };
     let decimal = item.decimal_truncation(value);
+    if item.native == Native::Comp6 {
+        return (decimal, None);
+    }
     let binary = item.binary_truncation(value);
     match (item.native.is_native(), options.trunc) {
         (true, _) | (false, Trunc::Bin) => (binary, None),
@@ -187,6 +214,18 @@ mod tests {
         assert_eq!(store(comp_x(2), 300, &with(Trunc::Std)).value, 44);
         let pic_x = |n| Binary { digits: alphanumeric_digits(n), signed: false, native: Native::Comp5Bytes }.bytes();
         assert_eq!((1..=7).map(pic_x).collect::<Vec<_>>(), [1, 2, 3, 4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn comp_6_is_two_decimal_digits_a_byte_truncated_to_the_picture() {
+        let comp_6 = |digits| Binary { digits, signed: false, native: Native::Comp6 };
+        assert_eq!([1, 2, 3, 4, 32, 38].map(|d| comp_6(d).bytes()), [1, 1, 2, 2, 16, 19]);
+        let s = store(comp_6(3), -12345, &with(Trunc::Bin));
+        assert_eq!((s.value, s.bytes.as_slice()), (345, [0x03, 0x45].as_slice()));
+        assert_eq!(comp_6(3).load(&[0x13, 0x45]), 345);
+        let wide = store(comp_6(38), 7, &with(Trunc::Std));
+        assert_eq!((wide.bytes.len(), wide.bytes[18]), (19, 0x07));
+        assert_eq!(comp_6(38).load(&wide.bytes), 7);
     }
 
     #[test]

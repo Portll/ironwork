@@ -50,7 +50,7 @@ fn data(c: &Compiled, facts: &mut Facts) {
     for item in &c.layout.items {
         let usage = match item.kind {
             Kind::Zoned { .. } => U::Zoned,
-            Kind::Packed { .. } => U::Packed,
+            Kind::Packed { .. } | Kind::Binary { native: numeric::Native::Comp6, .. } => U::Packed,
             Kind::Binary { native, .. } => {
                 if native != numeric::Native::No {
                     facts.usage(U::NativeBinary);

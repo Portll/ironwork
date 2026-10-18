@@ -695,6 +695,24 @@ and leaves the others where they are. An alphanumeric PICTURE of more than eight
 (IWC0303); Micro Focus takes up to sixteen. Strict refuses COMP-X (IWC0301) and an alphanumeric
 PICTURE with COMP-5 (IWC0302).
 
+### IWX0160-W COMP-6 and IWX0161-W COMP-6 with a signed PICTURE
+
+`IWX0160-W COMP-6 (GnuCOBOL; Enterprise COBOL has no unsigned packed decimal without a sign
+half-byte): U3 is 2 bytes of packed digits, unsigned`, at the data entry, and `IWX0161-W COMP-6 with
+a signed PICTURE (GnuCOBOL changes it to COMP-3; Enterprise COBOL has no COMP-6): SG is read as
+COMP-3`.
+
+`PIC 9(n) COMP-6` is packed decimal with no sign half-byte: two digits a byte, ceil(n / 2) bytes, the
+high half-byte of the first byte 0 for an odd n, up to 38 digits. It is unsigned, so a MOVE of -123
+stores 0123 and COMPUTE of 3 - 10 stores 0007, as cobc 3.2 does. A value keeps the PICTURE's low-order
+digits, ON SIZE ERROR is taken where a result has more, and DISPLAY and a MOVE to an alphanumeric item
+show the PICTURE's digits. NUMERIC is false where a half-byte above 9 is held or an odd count's spare
+half-byte is not 0. Half-bytes above 9 are read as their own values in arithmetic, where cobc 3.2
+reads a MOVE to a display item as characters. SYNCHRONIZED leaves it where it is. Assumption C530.
+
+A signed PICTURE, `PIC S99 COMP-6`, is read as COMP-3, as cobc warns it does. Assumption C531. Strict
+refuses COMP-6 (IWC0380); a COMP-6 PICTURE of more than 38 digits is refused (IWC0381).
+
 ### IWX0027-W FLOAT-SHORT and FLOAT-LONG
 
 `IWX0027-W FLOAT-SHORT (GnuCOBOL and Micro Focus; Enterprise COBOL writes COMP-1 and COMP-2): it is

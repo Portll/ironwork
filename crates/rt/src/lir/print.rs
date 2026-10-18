@@ -1979,6 +1979,7 @@ fn native_word(native: Native) -> &'static str {
         Native::Comp5 => " native",
         Native::BinaryChar => " binary-char",
         Native::CompX => " comp-x",
+        Native::Comp6 => " comp-6",
         Native::Comp5Bytes => " native-bytes",
     }
 }
@@ -2109,6 +2110,7 @@ fn byte_class(c: super::ByteClass) -> String {
         ByteClass::Packed { signed: false } => "numeric [packed]",
         ByteClass::Zoned { signed: true } => "numeric [zoned signed]",
         ByteClass::Zoned { signed: false } => "numeric [zoned]",
+        ByteClass::Comp6 { .. } => "numeric [comp-6]",
         ByteClass::Digits => "numeric [digits]",
         ByteClass::Alphabetic => "alphabetic",
         ByteClass::AlphabeticLower => "alphabetic-lower",

@@ -102,6 +102,8 @@ pub enum Compare {
 pub enum ByteClass {
     Packed { signed: bool },
     Zoned { signed: bool },
+    /// COMP-6: every digit half-byte 0 to 9 and, for an odd count, the first half-byte 0.
+    Comp6 { digits: u32 },
     Digits,
     Alphabetic,
     AlphabeticLower,
@@ -166,7 +168,7 @@ codec_enum!(Compare {
     ZonedBytes { zoned_first } = 8,
     Dbcs = 9,
 });
-codec_enum!(ByteClass { Packed { signed } = 0, Zoned { signed } = 1, Digits = 2, Alphabetic = 3, AlphabeticLower = 4, AlphabeticUpper = 5, Dbcs = 6, Kanji = 7, Set { bits } = 8 });
+codec_enum!(ByteClass { Packed { signed } = 0, Zoned { signed } = 1, Digits = 2, Alphabetic = 3, AlphabeticLower = 4, AlphabeticUpper = 5, Dbcs = 6, Kanji = 7, Set { bits } = 8, Comp6 { digits } = 9 });
 codec_enum!(SignTest { Positive = 0, Negative = 1, Zero = 2 });
 codec_enum!(Count { Fixed(n) = 0, Odo(odo) = 1, Temp(temp) = 2 });
 codec_enum!(SqlTest { Error = 0, NotFound = 1, Warning = 2 });

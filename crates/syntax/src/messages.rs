@@ -384,6 +384,8 @@ catalogue! {
     IWC0349 Severe "FUNCTION {name}: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0350 Severe "ANY NUMERIC: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0370 Severe "SET LAST EXCEPTION TO OFF: COBOL 2014's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
+    IWC0380 Severe "COMP-6: GnuCOBOL's unsigned packed decimal with no sign half-byte, not Enterprise COBOL's; --compliance extended reads it";
+    IWC0381 Severe "a COMP-6 item holds at most 38 digits";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
     IWJ0002 Severe "an unbalanced ) in {text}";
     IWJ0003 Severe "unbalanced parentheses or quotes in {text}";
@@ -992,6 +994,8 @@ catalogue! {
     IWX0153 Warning "FUNCTION {name} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such function): it reports the last exception condition a statement raised";
     IWX0154 Warning "SET LAST EXCEPTION TO OFF (COBOL 2014 and GnuCOBOL; Enterprise COBOL has no exception status): the last exception FUNCTION EXCEPTION-STATUS reports is cleared";
     IWX0155 Warning "{directive} (COBOL 2014 and GnuCOBOL; Enterprise COBOL has no such directive): from the next line {what}";
+    IWX0160 Warning "COMP-6 (GnuCOBOL; Enterprise COBOL has no unsigned packed decimal without a sign half-byte): {name} is {n} bytes of packed digits, unsigned";
+    IWX0161 Warning "COMP-6 with a signed PICTURE (GnuCOBOL changes it to COMP-3; Enterprise COBOL has no COMP-6): {name} is read as COMP-3";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

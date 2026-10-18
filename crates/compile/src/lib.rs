@@ -368,6 +368,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     binary_chars(&program, &options, &mut errors);
     forever_names(&program, &mut errors);
     micro_focus_binaries(&program, &options, &mut errors);
+    comp_6(&program, &options, &mut errors);
     let drafts = report::prepare(&mut program, options.adv, options.qualify, &mut errors);
     let linage_counters = linage::add_counters(&mut program, options.qualify);
     if whole {
@@ -1372,6 +1373,32 @@ fn micro_focus_binaries(program: &Program, options: &Options, errors: &mut Vec<E
             syntax::messages::IWX0025.at(e.pos, format!("COMP-X (Micro Focus; Enterprise COBOL's binary items are two, four or eight bytes): {name} is {bytes} byte{plural} of binary, {range}, shown in {digits} digits"))
         } else {
             syntax::messages::IWX0026.at(e.pos, format!("PIC X(n) COMP-5 (Micro Focus and GnuCOBOL; Enterprise COBOL's COMP-5 takes a numeric PICTURE): {name} is {bytes} byte{plural} of binary, {range}"))
+        });
+    }
+}
+
+/// COMP-6, GnuCOBOL's unsigned packed decimal: a warning naming its bytes under `--compliance
+/// extended` (assumption C530), refused under strict. A signed PICTURE is read as COMP-3, as cobc
+/// does (assumption C531).
+fn comp_6(program: &Program, options: &Options, errors: &mut Vec<Error>) {
+    let entries = program.working_storage.iter().chain(&program.local_storage).chain(&program.linkage).chain(program.files.iter().flat_map(|f| &f.records));
+    for e in entries {
+        let Some(Usage::Comp6) = e.usage else { continue };
+        let Some(pic) = e.picture.as_deref().and_then(|p| picture::analyse(p).ok()) else { continue };
+        if pic.category != picture::Category::Numeric {
+            continue;
+        }
+        if options.compliance == numeric::Compliance::Strict {
+            errors.push(syntax::messages::IWC0380.at(e.pos, "COMP-6: GnuCOBOL's unsigned packed decimal with no sign half-byte, not Enterprise COBOL's; --compliance extended reads it"));
+            continue;
+        }
+        let name = e.name.as_deref().unwrap_or("FILLER");
+        errors.push(if pic.signed {
+            syntax::messages::IWX0161.at(e.pos, format!("COMP-6 with a signed PICTURE (GnuCOBOL changes it to COMP-3; Enterprise COBOL has no COMP-6): {name} is read as COMP-3"))
+        } else {
+            let bytes = numeric::binary::Binary { digits: pic.digits as u8, signed: false, native: numeric::Native::Comp6 }.bytes();
+            let plural = if bytes == 1 { "" } else { "s" };
+            syntax::messages::IWX0160.at(e.pos, format!("COMP-6 (GnuCOBOL; Enterprise COBOL has no unsigned packed decimal without a sign half-byte): {name} is {bytes} byte{plural} of packed digits, unsigned"))
         });
     }
 }

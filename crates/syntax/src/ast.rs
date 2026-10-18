@@ -278,6 +278,8 @@ pub enum Usage {
     /// Micro Focus's COMP-X: binary in the fewest bytes that hold the PICTURE's digits, or n bytes
     /// for PIC X(n).
     CompX,
+    /// GnuCOBOL's COMP-6: packed decimal with no sign half-byte, unsigned.
+    Comp6,
     Packed,
     Float1,
     Float2,

@@ -358,6 +358,8 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0349 | S | `FUNCTION {name}: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0350 | S | `ANY NUMERIC: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0370 | S | `SET LAST EXCEPTION TO OFF: COBOL 2014's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0380 | S | `COMP-6: GnuCOBOL's unsigned packed decimal with no sign half-byte, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0381 | S | `a COMP-6 item holds at most 38 digits` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
 | IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |
@@ -965,6 +967,8 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0153 | W | `FUNCTION {name} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such function): it reports the last exception condition a statement raised` |
 | IWX0154 | W | `SET LAST EXCEPTION TO OFF (COBOL 2014 and GnuCOBOL; Enterprise COBOL has no exception status): the last exception FUNCTION EXCEPTION-STATUS reports is cleared` |
 | IWX0155 | W | `{directive} (COBOL 2014 and GnuCOBOL; Enterprise COBOL has no such directive): from the next line {what}` |
+| IWX0160 | W | `COMP-6 (GnuCOBOL; Enterprise COBOL has no unsigned packed decimal without a sign half-byte): {name} is {n} bytes of packed digits, unsigned` |
+| IWX0161 | W | `COMP-6 with a signed PICTURE (GnuCOBOL changes it to COMP-3; Enterprise COBOL has no COMP-6): {name} is read as COMP-3` |
 
 ## Run-time refusals
 

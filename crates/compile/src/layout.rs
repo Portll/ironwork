@@ -711,7 +711,7 @@ fn ancestors(items: &[Item], i: usize) -> impl Iterator<Item = usize> + '_ {
 /// pp. 232-233); 1 for the kinds SYNCHRONIZED leaves where they are.
 fn alignment(kind: Kind) -> u32 {
     match kind {
-        Kind::Binary { native: Native::BinaryChar, .. } => 1,
+        Kind::Binary { native: Native::BinaryChar | Native::Comp6, .. } => 1,
         Kind::Binary { digits, signed, native: native @ (Native::CompX | Native::Comp5Bytes), .. } => match (numeric::binary::Binary { digits: digits as u8, signed, native }).bytes() {
             bytes @ (2 | 4) => bytes as u32,
             8 => 4,
@@ -784,6 +784,9 @@ fn kind(e: &DataEntry, item: &Item, usage: Option<Usage>, sign: Option<SignClaus
         }
         (Category::Numeric, Usage::Display) => Kind::Zoned { digits: pic.digits, scale: pic.scale, signed: pic.signed, sign: sign.filter(|_| pic.signed) },
         (Category::Numeric, Usage::Packed) => Kind::Packed { digits: pic.digits, scale: pic.scale, signed: pic.signed },
+        (Category::Numeric, Usage::Comp6) if pic.signed => Kind::Packed { digits: pic.digits, scale: pic.scale, signed: true },
+        (Category::Numeric, Usage::Comp6) if pic.digits <= 38 => Kind::Binary { digits: pic.digits, scale: pic.scale, signed: false, native: Native::Comp6 },
+        (Category::Numeric, Usage::Comp6) => return Err(err(syntax::messages::IWC0381, "a COMP-6 item holds at most 38 digits".into())),
         (Category::Numeric, Usage::Binary | Usage::NativeBinary | Usage::CompX) if pic.digits <= 18 => {
             let native = match usage {
                 Usage::NativeBinary => Native::Comp5,

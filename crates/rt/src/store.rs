@@ -362,7 +362,7 @@ fn integer_image(facts: &dyn ProgramFacts, loc: Loc, value: &Fixed) -> Option<(I
     }
     let m = value.magnitude.lo;
     match loc.kind {
-        Kind::Binary { digits, scale: 0, signed, native } if facts.scaling(loc.item) == 0 => {
+        Kind::Binary { digits, scale: 0, signed, native } if facts.scaling(loc.item) == 0 && native != Native::Comp6 => {
             let options = facts.options();
             let v = if value.negative { -(m as i128) } else { m as i128 };
             let item = Binary { digits: digits as u8, signed, native };
@@ -416,6 +416,9 @@ fn count_image(facts: &dyn ProgramFacts, loc: Loc, count: (i64, Places), rounded
 #[inline]
 pub fn count_bytes(kind: Kind, len: usize, (n, places): (i64, Places), rounded: bool, options: impl FnOnce() -> Options, out: &mut [u8; MAX_DIGITS + 1]) -> Option<Result<(usize, bool), ProgramCheck>> {
     let (Kind::Binary { digits, scale, .. } | Kind::Packed { digits, scale, .. } | Kind::Zoned { digits, scale, .. }) = kind else { return None };
+    if matches!(kind, Kind::Binary { native: Native::Comp6, .. }) {
+        return None;
+    }
     let magnitude = u128::from(n.unsigned_abs());
     let m = if scale >= places.dec {
         magnitude.checked_mul(10u128.checked_pow(scale - places.dec)?)?
@@ -491,6 +494,13 @@ fn image_of(facts: &dyn ProgramFacts, err: &mut dyn std::io::Write, loc: Loc, va
             }
             (out, m >= cap)
         }
+        Kind::Binary { digits, scale, native: Native::Comp6, .. } => {
+            let m = align(value, scale, rounded).ok_or_else(beyond)?;
+            let cap = pow10(digits);
+            let kept = m.div_rem(cap).1.to_u128().unwrap();
+            let item = Binary { digits: digits as u8, signed: false, native: Native::Comp6 };
+            (Image::of(binary::image(item, kept as i128, &mut [0; 20])), m >= cap)
+        }
         Kind::Binary { digits, scale, signed, native } => {
             let m = align(value, scale, rounded).ok_or_else(beyond)?;
             let magnitude = m.to_u128().and_then(|m| i128::try_from(m).ok()).ok_or_else(beyond)?;
@@ -512,7 +522,7 @@ fn image_of(facts: &dyn ProgramFacts, err: &mut dyn std::io::Write, loc: Loc, va
             let bits = 8 * item.bytes() as u32;
             let binary_range = if signed { v >= -(1i128 << (bits - 1)) && v < (1i128 << (bits - 1)) } else { (0..(1i128 << bits)).contains(&v.abs()) };
             let exceeds = if native.is_native() || options.trunc == Trunc::Bin { !binary_range } else { v.unsigned_abs() >= if digits <= 38 { pow10(digits).lo } else { 10u128.pow(digits) } };
-            (Image::of(&kept.to_be_bytes()[16 - item.bytes()..]), exceeds)
+            (Image::of(binary::image(item, kept, &mut [0; 20])), exceeds)
         }
         Kind::Float(p) => (Image::Grown(float::from_fixed(*value, p, ProgramMask::default()).map_err(|c| Abend::check(c, pos))?.to_bytes()), false),
         Kind::Index => {
@@ -1209,6 +1219,11 @@ pub fn byte_class(facts: &dyn ProgramFacts, mem: &[u8], loc: Loc, test: ByteClas
             let zone_ok = if i + 1 == bytes.len() && signed { matches!(b >> 4, 0xC | 0xD | 0xF) } else { b >> 4 == 0xF };
             zone_ok && b & 0x0F <= 9
         }),
+        ByteClass::Comp6 { digits } => {
+            let mut nibbles = bytes.iter().flat_map(|b| [b >> 4, b & 0x0F]);
+            let spare = 2 * bytes.len() - digits as usize;
+            nibbles.by_ref().take(spare).all(|n| n == 0) && nibbles.all(|n| n <= 9)
+        }
         ByteClass::Digits => bytes.iter().all(|b| (0xF0..=0xF9).contains(b)),
         ByteClass::Alphabetic => bytes.iter().all(|&b| b == ebcdic::SPACE || facts.page().decode_byte(b).is_ascii_alphabetic()),
         ByteClass::AlphabeticLower => bytes.iter().all(|&b| b == ebcdic::SPACE || facts.page().decode_byte(b).is_ascii_lowercase()),

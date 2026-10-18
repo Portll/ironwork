@@ -446,7 +446,7 @@ symbols and the currency sign value it shows, which encode by §4 with these tag
   `NumericEdited{edit,digits,scale,blank_when_zero}` 7, `AlnumEdited{edit}` 8, `Pointer` 9,
   `Index` 10. `edit` is checked against `edits`.
 - **`Native`** (crates/numeric/src/binary.rs) is `No` 0 (BINARY, COMP, COMP-4), `Comp5` 1, `BinaryChar` 2
-  (one byte), `CompX` 3 (COMP-X) and `Comp5Bytes` 4 (PIC X(n) COMP-5).
+  (one byte), `CompX` 3 (COMP-X), `Comp5Bytes` 4 (PIC X(n) COMP-5) and `Comp6` 5 (COMP-6).
 - **`Precision`** (crates/zarch/src/hfp.rs:10) is `Short` 0, `Long` 1, `Extended` 2.
 - **`Sym`** (exec/src/picture.rs:12-32) has fourteen variants, four of them carrying a `char`
   (`FloatLead`, `Float`, `Sign`, `Insert`), and encodes as an enum.
@@ -611,7 +611,7 @@ value in the PROCEDURE DIVISION, and `Arith` 2, `Wide`, the arithmetic of a prog
 32 to 38 digits under `--compliance extended`, whose `Fixed` magnitudes need no new encoding as `U256`
 already holds 77 digits. It also adds the functions 93 to 95, ARGUMENT NUMERIC, its class test
 and its DISPLAY text, which an ANY NUMERIC parameter's uses become under `--compliance extended`
-(lir.md §9.9), and holds a numeric literal BY CONTENT as `Chars::Value`, not `Chars::Literal`. The functions 96 to 102 (HIGHEST-ALGEBRAIC, LOWEST-ALGEBRAIC, the boolean operators B-AND, B-OR, B-XOR and B-NOT, and DISPLAY's wrapper of a numeric function) and 103 (BOOLEAN-OF-INTEGER) and 104 (the exception functions), and the `Op` 46, `ClearException`, are also new under `--compliance extended`. A 0.x module is refused, and compiling the source again is the remedy (question 1).
+(lir.md §9.9), and holds a numeric literal BY CONTENT as `Chars::Value`, not `Chars::Literal`. The functions 96 to 102 (HIGHEST-ALGEBRAIC, LOWEST-ALGEBRAIC, the boolean operators B-AND, B-OR, B-XOR and B-NOT, and DISPLAY's wrapper of a numeric function) and 103 (BOOLEAN-OF-INTEGER) and 104 (the exception functions), and the `Op` 46, `ClearException`, are also new under `--compliance extended`. So are the `Native` `Comp6` 5, GnuCOBOL's COMP-6, and the `ByteClass` `Comp6` 9, its NUMERIC class test. A 0.x module is refused, and compiling the source again is the remedy (question 1).
 
 | The reader finds | It does |
 |---|---|
