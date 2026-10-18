@@ -580,3 +580,80 @@ fn boolean_of_integer_compiles_and_ends_the_run_that_reaches_it() {
     assert_eq!(ids_under(&source, EXTENDED), ["IWX0152"]);
     assert_eq!(ids_under(&source, &[]), ["IWC0348"]);
 }
+
+const EXCEPTIONS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. EXC.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 WS PIC S9(3) VALUE 7.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY \"[\" FUNCTION EXCEPTION-STATUS \"]\"\n",
+    "           DISPLAY \"[\" FUNCTION EXCEPTION-LOCATION \"]\"\n",
+    "           DISPLAY \"[\" FUNCTION EXCEPTION-STATEMENT \"]\"\n",
+    "           DISPLAY \"[\" FUNCTION EXCEPTION-FILE \"]\"\n",
+    "           DISPLAY FUNCTION LENGTH(FUNCTION EXCEPTION-STATUS)\n",
+    "           COMPUTE WS = 12345\n",
+    "               ON SIZE ERROR DISPLAY \"SE\"\n",
+    "           END-COMPUTE\n",
+    "           DISPLAY \"[\" FUNCTION EXCEPTION-STATUS \"]\"\n",
+    "           DISPLAY \"[\" FUNCTION EXCEPTION-LOCATION \"]\"\n",
+    "           DISPLAY \"[\" FUNCTION EXCEPTION-STATEMENT \"]\"\n",
+    "           CALL \"NOPE\"\n",
+    "              ON EXCEPTION DISPLAY \"NOCALL\"\n",
+    "           END-CALL\n",
+    "           DISPLAY \"[\" FUNCTION EXCEPTION-STATUS \"]\"\n",
+    "           DISPLAY \"[\" FUNCTION EXCEPTION-LOCATION \"]\"\n",
+    "           DISPLAY \"[\" FUNCTION EXCEPTION-STATEMENT \"]\"\n",
+    "           GOBACK.\n",
+);
+
+const FILE_EXCEPTIONS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. EXC3.\n",
+    "       ENVIRONMENT DIVISION.\n",
+    "       INPUT-OUTPUT SECTION.\n",
+    "       FILE-CONTROL.\n",
+    "           SELECT FILE-ONE ASSIGN TO 'EXC3DD' ORGANIZATION SEQUENTIAL\n",
+    "               FILE STATUS FS.\n",
+    "       DATA DIVISION.\n",
+    "       FILE SECTION.\n",
+    "       FD FILE-ONE.\n",
+    "       01 F-REC PIC X(4).\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 FS PIC XX.\n",
+    "       01 WS PIC S9(3) VALUE 7.\n",
+    "       PROCEDURE DIVISION.\n",
+    "       MAIN-PARA.\n",
+    "           DISPLAY \"0[\" FUNCTION EXCEPTION-FILE \"]\"\n",
+    "           DISPLAY \"0[\" FUNCTION EXCEPTION-LOCATION \"]\"\n",
+    "           DISPLAY \"0[\" FUNCTION EXCEPTION-STATEMENT \"]\"\n",
+    "           DISPLAY \"0[\" FUNCTION EXCEPTION-STATUS \"]\"\n",
+    "           OPEN INPUT FILE-ONE\n",
+    "           DISPLAY \"1[\" FUNCTION EXCEPTION-FILE \"]\"\n",
+    "           DISPLAY \"1[\" FUNCTION EXCEPTION-LOCATION \"]\"\n",
+    "           DISPLAY \"1[\" FUNCTION EXCEPTION-STATUS \"]\"\n",
+    "           SET LAST EXCEPTION TO OFF\n",
+    "           DISPLAY \"2[\" FUNCTION EXCEPTION-FILE \"]\"\n",
+    "           DISPLAY \"2[\" FUNCTION EXCEPTION-LOCATION \"]\"\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn exception_functions_report_the_last_exception_condition() {
+    // cobc 3.2's output.
+    runs(EXCEPTIONS, EXTENDED, "[                               ]\n[ ]\n[                               ]\n[00]\n000000031\nSE\n[EC-SIZE-OVERFLOW               ]\n[EXC; ; 0]\n[                               ]\nNOCALL\n[EC-PROGRAM-NOT-FOUND           ]\n[EXC; ; 0]\n[                               ]\n");
+    let ids = ids_under(EXCEPTIONS, EXTENDED);
+    assert_eq!(ids.iter().filter(|i| *i == "IWX0153").count(), 11);
+    assert!(ids_under(EXCEPTIONS, &[]).contains(&"IWC0349".to_owned()));
+}
+
+#[test]
+fn a_file_status_is_an_exception_condition_with_its_file() {
+    let dir = temp("exception-file");
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, executor) in [("interpreter", Executor::Interpreter), ("vm", Executor::Vm)] {
+        let o = Harness::source(FILE_EXCEPTIONS).flags(EXTENDED).dds(&[format!("EXC3DD={}", dir.join(format!("{name}.dat")).display())]).run(executor);
+        assert_eq!((o.out.as_str(), o.ending.as_ref().ok()), ("0[00]\n0[ ]\n0[                               ]\n0[                               ]\n1[35FILE-ONE]\n1[EXC3; ; 0]\n1[EC-I-O-PERMANENT-ERROR         ]\n2[00]\n2[ ]\n", Some(&Ending::Goback)), "{name}: {}", o.err);
+    }
+}

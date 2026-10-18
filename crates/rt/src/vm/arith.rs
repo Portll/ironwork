@@ -76,9 +76,15 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
         };
         let value = match outcome {
             Ok(value) => value,
-            Err(a) if plan.handled && a.size_error() => return Ok(Step::Arm(1)),
+            Err(a) if plan.handled && a.size_error() => {
+                self.unit.exception = Some(size_exception(&a));
+                return Ok(Step::Arm(1));
+            }
             // Compiled for GnuCOBOL, a zero divisor leaves the receiver as it was, as cobc does.
-            Err(a) if self.p.options.options.emulates_cobc() && a.divides_by_zero() => return Ok(Step::Next),
+            Err(a) if self.p.options.options.emulates_cobc() && a.divides_by_zero() => {
+                self.unit.exception = Some(size_exception(&a));
+                return Ok(Step::Next);
+            }
             Err(a) => return Err(a.into()),
         };
         let counted = match value {
@@ -89,6 +95,9 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             Some(stored) => stored?,
             None => store::store_value(&self.facts(), self.unit, loc, Val::Num(value.fixed()), step.rounded, plan.handled, pos)?,
         };
+        if size_error {
+            self.unit.exception = Some(crate::unit::LastException { name: "EC-SIZE-OVERFLOW", file: None });
+        }
         Ok(if plan.handled { Step::Arm(u8::from(size_error)) } else { Step::Next })
     }
 
@@ -119,6 +128,7 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             None => None,
         };
         let mut size_error = false;
+        let mut raised = false;
         let mut quotient: Option<Loc> = None;
         for (k, (step, shared, own, outcome)) in results.into_iter().enumerate() {
             // cobc reads a single sending item again for each receiver, after the one before it
@@ -154,6 +164,10 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
                 }
                 (_, outcome) => outcome,
             };
+            if let Err(a) = &outcome && (plan.handled && a.size_error() || self.p.options.options.emulates_cobc() && a.divides_by_zero()) {
+                self.unit.exception = Some(size_exception(a));
+                raised = true;
+            }
             let Some(value) = arith::size_error(outcome, plan.handled, self.p.options.options.emulates_cobc())? else {
                 size_error = true;
                 continue;
@@ -165,6 +179,9 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
         {
             let loc = self.loc(r.target)?;
             size_error |= store::store_value(&self.facts(), self.unit, loc, Val::Num(rest), false, plan.handled, pos)?;
+        }
+        if size_error && !raised {
+            self.unit.exception = Some(crate::unit::LastException { name: "EC-SIZE-OVERFLOW", file: None });
         }
         Ok(if plan.handled { Step::Arm(u8::from(size_error)) } else { Step::Next })
     }
@@ -191,4 +208,9 @@ impl<L: Loader<Rc<Code>>> Vm<'_, '_, '_, L> {
             _ => (step.expr, None),
         }
     }
+}
+
+/// The exception condition an arithmetic abend that ON SIZE ERROR catches stands for.
+fn size_exception(a: &crate::abend::Abend) -> crate::unit::LastException {
+    crate::unit::LastException { name: if a.divides_by_zero() { "EC-SIZE-ZERO-DIVIDE" } else { "EC-SIZE-OVERFLOW" }, file: None }
 }

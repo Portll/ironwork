@@ -671,6 +671,9 @@ pub enum Op {
     Environment { display: DisplayId, value: bool },
     /// DISPLAY UPON SYSERR under `--compliance extended`, tag 40: the line to standard error.
     DisplayError(DisplayId),
+    /// SET LAST EXCEPTION TO OFF under `--compliance extended`, tag 46: the run unit has no last
+    /// exception condition.
+    ClearException,
     File(FileOpId), Call(CallId), Cancel(Operand),
     Sort(SortId), Release(ReleaseId), Return(ReturnId), Report(ReportOp),
     Invoke(InvokeId), Cics(CicsId), Sql(SqlId),
@@ -735,7 +738,7 @@ pub enum RangeKind { Perform, SortProcedure, UseBeforeReporting, UseProcedure, D
 
 - **Tags** (load-module.md §4.3): `PerformEnter` is tag 12 and `Debug` 11 of `Terminator`, and tag 6
   is retired; `DebugLine` and `DebugAlter` are tags 30 and 31 of `Op`, `Markup` 32, `Set` 33, `SetCount` 34, `SetEntry` 35, `ArgumentNumber` 36, `ScreenDisplay` 37,
-  `ScreenAccept` 38, `Environment` 39, `DisplayError` 40, `UnstringValue` 41, and tag 29
+  `ScreenAccept` 38, `Environment` 39, `DisplayError` 40, `UnstringValue` 41, `ClearException` 46, and tag 29
   (`SetSegment`) is retired. `Processing` is tag 5 of `RangeKind`, `Xml` tag 7 of `Base` and
   `Walk` tag 3 of `IntExpr`.
 - **A range's region** (`Range::region`) is the paragraphs a GO TO stays in it for: `first` to
@@ -1873,6 +1876,7 @@ functions! {
     BitNot = 101, "BIT NOT", 1..=1;
     DisplayedNumber = 102, "DISPLAYED NUMBER", 1..=2;
     BooleanOfInteger = 103, "BOOLEAN-OF-INTEGER", 2..=2;
+    ExceptionInfo = 104, "EXCEPTION INFO", 1..=1;
 }
 ```
 
@@ -1889,7 +1893,7 @@ position or the item's own bytes; 89 the last screen key's CRT STATUS code; 92 t
 the running program was called with; and 93 to 95 the value, the class test NUMERIC (1 or 0) and the
 DISPLAY text of the argument in a USING position, which compile's ANY NUMERIC rewrite makes of the
 parameter's uses (C510). Each reads the field the CALL passed, with the bytes as they are when it
-runs (`RunUnit::argument_field`). Under `--compliance extended` 96 and 97 are COBOL 2002's and GnuCOBOL's HIGHEST-ALGEBRAIC and LOWEST-ALGEBRAIC, which read their one argument's description (the place's kind), not its value, as HEX-OF reads its storage; and 98 to 101 are the boolean operators B-AND, B-OR, B-XOR and B-NOT that the parser rewrites into calls, and 102, the call DISPLAY of a numeric function is wrapped in, which gives the digits cobc shows; no source can name them. 103 is BOOLEAN-OF-INTEGER, which GnuCOBOL declares and a run that reaches it ends with IWR0092.
+runs (`RunUnit::argument_field`). Under `--compliance extended` 96 and 97 are COBOL 2002's and GnuCOBOL's HIGHEST-ALGEBRAIC and LOWEST-ALGEBRAIC, which read their one argument's description (the place's kind), not its value, as HEX-OF reads its storage; and 98 to 101 are the boolean operators B-AND, B-OR, B-XOR and B-NOT that the parser rewrites into calls, and 102, the call DISPLAY of a numeric function is wrapped in, which gives the digits cobc shows; no source can name them. 103 is BOOLEAN-OF-INTEGER, which GnuCOBOL declares and a run that reaches it ends with IWR0092, and 104 the call FUNCTION EXCEPTION-STATUS, EXCEPTION-LOCATION, EXCEPTION-STATEMENT and EXCEPTION-FILE become, its one argument the literal 1 to 4 that picks one.
 Every function the walker runs has a row.
 
 - **The walker's order** (machine.rs `function`): every argument by `expr_value`, which is

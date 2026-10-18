@@ -805,7 +805,7 @@ fn verify_program(p: &Program) -> Result<(), String> {
                     symbol(*name)?;
                     symbol(*contents)?;
                 }
-                Op::Nest | Op::Unnest(_) | Op::DecTemp(_) | Op::EnterSegment(_) | Op::DebugLine(_) => {}
+                Op::Nest | Op::ClearException | Op::Unnest(_) | Op::DecTemp(_) | Op::EnterSegment(_) | Op::DebugLine(_) => {}
             }
         }
         match &blk.end {

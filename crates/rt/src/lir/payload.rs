@@ -375,6 +375,7 @@ functions! {
     BitNot = 101, "BIT NOT", 1..=1;
     DisplayedNumber = 102, "DISPLAYED NUMBER", 1..=2;
     BooleanOfInteger = 103, "BOOLEAN-OF-INTEGER", 2..=2;
+    ExceptionInfo = 104, "EXCEPTION INFO", 1..=1;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

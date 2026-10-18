@@ -708,6 +708,8 @@ pub enum SetStmt {
     UpDown { targets: Vec<Ref>, down: bool, by: Expr },
     /// SET mnemonic-names TO ON or OFF, each group in order: the UPSI switches the names stand for.
     Switches(Vec<(Vec<Ref>, bool)>),
+    /// SET LAST EXCEPTION TO OFF, under `--compliance extended`.
+    LastExceptionOff,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

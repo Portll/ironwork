@@ -419,6 +419,16 @@ pub const TYPEDEF_STRONG_WEAK: &str = "C503";
 pub const ALGEBRAIC_LIMITS: &str = "C504";
 pub const SYSTEM_OFFSET_UTC: &str = "C505";
 pub const CODE_NAME_SEQUENCES: &str = "C506";
+pub const EXCEPTION_REPORTING: &str = "C507";
+pub const DISPLAYED_FUNCTION_NUMBER: &str = "C508";
+pub const BOOLEAN_OPERATORS: &str = "C509";
+pub const EXTERNAL_AS_NAME: &str = "C520";
+pub const CLASS_CONDITION_LITERAL: &str = "C521";
+pub const PERFORM_THRU_DECLARATIVE_HOLE: &str = "C522";
+pub const STOP_RUN_STATUS: &str = "C523";
+pub const START_KEY_LENGTH: &str = "C524";
+pub const BOOLEAN_PICTURE: &str = "C525";
+pub const DEBUGGING_ON_ALL_LEFT_OUT: &str = "C526";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2857,6 +2867,76 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[U(OccursDepending)]],
+    },
+    Assumption {
+        id: DEBUGGING_ON_ALL_LEFT_OUT,
+        claim: "USE FOR DEBUGGING ON ALL [REFERENCES OF] item, read under --compliance extended, leaves the item out of the USE statement: cobc 3.2 reads it and never runs the section for it. Enterprise COBOL debugs procedures only",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended)]],
+    },
+    Assumption {
+        id: BOOLEAN_PICTURE,
+        claim: "A PICTURE of 1s (1(n)) without USAGE BIT, read under --compliance extended, is held as n bytes of numeric DISPLAY, as cobc 3.2 holds it. USAGE BIT, which cobc declares and does not implement, stays refused. Enterprise COBOL has no boolean PICTURE",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended)]],
+    },
+    Assumption {
+        id: START_KEY_LENGTH,
+        claim: "START ... KEY ... [WITH] LENGTH n, read under --compliance extended with n an integer literal not past the key's length, compares the first n characters of the key, as cobc 3.2 compares them. Enterprise COBOL's START has no such phrase",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), S(FileIo)]],
+    },
+    Assumption {
+        id: STOP_RUN_STATUS,
+        claim: "STOP RUN [WITH] NORMAL or ERROR [STATUS] [value], read under --compliance extended, moves the value, or 0 for NORMAL and 1 for ERROR where none is written, to RETURN-CODE and ends the run, whatever RETURN-CODE held, as cobc 3.2 ends. Enterprise COBOL's STOP RUN has no such phrase",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended)]],
+    },
+    Assumption {
+        id: PERFORM_THRU_DECLARATIVE_HOLE,
+        claim: "Under --compliance extended a PERFORM ... THRU whose range starts or ends in a declarative section and does not stay in one compiles as a hole that ends the run with IWR0078 when it is reached, where cobc 3.2 warns and fails when the statement runs and Enterprise COBOL refuses the program",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended)]],
+    },
+    Assumption {
+        id: CLASS_CONDITION_LITERAL,
+        claim: "A class condition on an alphanumeric literal, read under --compliance extended, tests the literal's characters as a data item holding them is tested, as cobc 3.2 tests them. Enterprise COBOL's class condition tests a data item",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended)]],
+    },
+    Assumption {
+        id: EXTERNAL_AS_NAME,
+        claim: "A WORKING-STORAGE record written EXTERNAL AS literal, read under --compliance extended, is shared across the run unit under the literal's name, as cobc 3.2 shares it, where Enterprise COBOL's EXTERNAL record is shared under its data-name",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended)]],
+    },
+    Assumption {
+        id: BOOLEAN_OPERATORS,
+        claim: "B-AND, B-OR, B-XOR and B-NOT in an arithmetic expression, read under --compliance extended, work on the unsigned 64-bit value of each operand's digits, its sign and decimal point ignored, and bind as multiplication and division do, left to right, as cobc 3.2 reads them under -std=mf. Enterprise COBOL has no boolean operators",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), S(Arithmetic)]],
+    },
+    Assumption {
+        id: DISPLAYED_FUNCTION_NUMBER,
+        claim: "DISPLAY of a numeric function whose result cobc 3.2 holds in a field it allocates for the value (INTEGER, MOD, SUM and the rest IWX0149 lists) shows the digits of that field: four bytes of binary in 9 digits, truncated to them, where the magnitude has fewer than 32 bits (31 if negative) and fewer than 10 decimal places; eight bytes in 20 digits where it has fewer than 64 (63) bits and fewer than 19 places; else as many digits as the value has. The decimal point shows where the places are and trailing zeros in them are dropped. Enterprise COBOL takes such a function only in an arithmetic expression",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), S(Display)]],
+    },
+    Assumption {
+        id: EXCEPTION_REPORTING,
+        claim: "Under --compliance extended the run unit remembers the last exception condition a statement raised, which FUNCTION EXCEPTION-STATUS, EXCEPTION-FILE, EXCEPTION-LOCATION and EXCEPTION-STATEMENT report as cobc 3.2 reports them without -debug: the condition's name padded to 31 characters, the file's status and name, the running program's PROGRAM-ID then '; ; 0', and 31 spaces. An arithmetic statement raises EC-SIZE-OVERFLOW or EC-SIZE-ZERO-DIVIDE whether or not it has ON SIZE ERROR, a CALL of a program not found EC-PROGRAM-NOT-FOUND, and a file status other than 0x the EC-I-O condition of its first digit; the other conditions cobc raises are not. Enterprise COBOL has no such functions",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended)]],
     },
     Assumption {
         id: CODE_NAME_SEQUENCES,

@@ -611,7 +611,7 @@ value in the PROCEDURE DIVISION, and `Arith` 2, `Wide`, the arithmetic of a prog
 32 to 38 digits under `--compliance extended`, whose `Fixed` magnitudes need no new encoding as `U256`
 already holds 77 digits. It also adds the functions 93 to 95, ARGUMENT NUMERIC, its class test
 and its DISPLAY text, which an ANY NUMERIC parameter's uses become under `--compliance extended`
-(lir.md §9.9), and holds a numeric literal BY CONTENT as `Chars::Value`, not `Chars::Literal`. The functions 96 to 102 (HIGHEST-ALGEBRAIC, LOWEST-ALGEBRAIC, the boolean operators B-AND, B-OR, B-XOR and B-NOT, and DISPLAY's wrapper of a numeric function) and 103 (BOOLEAN-OF-INTEGER) are also new under `--compliance extended`. A 0.x module is refused, and compiling the source again is the remedy (question 1).
+(lir.md §9.9), and holds a numeric literal BY CONTENT as `Chars::Value`, not `Chars::Literal`. The functions 96 to 102 (HIGHEST-ALGEBRAIC, LOWEST-ALGEBRAIC, the boolean operators B-AND, B-OR, B-XOR and B-NOT, and DISPLAY's wrapper of a numeric function) and 103 (BOOLEAN-OF-INTEGER) and 104 (the exception functions), and the `Op` 46, `ClearException`, are also new under `--compliance extended`. A 0.x module is refused, and compiling the source again is the remedy (question 1).
 
 | The reader finds | It does |
 |---|---|

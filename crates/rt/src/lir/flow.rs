@@ -41,6 +41,8 @@ pub enum Op {
     /// source names its first receiving item and is not read.
     UnstringValue { value: Operand, plan: UnstringId },
     SearchAll(SearchAllId),
+    /// SET LAST EXCEPTION TO OFF, under `--compliance extended`.
+    ClearException,
     /// Raises the PERFORM and CALL depth, abending past 100.
     Nest,
     Unnest(u8),
@@ -273,6 +275,7 @@ codec_enum!(Op {
     Environment { display, value } = 39,
     DisplayError(id) = 40,
     UnstringValue { value, plan } = 41,
+    ClearException = 46,
 });
 codec_enum!(Step { Next = 0, Arm(arm) = 1, GoTo(para) = 2, End(ending) = 3, Return(frame) = 4, Resume(resume) = 5 });
 codec_enum!(Terminator {

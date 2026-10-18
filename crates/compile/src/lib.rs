@@ -1222,25 +1222,29 @@ fn display_lengths(program: &mut Program, layout: &layout::Layout, errors: &mut 
             let Stmt::Display { items, .. } = s else { continue };
             for item in items.iter_mut() {
                 let Operand::Function(f) = &*item else { continue };
-                if let Some(width) = displayed_width(&f.name).filter(|_| f.refmod.is_none() && !own.contains(&f.name)) {
+                if let [Expr::Operand(Operand::Ref(r))] = f.args.as_slice()
+                    && matches!(f.name.as_str(), "LENGTH" | "BYTE-LENGTH")
+                    && f.refmod.is_none()
+                    && r.refmod.is_none()
+                    && let Ok(layout::Resolved::Item(i)) = layout.resolve(&r.name, &r.qualifiers, r.pos)
+                    && layout.items[i].odo.is_empty()
+                {
+                    let it = &layout.items[i];
+                    let length = if f.name == "LENGTH" && matches!(it.kind, layout::Kind::National | layout::Kind::Dbcs { .. }) { it.size / 2 } else { it.size };
+                    errors.push(syntax::messages::IWX0113.at(f.pos, format!("DISPLAY FUNCTION {}({}) (GnuCOBOL; Enterprise COBOL uses an integer function only in an arithmetic expression): it shows {length}, the length the program fixes, as cobc 3.2 shows it", f.name, r.name)));
+                    *item = Operand::Literal(Literal::Number(length.to_string()));
+                    continue;
+                }
+                let width = match f.name.as_str() {
+                    "LENGTH" | "BYTE-LENGTH" => Some(None),
+                    name => displayed_width(name),
+                };
+                if let Some(width) = width.filter(|_| f.refmod.is_none() && !own.contains(&f.name)) {
                     errors.push(syntax::messages::IWX0149.at(f.pos, format!("DISPLAY FUNCTION {} (GnuCOBOL; Enterprise COBOL uses a numeric function only in an arithmetic expression): it shows the digits of the field cobc 3.2 holds its result in", f.name)));
                     let pos = f.pos;
                     let shown = FunctionCall { name: "DISPLAYED NUMBER".into(), args: [Some(Expr::Operand(Operand::Function(f.clone()))), width.map(|w| Expr::Operand(Operand::Literal(Literal::Number(w.to_string()))))].into_iter().flatten().collect(), modifier: None, refmod: None, all_subscripts: Vec::new(), pos };
                     *item = Operand::Function(shown);
-                    continue;
                 }
-                let [Expr::Operand(Operand::Ref(r))] = f.args.as_slice() else { continue };
-                if !matches!(f.name.as_str(), "LENGTH" | "BYTE-LENGTH") || f.refmod.is_some() || r.refmod.is_some() {
-                    continue;
-                }
-                let Ok(layout::Resolved::Item(i)) = layout.resolve(&r.name, &r.qualifiers, r.pos) else { continue };
-                let it = &layout.items[i];
-                if !it.odo.is_empty() {
-                    continue;
-                }
-                let length = if f.name == "LENGTH" && matches!(it.kind, layout::Kind::National | layout::Kind::Dbcs { .. }) { it.size / 2 } else { it.size };
-                errors.push(syntax::messages::IWX0113.at(f.pos, format!("DISPLAY FUNCTION {}({}) (GnuCOBOL; Enterprise COBOL uses an integer function only in an arithmetic expression): it shows {length}, the length the program fixes, as cobc 3.2 shows it", f.name, r.name)));
-                *item = Operand::Literal(Literal::Number(length.to_string()));
             }
         }
     }
@@ -1808,7 +1812,7 @@ impl Check<'_> {
                     targets.iter().for_each(|r| self.reference(r));
                     self.expr(by);
                 }
-                SetStmt::Switches(_) => {}
+                SetStmt::Switches(_) | SetStmt::LastExceptionOff => {}
             },
             Stmt::Accept { target, from, exception, screen, pos } => {
                 match screen {

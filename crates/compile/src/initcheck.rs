@@ -849,7 +849,7 @@ impl<'w, 'p> Walk<'w, 'p> {
                     targets.iter().for_each(|r| self.read(r, *pos, &st));
                     targets.iter().for_each(|r| self.write(r, *pos, &mut st));
                 }
-                SetStmt::Switches(_) => {}
+                SetStmt::Switches(_) | SetStmt::LastExceptionOff => {}
             },
             Stmt::Accept { target, exception, pos, .. } => {
                 let failed = st.clone();

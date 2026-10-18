@@ -77,6 +77,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 if let Some(step) = self.virtual_print(plan, &name, pos)? {
                     return Ok(step);
                 }
+                self.unit.exception = Some(crate::unit::LastException { name: "EC-PROGRAM-NOT-FOUND", file: None });
                 if plan.on_exception {
                     return Ok(Step::Arm(1));
                 }

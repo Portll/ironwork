@@ -99,6 +99,7 @@ impl Lower<'_> {
                 self.op(Op::SetUpDown { by, down: *down, targets: moved }, pos)?;
             }
             SetStmt::Switches(_) => return unsupported("SET ... TO ON or OFF, which compile makes SET ... TO TRUE", pos),
+            SetStmt::LastExceptionOff => self.op(Op::ClearException, pos)?,
         }
         Ok(())
     }

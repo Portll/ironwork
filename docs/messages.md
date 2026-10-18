@@ -355,7 +355,9 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0346 | S | `STOP RUN {word}: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0347 | S | `XML GENERATE SUPPRESS WHEN: GnuCOBOL's, not Enterprise COBOL's, which names an item or EVERY; --compliance extended reads it` |
 | IWC0348 | S | `FUNCTION BOOLEAN-OF-INTEGER: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0349 | S | `FUNCTION {name}: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0350 | S | `ANY NUMERIC: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0370 | S | `SET LAST EXCEPTION TO OFF: COBOL 2014's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
 | IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |
@@ -961,6 +963,8 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0150 | W | `STOP RUN {word} (COBOL 2002 and GnuCOBOL; Enterprise COBOL's STOP RUN ends with RETURN-CODE): the value, or {default} where none is written, is moved to RETURN-CODE, then STOP RUN ends the run` |
 | IWX0151 | W | `XML GENERATE SUPPRESS WHEN (GnuCOBOL; Enterprise COBOL's SUPPRESS names an item or EVERY): it is read as SUPPRESS EVERY ... WHEN, for each element and attribute` |
 | IWX0152 | W | `FUNCTION BOOLEAN-OF-INTEGER (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such function): GnuCOBOL declares it and fails when a run reaches it, and so does this program` |
+| IWX0153 | W | `FUNCTION {name} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such function): it reports the last exception condition a statement raised` |
+| IWX0154 | W | `SET LAST EXCEPTION TO OFF (COBOL 2014 and GnuCOBOL; Enterprise COBOL has no exception status): the last exception FUNCTION EXCEPTION-STATUS reports is cleared` |
 
 ## Run-time refusals
 

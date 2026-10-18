@@ -309,6 +309,13 @@ pub enum Connector {
 /// the input trace checks.
 pub const OS_COMMAND_ROUTINES: &[&str] = &["SYSTEM", "C$SYSTEM", "CBL_EXEC_RUN_UNIT", "CBL_GC_HOSTED", "BXPSYSTM"];
 
+pub struct LastException {
+    /// The condition's name, such as EC-SIZE-OVERFLOW.
+    pub name: &'static str,
+    /// The status and name of the file an input-output condition came from.
+    pub file: Option<String>,
+}
+
 pub struct RunUnit<'w, H, L: Loader<H>> {
     pub mem: Vec<u8>,
     /// PERFORMs and CALLs in progress, across every program.
@@ -335,6 +342,9 @@ pub struct RunUnit<'w, H, L: Loader<H>> {
     pub observer: Option<Observer<'w>>,
     /// FUNCTION RANDOM's generator, one for the run unit, from the first reference on.
     pub random: Option<u32>,
+    /// The last exception condition a statement raised, which FUNCTION EXCEPTION-STATUS and its
+    /// relatives report under `--compliance extended`, until SET LAST EXCEPTION TO OFF.
+    pub exception: Option<LastException>,
     /// The first program activated, the run unit's main program.
     pub main: Option<usize>,
     /// The programs CALLs, functions and INVOKEs in progress entered, outermost first.
@@ -542,6 +552,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             oo: Default::default(),
             observer: None,
             random: None,
+            exception: None,
             main: None,
             calls: Vec::new(),
             arguments_passed: Vec::new(),

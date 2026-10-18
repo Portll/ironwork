@@ -1582,7 +1582,7 @@ data-name): the record is shared under that name`, at AS.
 
 An EXTERNAL record written `EXTERNAL AS literal` is shared across the run unit under the literal, as
 cobc 3.2 shares it, so programs may refer to one record by different data-names. Strict refuses it
-(IWC0342-S).
+(IWC0342-S). (Assumption C520.)
 
 ### IWX0116-W HIGHEST-ALGEBRAIC and LOWEST-ALGEBRAIC
 
@@ -1613,7 +1613,7 @@ byte a position, held as the numeric PICTURE {alphanumeric}`, at the PICTURE.
 
 `PIC 1(n)` without USAGE BIT is read as `PIC 9(n)`, which is how cobc 3.2 holds it: a MOVE of an
 alphanumeric value stores its leading characters, space-filled, as an elementary numeric DISPLAY
-item takes them. Strict refuses the symbol (IWC0261-S). USAGE BIT stays refused.
+item takes them. Strict refuses the symbol (IWC0261-S). USAGE BIT stays refused. (Assumption C525.)
 
 ### IWX0119-W A FILLER record of an EXTERNAL or GLOBAL file
 
@@ -1649,7 +1649,7 @@ cobc 3.2 gives the host's offset (+1100 on a host in Sydney); ironwork's clock i
 `START file KEY IS >= key [WITH] LENGTH n` compares the first n characters of the key with the file's
 keys, as cobc 3.2 does: `LENGTH 2` of AAZZ finds the first key starting AA. n is an integer literal not
 past the key's length; any other length is refused as not lowered yet. Strict refuses the phrase
-(IWC0344-S).
+(IWC0344-S). (Assumption C524.)
 
 ### IWX0144-W Boolean operators
 
@@ -1660,7 +1660,7 @@ B-AND, B-OR, B-XOR and B-NOT in an arithmetic expression work on the unsigned 64
 operand's digits, its sign and decimal point ignored, as cobc 3.2 reads them (`A B-AND 2.9` is A and 29).
 They bind as * and / do, left to right, so `2 + 1 B-AND 1` is 3 and `2 * 3 B-AND 6` is 6. Each is an
 internal intrinsic function (Func 98 to 101) no source can name. Strict reads B-AND and the others as
-data-names, so an expression using one is a syntax error.
+data-names, so an expression using one is a syntax error. (Assumption C509.)
 
 ### IWX0145-W A based numeric literal
 
@@ -1675,7 +1675,7 @@ cobc 3.2 reads them under -std=mf. Strict has no such token.
 `IWX0146-W USE FOR DEBUGGING ON ALL REFERENCES OF {item} (GnuCOBOL reads it and never runs it; Enterprise
 COBOL debugs procedures): the item is left out of the USE statement, and the section does not run for
 references to it`, at the item. A USE statement naming procedures as well keeps them. Strict refuses
-the form (IWS0067-S); loose gave it IWX0065-W before extended read it.
+the form (IWS0067-S); loose gave it IWX0065-W before extended read it. (Assumption C526.)
 
 ### IWX0147-W A class condition on a literal
 
@@ -1684,7 +1684,7 @@ literal's characters are tested as a data item holding them is`, at the conditio
 
 `IF "7X" IS DIGITS`, `IS NUMERIC`, `IS ALPHABETIC`, `IS ALPHABETIC-LOWER` and `IS ALPHABETIC-UPPER` of
 an alphanumeric literal test its characters, as cobc 3.2 does: a hidden item holds the literal. The
-class-name test of a function's result stays refused (IWC0086-S).
+class-name test of a function's result stays refused (IWC0086-S). (Assumption C521.)
 
 ### IWX0148-W PERFORM THRU out of a declarative
 
@@ -1693,7 +1693,7 @@ compiles as a hole, and a run that reaches it ends with IWR0078`, at the PERFORM
 
 A PERFORM ... THRU whose range starts or ends in a declarative section and does not stay in one is
 IWC0015-S under strict. cobc 3.2 warns and fails when the statement runs, so extended compiles it as a
-hole, as relaxed compiles a statement it cannot read.
+hole, as relaxed compiles a statement it cannot read. (Assumption C522.)
 
 ### IWX0149-W DISPLAY of a numeric function
 
@@ -1712,7 +1712,7 @@ INTEGER(-12.75)` shows `-000000013`, `MOD(17 5)` shows `000000002`, `REM(17.5 5)
 BYTE-LENGTH of an item whose length the program fixes show as IWX0113 says. A function that returns its
 argument's field (ABS, MAX, MIN, MEDIAN), a float (SQRT, PI, E, EXP, LOG, SIN, NUMVAL) or a long decimal
 (MEAN, VARIANCE, ANNUITY) stays refused with IWC0101-S, as under strict. Internally the DISPLAY operand is
-a call of DISPLAYED NUMBER, Func 102, no source can name.
+a call of DISPLAYED NUMBER, Func 102, no source can name. (Assumption C508.)
 
 ### IWX0150-W STOP RUN NORMAL and ERROR
 
@@ -1722,7 +1722,7 @@ the phrase.
 
 `STOP RUN [WITH] NORMAL [STATUS] [value]` ends with the value, or 0, and `STOP RUN [WITH] ERROR [STATUS]
 [value]` with the value, or 1, whatever RETURN-CODE held, as cobc 3.2 ends. Strict refuses the phrase
-(IWC0346-S).
+(IWC0346-S). (Assumption C523.)
 
 ### IWX0151-W XML GENERATE SUPPRESS WHEN
 
@@ -1740,6 +1740,30 @@ GnuCOBOL declares it and fails when a run reaches it, and so does this program`,
 cobc 3.2 compiles a call of BOOLEAN-OF-INTEGER and ends the run that reaches it with `attempt to use
 non-implemented function`. Extended compiles it alike and ends the run with IWR0092-S. Strict refuses it
 (IWC0348-S). INTEGER-OF-BOOLEAN, which cobc declares the same way, stays unknown.
+
+### IWX0153-W EXCEPTION-STATUS and its relatives
+
+`IWX0153-W FUNCTION {name} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such function): it reports the
+last exception condition a statement raised`, at the function.
+
+EXCEPTION-STATUS, EXCEPTION-LOCATION, EXCEPTION-STATEMENT and EXCEPTION-FILE report the run unit's last
+exception condition, as cobc 3.2 reports it without `-debug`: EXCEPTION-STATUS its name padded to 31
+characters (`EC-SIZE-OVERFLOW`, `EC-SIZE-ZERO-DIVIDE`, `EC-PROGRAM-NOT-FOUND`, and for a file status other
+than 0x `EC-I-O-AT-END`, `EC-I-O-INVALID-KEY`, `EC-I-O-PERMANENT-ERROR`, `EC-I-O-LOGIC-ERROR`,
+`EC-I-O-RECORD-OPERATION`, `EC-I-O-FILE-SHARING` and `EC-I-O-IMP` for status 1x to 6x and 9x); EXCEPTION-FILE
+the status and the file's name; EXCEPTION-LOCATION the PROGRAM-ID of the running program, then `; ; 0`
+(cobc gives the section, paragraph and line only under `-debug`); EXCEPTION-STATEMENT 31 spaces. With no
+exception raised they are 31 spaces, `00`, one space and 31 spaces. An arithmetic statement raises the
+size conditions whether or not it has ON SIZE ERROR; the other exceptions cobc raises (a subscript out of
+range, a bad reference modification, an invalid decimal) are not raised (assumption C507). Strict
+refuses the functions (IWC0349-S). Internally each is a call of EXCEPTION INFO, Func 104, with its
+selector.
+
+### IWX0154-W SET LAST EXCEPTION TO OFF
+
+`IWX0154-W SET LAST EXCEPTION TO OFF (COBOL 2014 and GnuCOBOL; Enterprise COBOL has no exception
+status): the last exception FUNCTION EXCEPTION-STATUS reports is cleared`, at SET. Strict refuses it
+(IWC0370-S). It is LIR op 46, `ClearException`.
 
 ## Relaxed
 

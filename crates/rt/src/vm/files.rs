@@ -371,6 +371,10 @@ impl<'p, L: Loader<Rc<Code>>> Files<Handle<'p>, &'p IntExpr> for Io<'_, 'p, '_, 
         self.vm.unit.locked(self.vm.me, k)
     }
 
+    fn raise(&mut self, name: &'static str, file: Option<String>) {
+        self.vm.unit.exception = Some(crate::unit::LastException { name, file });
+    }
+
     fn dd(&self, assign: &str) -> Option<Dd> {
         self.vm.unit.dds.assigned(assign)
     }

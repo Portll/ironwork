@@ -168,9 +168,24 @@ pub trait Files<P: Copy, X: Copy>: Host<P> {
     /// Which key of indexed file `k` the item names (0 the prime key, then each alternate), and
     /// its value in the record area. With `partial` (START) it may be a leading part of the key.
     fn key_value(&mut self, k: usize, keying: &Keying, key: P, partial: bool, pos: Pos) -> R<(usize, Vec<u8>)>;
+    /// Records exception condition `name`, with the status and name of its file, as the run unit's last.
+    fn raise(&mut self, name: &'static str, file: Option<String>);
 }
 
 pub fn set_status<P: Copy, X: Copy>(x: &mut impl Files<P, X>, file: &File<'_, P, X>, status: FileStatus, pos: Pos) -> R<()> {
+    if !status.covers('0') {
+        let name = match status.as_str().as_bytes().first() {
+            Some(b'1') => "EC-I-O-AT-END",
+            Some(b'2') => "EC-I-O-INVALID-KEY",
+            Some(b'3') => "EC-I-O-PERMANENT-ERROR",
+            Some(b'4') => "EC-I-O-LOGIC-ERROR",
+            Some(b'5') => "EC-I-O-RECORD-OPERATION",
+            Some(b'6') => "EC-I-O-FILE-SHARING",
+            Some(b'9') => "EC-I-O-IMP",
+            _ => "EC-I-O",
+        };
+        x.raise(name, Some(format!("{}{}", status.as_str(), file.name)));
+    }
     if let Some(p) = file.status {
         let loc = receiver(x, p)?;
         let bytes = x.facts().page().encode(status.as_str()).map_err(|e| Abend::ironwork(e.to_string(), pos))?;

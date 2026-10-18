@@ -547,6 +547,11 @@ impl<'p, L: Loader<Rc<Code>>> Evaluator for Call<'_, 'p, '_, '_, L> {
         self.vm.unit.heap_free(address)
     }
 
+    fn exception(&mut self) -> (Option<(&'static str, Option<String>)>, String) {
+        let unit = &self.vm.unit;
+        (unit.exception.as_ref().map(|e| (e.name, e.file.clone())), unit.programs[self.vm.me].name.clone())
+    }
+
     fn argument_length(&mut self, position: usize) -> usize {
         self.vm.unit.argument_length_of(self.vm.me, position)
     }
@@ -656,6 +661,10 @@ mod tests {
 
         fn heap_free(&mut self, address: u32) -> u32 {
             address
+        }
+
+        fn exception(&mut self) -> (Option<(&'static str, Option<String>)>, String) {
+            (None, String::new())
         }
     }
 

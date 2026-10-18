@@ -129,6 +129,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
             }
             Op::SearchAll(id) => return self.search_all(&p.plans.search_all[*id as usize], pos),
             Op::Nest => self.unit.enter(pos)?,
+            Op::ClearException => self.unit.exception = None,
             Op::Unnest(n) => self.unit.depth = self.unit.depth.saturating_sub(usize::from(*n)),
             Op::SetTemp(t, value) => {
                 let n = self.int(value, pos)?.max(0);

@@ -1047,6 +1047,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 if let Some(flow) = self.virtual_print(c, &name)? {
                     return Ok(flow);
                 }
+                self.unit.exception = Some(rt::unit::LastException { name: "EC-PROGRAM-NOT-FOUND", file: None });
                 return match &c.on_exception {
                     Some(body) => self.run_block(body),
                     None => Err(crate::le::not_found(&format!("CALL {name}"), &name, dynamic, pos)),
@@ -1256,6 +1257,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 rt::set::up_down(self, by, *down, &targets, pos)?;
             }
             SetStmt::Switches(_) => return Err(Abend::ironwork("SET ... TO ON or OFF reached the interpreter, which runs it as the SET ... TO TRUE compile makes it", pos)),
+            SetStmt::LastExceptionOff => self.unit.exception = None,
         }
         Ok(())
     }
@@ -1449,6 +1451,7 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
     /// leaves the target unchanged when the statement handles it.
     fn arithmetic(&mut self, computations: &[(Target, Expr)], remainder: Option<&(Target, Expr, Expr)>, handler: Option<&'p SizeError>, per_receiver: bool, pos: Pos) -> R<Flow> {
         let mut size_error = false;
+        let mut raised = false;
         let mut places = Dmax::default();
         // A COMP-1 or COMP-2 receiver makes the statement's arithmetic floating point (Programming
         // Guide SC27-8714-03, p. 800).
@@ -1519,6 +1522,10 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
                 }
                 (_, outcome) => outcome,
             };
+            if let Err(a) = &outcome && (handler.is_some() && a.size_error() || self.options.emulates_cobc() && a.divides_by_zero()) {
+                self.unit.exception = Some(rt::unit::LastException { name: if a.divides_by_zero() { "EC-SIZE-ZERO-DIVIDE" } else { "EC-SIZE-OVERFLOW" }, file: None });
+                raised = true;
+            }
             let Some(value) = arith::size_error(outcome, handler.is_some(), self.options.emulates_cobc())? else {
                 size_error = true;
                 continue;
@@ -1530,6 +1537,9 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
         {
             let r_loc = self.locate(&t.r)?;
             size_error |= store::store_value(&self.facts(), self.unit, r_loc, Val::Num(r), false, handler.is_some(), pos)?;
+        }
+        if size_error && !raised {
+            self.unit.exception = Some(rt::unit::LastException { name: "EC-SIZE-OVERFLOW", file: None });
         }
         if let Some(h) = handler {
             return self.run_block(if size_error { &h.on } else { &h.not_on });

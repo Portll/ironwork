@@ -71,6 +71,11 @@ impl<'p> Evaluator for Call<'_, 'p, '_, '_, '_> {
         self.machine.unit.heap_allocate(size)
     }
 
+    fn exception(&mut self) -> (Option<(&'static str, Option<String>)>, String) {
+        let unit = &self.machine.unit;
+        (unit.exception.as_ref().map(|e| (e.name, e.file.clone())), unit.programs[self.machine.me].name.clone())
+    }
+
     fn heap_free(&mut self, address: u32) -> u32 {
         self.machine.unit.heap_free(address)
     }

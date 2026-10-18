@@ -62,6 +62,9 @@ pub trait Evaluator {
     fn heap_allocate(&mut self, size: usize) -> u32;
     /// FREE of `address`: NULL once the block it starts is released, else `address` unchanged.
     fn heap_free(&mut self, address: u32) -> u32;
+    /// The run unit's last exception condition: its name and its file's status and name; and the
+    /// PROGRAM-ID of the running program.
+    fn exception(&mut self) -> (Option<(&'static str, Option<String>)>, String);
 }
 
 fn integer(n: i128, digits: u32) -> Val {
@@ -1069,6 +1072,19 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
                 _ => return Err(crate::refusal::IWR0065.abend("FUNCTION STORED-CHAR-LENGTH of this argument is not supported yet", pos)),
             };
             Ok(Val::Num(Fixed::new(n as i128, Places::new(9, 0))))
+        }
+        "EXCEPTION INFO" => {
+            arity(1..=1, args)?;
+            let (last, program) = x.exception();
+            let text = match (whole(&args[0], name, pos)?, last) {
+                (1, Some((condition, _))) => format!("{condition:<31}"),
+                (2, Some(_)) => format!("{program}; ; 0"),
+                (4, Some((_, Some(file)))) => file,
+                (1 | 3, _) => " ".repeat(31),
+                (4, _) => "00".to_owned(),
+                _ => " ".to_owned(),
+            };
+            text_value(facts, &text, pos)
         }
         "BOOLEAN-OF-INTEGER" => {
             arity(2..=2, args)?;

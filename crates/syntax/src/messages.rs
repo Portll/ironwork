@@ -381,7 +381,9 @@ catalogue! {
     IWC0346 Severe "STOP RUN {word}: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0347 Severe "XML GENERATE SUPPRESS WHEN: GnuCOBOL's, not Enterprise COBOL's, which names an item or EVERY; --compliance extended reads it";
     IWC0348 Severe "FUNCTION BOOLEAN-OF-INTEGER: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
+    IWC0349 Severe "FUNCTION {name}: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0350 Severe "ANY NUMERIC: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
+    IWC0370 Severe "SET LAST EXCEPTION TO OFF: COBOL 2014's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
     IWJ0002 Severe "an unbalanced ) in {text}";
     IWJ0003 Severe "unbalanced parentheses or quotes in {text}";
@@ -987,6 +989,8 @@ catalogue! {
     IWX0150 Warning "STOP RUN {word} (COBOL 2002 and GnuCOBOL; Enterprise COBOL's STOP RUN ends with RETURN-CODE): the value, or {default} where none is written, is moved to RETURN-CODE, then STOP RUN ends the run";
     IWX0151 Warning "XML GENERATE SUPPRESS WHEN (GnuCOBOL; Enterprise COBOL's SUPPRESS names an item or EVERY): it is read as SUPPRESS EVERY ... WHEN, for each element and attribute";
     IWX0152 Warning "FUNCTION BOOLEAN-OF-INTEGER (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such function): GnuCOBOL declares it and fails when a run reaches it, and so does this program";
+    IWX0153 Warning "FUNCTION {name} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such function): it reports the last exception condition a statement raised";
+    IWX0154 Warning "SET LAST EXCEPTION TO OFF (COBOL 2014 and GnuCOBOL; Enterprise COBOL has no exception status): the last exception FUNCTION EXCEPTION-STATUS reports is cleared";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

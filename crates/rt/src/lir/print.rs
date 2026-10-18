@@ -719,6 +719,7 @@ impl<'a> Printer<'a> {
             Op::UnstringValue { value, plan } => self.unstring(*plan, Some(value)),
             Op::SearchAll(id) => self.search_all(*id),
             Op::Nest => "Nest".to_owned(),
+            Op::ClearException => "ClearException".to_owned(),
             Op::Unnest(n) => format!("Unnest {n}"),
             Op::SetTemp(t, value) => format!("SetTemp t{t} <- {}", self.int(value)),
             Op::DecTemp(t) => format!("DecTemp t{t}"),

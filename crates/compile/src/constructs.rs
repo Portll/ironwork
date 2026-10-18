@@ -244,6 +244,7 @@ impl Walk<'_> {
                         self.expr(by);
                     }
                     SetStmt::Switches(groups) => groups.iter().for_each(|(refs, _)| self.refs(refs)),
+                    SetStmt::LastExceptionOff => {}
                 }
             }
             Stmt::String(st) => {

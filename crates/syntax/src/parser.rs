@@ -4277,6 +4277,17 @@ impl Parser<'_> {
     }
 
     fn set(&mut self) -> R<SetStmt> {
+        if self.is_word("LAST") && self.word_at(1) == Some("EXCEPTION") {
+            let at = self.pos();
+            if !self.extended {
+                return Err(crate::messages::IWC0370.at(at, "SET LAST EXCEPTION TO OFF: COBOL 2014's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it"));
+            }
+            self.at += 2;
+            self.expect_word("TO")?;
+            self.expect_word("OFF")?;
+            self.messages.push(crate::messages::IWX0154.at(at, "SET LAST EXCEPTION TO OFF (COBOL 2014 and GnuCOBOL; Enterprise COBOL has no exception status): the last exception FUNCTION EXCEPTION-STATUS reports is cleared"));
+            return Ok(SetStmt::LastExceptionOff);
+        }
         if self.is_word("ADDRESS") && self.word_at(1) == Some("OF") {
             let mut targets = Vec::new();
             while self.is_word("ADDRESS") && self.word_at(1) == Some("OF") {
@@ -4510,6 +4521,14 @@ impl Parser<'_> {
                 }
                 args.push(self.expr()?);
             }
+        }
+        if let Some(selector) = ["EXCEPTION-STATUS", "EXCEPTION-LOCATION", "EXCEPTION-STATEMENT", "EXCEPTION-FILE"].iter().position(|n| *n == name) {
+            if !self.extended {
+                return Err(crate::messages::IWC0349.at(pos, format!("FUNCTION {name}: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it")));
+            }
+            self.messages.push(crate::messages::IWX0153.at(pos, format!("FUNCTION {name} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such function): it reports the last exception condition a statement raised")));
+            args = vec![Expr::Operand(Operand::Literal(Literal::Number((selector + 1).to_string())))];
+            name = "EXCEPTION INFO".into();
         }
         if self.extended && CHARACTER_FUNCTIONS.contains(&name.as_str()) {
             for arg in &mut args {

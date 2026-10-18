@@ -352,7 +352,7 @@ fn result(func: Func, args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
         Func::HighestAlgebraic | Func::LowestAlgebraic => num(None, 0),
         Func::BitAnd | Func::BitOr | Func::BitXor | Func::BitNot => integer(20),
         Func::DisplayedNumber => of(Value::Bytes),
-        Func::BooleanOfInteger => of(Value::Bytes),
+        Func::BooleanOfInteger | Func::ExceptionInfo => of(Value::Bytes),
         Func::CrtStatus => integer(4),
         Func::CallParameters => integer(9),
         Func::Factorial => integer(if arith != Arith::Compat { 31 } else { 30 }),

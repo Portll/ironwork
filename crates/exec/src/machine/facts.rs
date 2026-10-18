@@ -186,6 +186,10 @@ impl<'a> Files<&'a Ref, Int<'a>> for Machine<'_, '_, '_> {
         self.unit.locked(self.me, k)
     }
 
+    fn raise(&mut self, name: &'static str, file: Option<String>) {
+        self.unit.exception = Some(rt::unit::LastException { name, file });
+    }
+
     fn dd(&self, assign: &str) -> Option<Dd> {
         self.unit.dds.assigned(assign)
     }
