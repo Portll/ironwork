@@ -1,7 +1,7 @@
 use numeric::assumptions::Oracle;
 use ironwork_oracle::hercules::{self, Case, Op, Outcome};
 use ironwork_oracle::witness::{self, basis_name, files};
-use ironwork_oracle::{Finding, Verdict, check, hex, parse_output, programs, summarize, tally};
+use ironwork_oracle::{Finding, Tally, Verdict, check, hex, parse_output, programs, summarize, tally};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -102,6 +102,11 @@ fn report(findings: &[Finding]) -> bool {
     }
     let t = tally(findings);
     println!("\n{} match, {} mismatch, {} not in the output\n", t.matched, t.mismatched, t.missing);
+    assumption_table(&t);
+    t.mismatched == 0
+}
+
+fn assumption_table(t: &Tally) {
     let tallies = t.assumptions();
     println!("assumption  state       held  broken  observed  basis     settled by        claim");
     for (a, t) in &tallies {
@@ -132,7 +137,7 @@ fn report(findings: &[Finding]) -> bool {
         s.observed,
         s.unmeasured
     );
-    t.mismatched == 0
+    println!("{} cases evidence no registered assumption", t.untagged);
 }
 
 fn smoke(dir: &Path) -> Result<bool, String> {
@@ -177,7 +182,8 @@ fn hercules_run(dir: &Path) -> Result<bool, String> {
     for (case, seen, expected) in &disagreements {
         println!("\nDISAGREE {}\n  operands   {}\n  hercules   {}\n  zarch      {}", case.name, operands(case), outcome(seen), outcome(expected));
     }
-    println!("\n{} agree, {} disagree", results.len() - disagreements.len(), disagreements.len());
+    println!("\n{} agree, {} disagree\n", results.len() - disagreements.len(), disagreements.len());
+    assumption_table(&tally(&hercules::findings(&results)));
     Ok(disagreements.is_empty())
 }
 
@@ -200,6 +206,7 @@ fn operands(case: &Case) -> String {
         Op::Tp { op } => format!("op={}", hex(op)),
         Op::Cvb { op2 } => format!("op2={}", hex(op2)),
         Op::Cvd { value } => format!("value={value}"),
+        Op::FromFixed { value, .. } => format!("value={value}"),
         Op::Hfp { op1, op2, mask, .. } => format!("op1={} op2={} mask={mask:X}", hex(op1), hex(op2)),
     }
 }

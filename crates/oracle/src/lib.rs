@@ -156,10 +156,12 @@ pub fn programs() -> Vec<Program> {
     ]
 }
 
-/// Job output: every `CASE <id> <offset> <hex>` line reassembled into each case's bytes, and the
-/// compiler named in the listing header, if the output carries one.
+/// Job output: every `CASE <id> <offset> <hex>` line reassembled into each case's bytes, the
+/// compiler named in the listing header, if the output carries one, and the Db2 run-source
+/// marker, if it carries that.
 pub struct Output {
     pub compiler: Option<String>,
+    pub db2: Option<String>,
     pub cases: BTreeMap<String, Vec<u8>>,
 }
 
@@ -172,9 +174,14 @@ pub struct Observation {
 }
 
 impl Output {
-    /// Only a listing that names IBM Enterprise COBOL identifies the run; nothing else is inferred.
+    /// Only a listing that names IBM Enterprise COBOL identifies the run, and only with that
+    /// listing does the Db2 marker make it a Db2 run; nothing else is inferred.
     pub fn ran(&self) -> Option<Oracle> {
-        self.compiler.is_some().then_some(Oracle::EnterpriseCobol)
+        match (&self.compiler, &self.db2) {
+            (None, _) => None,
+            (Some(_), None) => Some(Oracle::EnterpriseCobol),
+            (Some(_), Some(_)) => Some(Oracle::Db2),
+        }
     }
 
     pub fn observations(self) -> BTreeMap<String, Observation> {
@@ -185,7 +192,7 @@ impl Output {
 
 pub fn parse_output(text: &str) -> Output {
     let mut chunks: BTreeMap<String, Vec<(u32, Vec<u8>)>> = BTreeMap::new();
-    let compiler = witness::parse_listing(text).compiler;
+    let listing = witness::parse_listing(text);
     for line in text.lines() {
         let Some(at) = line.find("CASE ") else { continue };
         let mut fields = line[at + 5..].split_whitespace();
@@ -200,7 +207,7 @@ pub fn parse_output(text: &str) -> Output {
             (id, parts.into_iter().flat_map(|(_, b)| b).collect())
         })
         .collect();
-    Output { compiler, cases }
+    Output { compiler: listing.compiler, db2: listing.db2, cases }
 }
 
 pub fn hex(bytes: &[u8]) -> String {
@@ -225,7 +232,8 @@ pub struct Finding {
     pub id: String,
     pub assumptions: Vec<&'static str>,
     pub verdict: Verdict,
-    /// The oracle the case ran on, from the output's own listing; `None` when it named none.
+    /// The oracle the case ran on: from the output's own listing, or Hercules when it produced
+    /// the case; `None` when the output named none.
     pub ran: Option<Oracle>,
 }
 
@@ -273,6 +281,8 @@ pub struct Tally {
     pub matched: usize,
     pub mismatched: usize,
     pub missing: usize,
+    /// Cases the output carried that evidence no registered assumption.
+    pub untagged: usize,
     /// Per assumption id, among the cases the output carried; one with no case is absent.
     pub by_assumption: BTreeMap<&'static str, AssumptionTally>,
 }
@@ -287,7 +297,7 @@ impl Tally {
 
 /// A case the output lacks counts nowhere.
 pub fn tally(findings: &[Finding]) -> Tally {
-    let mut tally = Tally { matched: 0, mismatched: 0, missing: 0, by_assumption: BTreeMap::new() };
+    let mut tally = Tally { matched: 0, mismatched: 0, missing: 0, untagged: 0, by_assumption: BTreeMap::new() };
     for f in findings {
         match f.verdict {
             Verdict::Match => tally.matched += 1,
@@ -296,6 +306,9 @@ pub fn tally(findings: &[Finding]) -> Tally {
                 tally.missing += 1;
                 continue;
             }
+        }
+        if f.assumptions.is_empty() {
+            tally.untagged += 1;
         }
         for &id in &f.assumptions {
             let required = assumptions::get(id).oracle;
@@ -426,6 +439,18 @@ mod tests {
         assert_eq!(unnamed.observations()["a"].ran, None);
     }
 
+    #[test]
+    fn a_db2_marker_names_db2_only_beside_the_listing_and_none_is_parsed_yet() {
+        let output = |compiler: Option<&str>, db2: Option<&str>| Output { compiler: compiler.map(str::to_owned), db2: db2.map(str::to_owned), cases: BTreeMap::new() };
+        assert_eq!(output(Some("IBM Enterprise COBOL for z/OS 6.4.0"), Some("marker")).ran(), Some(Oracle::Db2));
+        assert_eq!(output(Some("IBM Enterprise COBOL for z/OS 6.4.0"), None).ran(), Some(Oracle::EnterpriseCobol));
+        assert_eq!(output(None, Some("marker")).ran(), None);
+        assert_eq!(output(None, None).ran(), None);
+        let parsed = parse_output("1PP 5655-EC6 IBM Enterprise COBOL for z/OS  6.4.0 P230418   Date 09/27/2026\nCASE a 0000 AA\n");
+        assert_eq!(parsed.db2, None);
+        assert_eq!(parsed.ran(), Some(Oracle::EnterpriseCobol));
+    }
+
     fn finding(n: usize, assumption: &'static str, verdict: Verdict, ran: Option<Oracle>) -> Finding {
         Finding { id: format!("T.{n}"), assumptions: vec![assumption], verdict, ran }
     }
@@ -483,6 +508,21 @@ mod tests {
         assert_eq!(tally_of(&machine_by_compiler, MACHINE).state(), State::Held);
         let database_by_compiler = [finding(1, DATABASE, Verdict::Match, Some(Oracle::EnterpriseCobol))];
         assert_eq!(tally_of(&database_by_compiler, DATABASE).state(), State::Observed);
+        let database_by_db2 = [finding(1, DATABASE, Verdict::Match, Some(Oracle::Db2))];
+        assert_eq!(tally_of(&database_by_db2, DATABASE), AssumptionTally { held: 1, broken: 0, observed: 0 });
+        assert_eq!(tally_of(&database_by_db2, DATABASE).state(), State::Held);
+    }
+
+    #[test]
+    fn a_case_with_no_assumption_is_counted_untagged_and_changes_no_row() {
+        let untagged = [Finding { id: "T.1".into(), assumptions: vec![], verdict: Verdict::Match, ran: Some(Oracle::Hercules) }];
+        let t = tally(&untagged);
+        assert_eq!((t.matched, t.untagged), (1, 1));
+        assert!(t.by_assumption.is_empty());
+        assert_eq!(summarize(&t.assumptions()).unmeasured, assumptions::ASSUMPTIONS.len());
+        let missing = [Finding { id: "T.2".into(), assumptions: vec![], verdict: Verdict::Missing, ran: None }];
+        assert_eq!(tally(&missing).untagged, 0);
+        assert_eq!(tally(&[finding(1, MACHINE, Verdict::Match, Some(Oracle::Hercules))]).untagged, 0);
     }
 
     #[test]

@@ -20,6 +20,9 @@ pub struct Listing {
     pub compiler: Option<String>,
     pub date: Option<String>,
     pub options: Vec<String>,
+    /// A marker only a run against Db2 for z/OS leaves in the spool. None is parsed yet: the deck
+    /// runs no SQL, and no spool or document in this tree shows one to match.
+    pub db2: Option<String>,
 }
 
 pub fn parse_listing(text: &str) -> Listing {

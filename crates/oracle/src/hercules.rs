@@ -3,7 +3,8 @@
 //! each record is compared with what `zarch` computes. Agreement is evidence, not proof: Hercules
 //! is itself an implementation of the same manual.
 
-use crate::unhex;
+use crate::{Finding, Verdict, unhex};
+use numeric::assumptions::{HFP_EXTENDED_LOW_HALF, HFP_FROM_FIXED_TRUNCATES, Oracle};
 use std::fs::{self, File};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -15,11 +16,14 @@ use zarch::hfp::{Hfp, Precision};
 pub struct Case {
     pub name: String,
     pub op: Op,
+    /// The registered assumptions the instruction's result is evidence for; empty for most.
+    pub assumptions: Vec<&'static str>,
 }
 
 impl Case {
     pub fn instruction(&self) -> String {
         let name = match &self.op {
+            Op::FromFixed { to, from64, .. } => return from_fixed_name(*to, *from64).to_uppercase(),
             Op::Pack { .. } => "PACK",
             Op::Unpk { .. } => "UNPK",
             Op::Zap { .. } => "ZAP",
@@ -56,7 +60,41 @@ pub enum Op {
     /// HFP register-to-register instructions on raw register images. `mask` is the PSW program
     /// mask: 8 fixed-point overflow, 4 decimal overflow, 2 exponent underflow, 1 significance.
     Hfp { inst: HfpInst, op1: Vec<u8>, op2: Vec<u8>, mask: u8 },
+    /// CONVERT FROM FIXED, a 32-bit (CEFR, CDFR, CXFR) or 64-bit (CEGR, CDGR, CXGR) general
+    /// register to HFP of precision `to`. A 32-bit value is held in `i64` within i32's range.
+    FromFixed { to: Precision, from64: bool, value: i64 },
 }
+
+fn from_fixed_name(to: Precision, from64: bool) -> &'static str {
+    match (to, from64) {
+        (Precision::Short, false) => "Cefr",
+        (Precision::Long, false) => "Cdfr",
+        (Precision::Extended, false) => "Cxfr",
+        (Precision::Short, true) => "Cegr",
+        (Precision::Long, true) => "Cdgr",
+        (Precision::Extended, true) => "Cxgr",
+    }
+}
+
+fn from_fixed_opcode(to: Precision, from64: bool) -> u16 {
+    match (to, from64) {
+        (Precision::Short, false) => 0xB3B4,
+        (Precision::Long, false) => 0xB3B5,
+        (Precision::Extended, false) => 0xB3B6,
+        (Precision::Short, true) => 0xB3C4,
+        (Precision::Long, true) => 0xB3C5,
+        (Precision::Extended, true) => 0xB3C6,
+    }
+}
+
+const FROM_FIXED: [(Precision, bool); 6] = [
+    (Precision::Short, false),
+    (Precision::Long, false),
+    (Precision::Extended, false),
+    (Precision::Short, true),
+    (Precision::Long, true),
+    (Precision::Extended, true),
+];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HfpInst {
@@ -160,6 +198,15 @@ fn ss(op: u8, l1: u8, l2: u8, b1: u8, d1: u16, b2: u8, d2: u16) -> [u8; 6] {
 
 fn s_format(op: u16, b: u8, d: u16) -> [u8; 4] {
     [(op >> 8) as u8, op as u8, b << 4 | (d >> 8) as u8, d as u8]
+}
+
+fn rre(op: u16, r1: u8, r2: u8) -> [u8; 4] {
+    [(op >> 8) as u8, op as u8, 0, r1 << 4 | r2]
+}
+
+/// LOAD (64), RXY format with a 12-bit displacement.
+fn lg(r: u8, b: u8, d: u16) -> [u8; 6] {
+    [0xE3, r << 4, b << 4 | (d >> 8) as u8, d as u8, 0x00, 0x04]
 }
 
 fn larl(r: u8, halfwords: i32) -> Vec<u8> {
@@ -266,6 +313,8 @@ fn operands(op: &Op) -> (Vec<u8>, Vec<u8>, u8) {
         Op::Cvb { op2 } => (Vec::new(), op2.to_vec(), 0),
         Op::Cvd { value } => (Vec::new(), value.to_be_bytes().to_vec(), 0),
         Op::Hfp { op1, op2, mask, .. } => (op1.clone(), op2.clone(), *mask),
+        Op::FromFixed { from64: true, value, .. } => (Vec::new(), value.to_be_bytes().to_vec(), 0),
+        Op::FromFixed { from64: false, value, .. } => (Vec::new(), (*value as i32).to_be_bytes().to_vec(), 0),
     }
 }
 
@@ -279,6 +328,7 @@ fn result_at(op: &Op) -> (u16, usize) {
         Op::Cvb { .. } => (OFF_RESULT, 4),
         Op::Cvd { .. } => (OFF_RESULT, 8),
         Op::Hfp { inst, .. } => (OFF_RESULT, shape(*inst).result.map_or(0, Precision::bytes)),
+        Op::FromFixed { to, .. } => (OFF_RESULT, to.bytes()),
     }
 }
 
@@ -331,6 +381,11 @@ fn case_code(op: &Op, at: usize, area: usize) -> Vec<u8> {
             if let Some(r) = s.result {
                 code.extend(store_reg(0, OFF_RESULT, r.bytes()));
             }
+        }
+        Op::FromFixed { to, from64, .. } => {
+            code.extend(if *from64 { lg(R2, R1, OFF_OP2).to_vec() } else { rx(0x58, R2, 0, R1, OFF_OP2).to_vec() });
+            code.extend(rre(from_fixed_opcode(*to, *from64), 0, R2));
+            code.extend(store_reg(0, OFF_RESULT, to.bytes()));
         }
         _ => {}
     }
@@ -432,8 +487,34 @@ fn interruption(e: ProgramCheck) -> Option<u16> {
 pub fn model(case: &Case) -> Outcome {
     match &case.op {
         Op::Hfp { inst, op1, op2, mask } => hfp_model(*inst, op1, op2, *mask),
+        Op::FromFixed { to, value, .. } => Outcome { result: Hfp::from_integer(i128::from(*value), *to).to_bytes(), cc: None, interruption: None },
         op => decimal_model(op),
     }
+}
+
+/// An outcome as one byte string, for a `Verdict`: the result, the condition code (X'FF' for
+/// none) and the interruption code (0 for none).
+fn outcome_bytes(o: &Outcome) -> Vec<u8> {
+    let mut out = o.result.clone();
+    out.push(o.cc.unwrap_or(0xFF));
+    out.extend(o.interruption.unwrap_or(0).to_be_bytes());
+    out
+}
+
+/// Each case as a `Finding` from a Hercules run, for the assumption tally the oracle programs
+/// also feed.
+pub fn findings(results: &[(Case, Outcome, Outcome)]) -> Vec<Finding> {
+    results
+        .iter()
+        .map(|(case, seen, expected)| {
+            let verdict = if agrees(seen, expected) {
+                Verdict::Match
+            } else {
+                Verdict::Mismatch { expected: outcome_bytes(expected), observed: outcome_bytes(seen) }
+            };
+            Finding { id: case.name.clone(), assumptions: case.assumptions.clone(), verdict, ran: Some(Oracle::Hercules) }
+        })
+        .collect()
 }
 
 fn on_copy(mut a: Vec<u8>, f: impl FnOnce(&mut [u8]) -> Result<Option<Cc>, ProgramCheck>) -> Outcome {
@@ -467,7 +548,7 @@ fn decimal_model(op: &Op) -> Outcome {
             Err(e) => Outcome { result: Vec::new(), cc: None, interruption: interruption(e) },
         },
         Op::Cvd { value } => Outcome { result: decimal::cvd(*value).to_vec(), cc: None, interruption: None },
-        Op::Hfp { .. } => unreachable!(),
+        Op::Hfp { .. } | Op::FromFixed { .. } => unreachable!(),
     }
 }
 
@@ -584,9 +665,47 @@ fn edge_hfp(p: Precision, negative: bool, characteristic: u8, digits: &str) -> V
     hfp_bytes(p, negative, characteristic, u128::from_str_radix(&padded, 16).expect("hex"))
 }
 
-fn hfp_case(name: String, inst: HfpInst, op1: Vec<u8>, op2: Vec<u8>, mask: u8) -> Case {
-    Case { name, op: Op::Hfp { inst, op1, op2, mask } }
+/// The instructions that write an extended result, whose low half is M1's claim.
+fn evidences(inst: HfpInst) -> Vec<&'static str> {
+    match inst {
+        HfpInst::Axr | HfpInst::Sxr | HfpInst::Mxr | HfpInst::Mxdr => vec![HFP_EXTENDED_LOW_HALF],
+        _ => Vec::new(),
+    }
 }
+
+fn hfp_case(name: String, inst: HfpInst, op1: Vec<u8>, op2: Vec<u8>, mask: u8) -> Case {
+    Case { name, op: Op::Hfp { inst, op1, op2, mask }, assumptions: evidences(inst) }
+}
+
+fn from_fixed_case(label: &str, to: Precision, from64: bool, value: i64) -> Case {
+    Case { name: format!("{}-{label}", from_fixed_name(to, from64)), op: Op::FromFixed { to, from64, value }, assumptions: vec![HFP_FROM_FIXED_TRUNCATES] }
+}
+
+/// Values with more hexadecimal digits than the precision holds, where truncation and rounding
+/// part, beside the fits-exactly and extreme ones.
+const FROM_FIXED_EDGES_32: [(&str, i64); 9] = [
+    ("zero", 0),
+    ("one", 1),
+    ("minus-one", -1),
+    ("maximum", i32::MAX as i64),
+    ("minimum", i32::MIN as i64),
+    ("six-digits", 0x00FF_FFFF),
+    ("seven-digits-all-f", 0x0FFF_FFFF),
+    ("seven-digits-low-one", 0x0100_0001),
+    ("eight-digits", 0x1234_5678),
+];
+
+const FROM_FIXED_EDGES_64: [(&str, i64); 9] = [
+    ("zero", 0),
+    ("one", 1),
+    ("minus-one", -1),
+    ("maximum", i64::MAX),
+    ("minimum", i64::MIN),
+    ("fourteen-digits", 0x00FF_FFFF_FFFF_FFFF),
+    ("fifteen-digits-all-f", 0x0FFF_FFFF_FFFF_FFFF),
+    ("fifteen-digits-low-one", 0x0100_0000_0000_0001),
+    ("sixteen-digits", 0x1234_5678_9ABC_DEF1),
+];
 
 type Edge = (&'static str, bool, u8, &'static str, bool, u8, &'static str, u8);
 
@@ -629,7 +748,7 @@ const HFP_EDGES: [Edge; 34] = [
 
 fn decimal_edges() -> Vec<Case> {
     let mut cases = Vec::new();
-    let mut add = |name: &str, op: Op| cases.push(Case { name: name.into(), op });
+    let mut add = |name: &str, op: Op| cases.push(Case { name: name.into(), op, assumptions: Vec::new() });
     let b = bytes;
     add("zap-negative-zero", Op::Zap { op1: b("12345C"), op2: b("0D") });
     add("zap-invalid-sign", Op::Zap { op1: b("12345C"), op2: b("1234") });
@@ -696,7 +815,7 @@ fn decimal_edges() -> Vec<Case> {
 
 fn random_cases(rng: &mut Rng) -> Vec<Case> {
     let mut cases = Vec::new();
-    let mut add = |name: &str, i: usize, op: Op| cases.push(Case { name: format!("{name}-random-{i}"), op });
+    let mut add = |name: &str, i: usize, op: Op| cases.push(Case { name: format!("{name}-random-{i}"), op, assumptions: Vec::new() });
     for i in 0..40 {
         let len = |rng: &mut Rng| 1 + rng.below(16);
         let (l1, l2) = (len(rng), len(rng));
@@ -750,6 +869,14 @@ pub fn cases() -> Vec<Case> {
             };
             let mask = rng.below(16) as u8;
             all.push(hfp_case(format!("{inst:?}-random-{i}"), inst, op1, op2, mask));
+        }
+    }
+    for (to, from64) in FROM_FIXED {
+        let edges = if from64 { FROM_FIXED_EDGES_64 } else { FROM_FIXED_EDGES_32 };
+        all.extend(edges.iter().map(|&(label, value)| from_fixed_case(label, to, from64, value)));
+        for i in 0..40 {
+            let value = if from64 { (rng.next() as i64) >> rng.below(64) } else { i64::from((rng.next() as i32) >> rng.below(32)) };
+            all.push(from_fixed_case(&format!("random-{i}"), to, from64, value));
         }
     }
     all
@@ -880,8 +1007,8 @@ mod tests {
     #[test]
     fn image_places_psws_handler_and_operands() {
         let cases = vec![
-            Case { name: "a".into(), op: Op::Ap { op1: vec![0x12, 0x3C], op2: vec![0x00, 0x1C] } },
-            Case { name: "b".into(), op: Op::Hfp { inst: HfpInst::Aer, op1: vec![0x41, 0x10, 0, 0], op2: vec![0x41, 0x20, 0, 0], mask: 2 } },
+            Case { name: "a".into(), op: Op::Ap { op1: vec![0x12, 0x3C], op2: vec![0x00, 0x1C] }, assumptions: Vec::new() },
+            Case { name: "b".into(), op: Op::Hfp { inst: HfpInst::Aer, op1: vec![0x41, 0x10, 0, 0], op2: vec![0x41, 0x20, 0, 0], mask: 2 }, assumptions: Vec::new() },
         ];
         let mem = image(&cases);
         assert_eq!(hex(&mem[0x1A0..0x1B0]), "00000001800000000000000000002000");
@@ -902,9 +1029,9 @@ mod tests {
     #[test]
     fn outcomes_decode_a_synthetic_dump() {
         let cases = vec![
-            Case { name: "ap".into(), op: Op::Ap { op1: vec![0x12, 0x3C], op2: vec![0x00, 0x1C] } },
-            Case { name: "pack".into(), op: Op::Pack { op1_len: 2, op2: vec![0xF1, 0xF2, 0xC3] } },
-            Case { name: "bad".into(), op: Op::Ap { op1: vec![0x12, 0x3C], op2: vec![0x00, 0x1C] } },
+            Case { name: "ap".into(), op: Op::Ap { op1: vec![0x12, 0x3C], op2: vec![0x00, 0x1C] }, assumptions: Vec::new() },
+            Case { name: "pack".into(), op: Op::Pack { op1_len: 2, op2: vec![0xF1, 0xF2, 0xC3] }, assumptions: Vec::new() },
+            Case { name: "bad".into(), op: Op::Ap { op1: vec![0x12, 0x3C], op2: vec![0x00, 0x1C] }, assumptions: Vec::new() },
         ];
         let base = area_base(&cases);
         let mut dump = vec![0u8; base + 3 * AREA];
@@ -929,9 +1056,9 @@ mod tests {
 
     #[test]
     fn the_model_answers_from_zarch() {
-        let ap = Case { name: "ap".into(), op: Op::Ap { op1: bytes("123C"), op2: bytes("001C") } };
+        let ap = Case { name: "ap".into(), op: Op::Ap { op1: bytes("123C"), op2: bytes("001C") }, assumptions: Vec::new() };
         assert_eq!(model(&ap), Outcome { result: bytes("124C"), cc: Some(2), interruption: None });
-        let dp = Case { name: "dp".into(), op: Op::Dp { op1: bytes("000012345C"), op2: bytes("0C") } };
+        let dp = Case { name: "dp".into(), op: Op::Dp { op1: bytes("000012345C"), op2: bytes("0C") }, assumptions: Vec::new() };
         assert_eq!(model(&dp).interruption, Some(0x0B));
         let one = edge_hfp(Precision::Short, false, 0x41, "1");
         let sum = hfp_case("s".into(), HfpInst::Aer, one.clone(), one.clone(), 0);
@@ -954,5 +1081,97 @@ mod tests {
         assert!(all.iter().filter(|c| c.name.starts_with("Aer-random")).count() == 40);
         let mem = image(&all);
         assert_eq!(mem.len(), (area_base(&all) + all.len() * AREA).next_multiple_of(4096));
+    }
+
+    #[test]
+    fn convert_from_fixed_encodes_as_load_rre_and_store() {
+        assert_eq!(hex(&rre(0xB3B4, 0, R2)), "B3B40002");
+        assert_eq!(hex(&lg(R2, R1, OFF_OP2)), "E32010200004");
+        let short32 = case_code(&Op::FromFixed { to: Precision::Short, from64: false, value: 1 }, 0x2000, 0x10000);
+        assert_eq!(hex(&short32), "C010000070005820104C042058201020B3B4000270001050B222003050301040D20310784010");
+        let extended64 = case_code(&Op::FromFixed { to: Precision::Extended, from64: true, value: 1 }, 0x2000, 0x10000);
+        assert!(hex(&extended64).contains("E32010200004B3C600026000105060201058"));
+        for (to, from64) in FROM_FIXED {
+            let case = from_fixed_case("x", to, from64, 0);
+            assert_eq!(result_at(&case.op), (OFF_RESULT, to.bytes()));
+            assert!(!sets_cc(&case.op));
+            assert_eq!(operands(&case.op).1.len(), if from64 { 8 } else { 4 });
+        }
+        assert_eq!(operands(&Op::FromFixed { to: Precision::Short, from64: false, value: -1 }).1, vec![0xFF; 4]);
+        assert_eq!(from_fixed_case("x", Precision::Long, true, 0).instruction(), "CDGR");
+    }
+
+    #[test]
+    fn convert_from_fixed_model_normalizes_and_truncates() {
+        let model_of = |to, from64, value| model(&from_fixed_case("x", to, from64, value));
+        assert_eq!(model_of(Precision::Short, false, 0), Outcome { result: bytes("00000000"), cc: None, interruption: None });
+        assert_eq!(model_of(Precision::Short, false, 1).result, bytes("41100000"));
+        assert_eq!(model_of(Precision::Short, false, -1).result, bytes("C1100000"));
+        assert_eq!(model_of(Precision::Short, false, 0x0FFF_FFFF).result, bytes("47FFFFFF"));
+        assert_eq!(model_of(Precision::Long, true, 0x0FFF_FFFF_FFFF_FFFF).result, bytes("4FFFFFFFFFFFFFFF"));
+        assert_eq!(model_of(Precision::Long, false, 0x0FFF_FFFF).result, bytes("47FFFFFFF0000000"));
+        assert_eq!(model_of(Precision::Short, true, i64::MIN).result, bytes("D0800000"));
+    }
+
+    #[test]
+    fn cases_carry_the_assumptions_their_instruction_evidences() {
+        let all = cases();
+        let extended_result = |c: &Case| matches!(c.op, Op::Hfp { inst: HfpInst::Axr | HfpInst::Sxr | HfpInst::Mxr | HfpInst::Mxdr, .. });
+        for c in &all {
+            let expected: &[&str] = match &c.op {
+                Op::FromFixed { .. } => &[HFP_FROM_FIXED_TRUNCATES],
+                _ if extended_result(c) => &[HFP_EXTENDED_LOW_HALF],
+                _ => &[],
+            };
+            assert_eq!(c.assumptions, expected, "{}", c.name);
+        }
+        assert_eq!(all.iter().filter(|c| c.assumptions == [HFP_EXTENDED_LOW_HALF]).count(), 4 * (HFP_EDGES.len() + 40));
+        assert_eq!(all.iter().filter(|c| c.assumptions == [HFP_FROM_FIXED_TRUNCATES]).count(), 6 * (9 + 40));
+        assert!(all.iter().any(|c| c.name == "Cxgr-sixteen-digits"));
+        let names: std::collections::BTreeSet<&str> = all.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names.len(), all.len(), "case names are unique");
+    }
+
+    fn agreeing(case: Case) -> (Case, Outcome, Outcome) {
+        let expected = model(&case);
+        (case, expected.clone(), expected)
+    }
+
+    fn tally_state(findings: &[Finding], id: &str) -> crate::State {
+        crate::tally(findings).assumptions().into_iter().find(|(a, _)| a.id == id).map(|(_, t)| t.state()).expect("a registered assumption")
+    }
+
+    #[test]
+    fn hercules_findings_settle_machine_claims_and_only_observe_compiler_ones() {
+        use crate::State;
+        let one = edge_hfp(Precision::Long, false, 0x41, "1");
+        let m1 = || hfp_case("Mxdr-one".into(), HfpInst::Mxdr, one.clone(), one.clone(), 0);
+        let held = findings(&[agreeing(m1())]);
+        assert_eq!(held.len(), 1);
+        assert_eq!(held[0].ran, Some(Oracle::Hercules));
+        assert_eq!(held[0].verdict, Verdict::Match);
+        assert_eq!(held[0].assumptions, [HFP_EXTENDED_LOW_HALF]);
+        assert_eq!(tally_state(&held, HFP_EXTENDED_LOW_HALF), State::Held);
+        assert_eq!(tally_state(&held, HFP_FROM_FIXED_TRUNCATES), State::Unmeasured);
+
+        let (case, mut seen, expected) = agreeing(m1());
+        seen.result[15] ^= 0xFF;
+        let broken = findings(&[(case, seen.clone(), expected.clone())]);
+        assert_eq!(broken[0].verdict, Verdict::Mismatch { expected: outcome_bytes(&expected), observed: outcome_bytes(&seen) });
+        assert_eq!(tally_state(&broken, HFP_EXTENDED_LOW_HALF), State::Broken);
+
+        let m2 = findings(&[agreeing(from_fixed_case("one", Precision::Short, false, 1))]);
+        assert_eq!(tally_state(&m2, HFP_FROM_FIXED_TRUNCATES), State::Held);
+
+        let mut compiler_claim = m1();
+        compiler_claim.assumptions = vec![numeric::assumptions::INTERMEDIATE_TABLE];
+        let observed = findings(&[agreeing(compiler_claim)]);
+        assert_eq!(tally_state(&observed, numeric::assumptions::INTERMEDIATE_TABLE), State::Observed);
+
+        let untagged = findings(&[agreeing(hfp_case("Adr-one".into(), HfpInst::Adr, one.clone(), one, 0))]);
+        let t = crate::tally(&untagged);
+        assert!(t.by_assumption.is_empty());
+        assert_eq!((t.matched, t.untagged), (1, 1));
+        assert_eq!(crate::tally(&held).untagged, 0);
     }
 }

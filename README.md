@@ -834,10 +834,12 @@ received are listed there and kept under `witness/`.
     cargo run -p ironwork-oracle -- hercules /tmp/herc   # needs hercules (4.9.1) on PATH
 
 This builds a bare-metal program that runs each of about two thousand cases once: PACK, UNPK, ZAP,
-AP, SP, MP, DP, CP, SRP, CVB, CVD, TP and the HFP add, subtract, multiply, divide, compare, halve
-and load-rounded instructions, on edge and random operands. Hercules runs it, and each result,
-condition code and program interruption is compared with `zarch`. Nothing from Hercules is copied
-into ironwork; it only runs.
+AP, SP, MP, DP, CP, SRP, CVB, CVD, TP and the HFP add, subtract, multiply, divide, compare, halve,
+load-rounded and convert-from-fixed instructions, on edge and random operands. Hercules runs it,
+and each result, condition code and program interruption is compared with `zarch`. Nothing from
+Hercules is copied into ironwork; it only runs. Each case carries the ids of the register's
+assumptions it evidences (M1 for the extended-result instructions, M2 for convert-from-fixed), and
+the run ends with the same assumption table `check` prints.
 
 Agreement is evidence, not proof: Hercules implements the same manual. Where the two disagree, the
 manual decides. On Hercules 4.9.1 every decimal case agrees. Two HFP instructions disagree, and in
