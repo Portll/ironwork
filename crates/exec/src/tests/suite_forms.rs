@@ -686,3 +686,58 @@ fn cobol_words_respells_and_frees_reserved_words() {
     assert_eq!(ids_under(COBOL_WORDS, EXTENDED).iter().filter(|i| *i == "IWX0155").count(), 3);
     assert_eq!(ids_under(COBOL_WORDS, &[]), ["IWS0001"]);
 }
+
+const EXTERNAL_LINAGE: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. LEXT.\n",
+    "       ENVIRONMENT DIVISION.\n",
+    "       INPUT-OUTPUT SECTION.\n",
+    "       FILE-CONTROL.\n",
+    "           SELECT PRT ASSIGN TO 'LEXTDD'.\n",
+    "       DATA DIVISION.\n",
+    "       FILE SECTION.\n",
+    "       FD PRT IS EXTERNAL LINAGE IS 3 LINES.\n",
+    "       01 PRT-REC PIC X(8).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           OPEN OUTPUT PRT\n",
+    "           MOVE 'ONE' TO PRT-REC\n",
+    "           WRITE PRT-REC\n",
+    "           CALL 'LEXTSUB'\n",
+    "           MOVE 'FOUR' TO PRT-REC\n",
+    "           WRITE PRT-REC\n",
+    "           CLOSE PRT\n",
+    "           GOBACK.\n",
+    "       END PROGRAM LEXT.\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. LEXTSUB.\n",
+    "       ENVIRONMENT DIVISION.\n",
+    "       INPUT-OUTPUT SECTION.\n",
+    "       FILE-CONTROL.\n",
+    "           SELECT PRT ASSIGN TO 'LEXTDD'.\n",
+    "       DATA DIVISION.\n",
+    "       FILE SECTION.\n",
+    "       FD PRT IS EXTERNAL LINAGE IS 3 LINES.\n",
+    "       01 PRT-REC PIC X(8).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE 'TWO' TO PRT-REC\n",
+    "           WRITE PRT-REC\n",
+    "           MOVE 'THREE' TO PRT-REC\n",
+    "           WRITE PRT-REC\n",
+    "           EXIT PROGRAM.\n",
+    "       END PROGRAM LEXTSUB.\n",
+);
+
+#[test]
+fn programs_write_one_external_linage_file_alike_on_both_executors() {
+    let dir = temp("external-linage");
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, executor) in [("interpreter", Executor::Interpreter), ("vm", Executor::Vm)] {
+        let file = dir.join(format!("{name}.txt"));
+        let _ = std::fs::remove_file(&file);
+        let o = Harness::source(EXTERNAL_LINAGE).flags(EXTENDED).dds(&[format!("LEXTDD={}:text", file.display())]).run(executor);
+        assert_eq!(o.ending.as_ref().ok(), Some(&Ending::Goback), "{name}: {}", o.err);
+        // cobc 3.2 writes the same four lines.
+        let written = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(written.lines().map(str::trim_end).filter(|l| !l.is_empty() && !l.contains('\u{c}')).collect::<Vec<_>>(), ["ONE", "TWO", "THREE", "FOUR"], "{name}");
+    }
+}

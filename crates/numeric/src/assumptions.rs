@@ -429,6 +429,7 @@ pub const STOP_RUN_STATUS: &str = "C523";
 pub const START_KEY_LENGTH: &str = "C524";
 pub const BOOLEAN_PICTURE: &str = "C525";
 pub const DEBUGGING_ON_ALL_LEFT_OUT: &str = "C526";
+pub const EXTERNAL_LINAGE: &str = "C527";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2867,6 +2868,13 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[U(OccursDepending)]],
+    },
+    Assumption {
+        id: EXTERNAL_LINAGE,
+        claim: "A file that is EXTERNAL and has a LINAGE clause keeps one logical page for the run unit, whichever program writes it, and each program that declares it has its own LINAGE-COUNTER, which a WRITE by that program sets from the page. cobc 3.2 keeps a page for each program; the lines written are the same",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[S(FileIo)]],
     },
     Assumption {
         id: DEBUGGING_ON_ALL_LEFT_OUT,

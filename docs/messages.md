@@ -681,7 +681,6 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWR0013 | S | `ADVANCING {mnemonic}: stacker selection ({environment}) on a card punch is not supported yet` |
 | IWR0014 | S | `WRITE ... ADVANCING {mnemonic} on {file}, whose FD has LINAGE, is not supported yet` |
 | IWR0015 | S | `{item}: INDEXED BY in a GLOBAL record, in a program that contains others, is not supported yet` |
-| IWR0016 | S | `FD {file}: LINAGE on an EXTERNAL file is not supported yet` |
 | IWR0017 | S | `FD {file}: REPORT on an EXTERNAL file is not supported yet` |
 | IWR0018 | S | `FD {file}: LINAGE or REPORT on a GLOBAL file, in a program that contains others, is not supported yet` |
 | IWR0019 | S | `{item}: a GLOBAL record of FD {file}, which is not GLOBAL, in a program that contains others, is not supported yet` |

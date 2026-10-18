@@ -70,9 +70,6 @@ pub(crate) fn rules(program: &Program, extended: bool, errors: &mut Vec<Error>) 
                 syntax::messages::IWC0198.at(f.pos, format!("FD {}: a record of an EXTERNAL or GLOBAL file needs a data-name, not FILLER", f.name))
             });
         }
-        if f.external && f.linage.is_some() {
-            errors.push(syntax::messages::IWR0016.at(f.pos, format!("FD {}: LINAGE on an EXTERNAL file is not supported yet", f.name)));
-        }
         if f.external && !f.reports.is_empty() {
             errors.push(syntax::messages::IWR0017.at(f.pos, format!("FD {}: REPORT on an EXTERNAL file is not supported yet", f.name)));
         }

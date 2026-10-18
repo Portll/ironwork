@@ -707,7 +707,7 @@ catalogue! {
     IWR0013 Severe "ADVANCING {mnemonic}: stacker selection ({environment}) on a card punch is not supported yet";
     IWR0014 Severe "WRITE ... ADVANCING {mnemonic} on {file}, whose FD has LINAGE, is not supported yet";
     IWR0015 Severe "{item}: INDEXED BY in a GLOBAL record, in a program that contains others, is not supported yet";
-    IWR0016 Severe "FD {file}: LINAGE on an EXTERNAL file is not supported yet";
+    // IWR0016 is not given to another message: releases up to 0.9.0 used it to refuse LINAGE on an EXTERNAL file.
     IWR0017 Severe "FD {file}: REPORT on an EXTERNAL file is not supported yet";
     IWR0018 Severe "FD {file}: LINAGE or REPORT on a GLOBAL file, in a program that contains others, is not supported yet";
     IWR0019 Severe "{item}: a GLOBAL record of FD {file}, which is not GLOBAL, in a program that contains others, is not supported yet";
