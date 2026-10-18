@@ -143,3 +143,110 @@ fn highest_and_lowest_algebraic_give_the_description_s_limits() {
     assert!(ids_under(ALGEBRAIC, &[]).iter().any(|i| i == "IWC0343"));
     assert_eq!(ids_under(ALGEBRAIC, EXTENDED).iter().filter(|i| *i == "IWX0116").count(), 12);
 }
+
+fn under(body: &str) -> String {
+    format!("       IDENTIFICATION DIVISION.\n       PROGRAM-ID. T.\n{body}")
+}
+
+#[test]
+fn a_boolean_picture_is_one_byte_a_position() {
+    let source = under(concat!(
+        "       DATA DIVISION.\n",
+        "       WORKING-STORAGE SECTION.\n",
+        "       01 WS-A PIC A(4) VALUE 'ABCD'.\n",
+        "       01 WS-B PIC 1(3).\n",
+        "       01 WS-C PIC 1 VALUE 1.\n",
+        "       PROCEDURE DIVISION.\n",
+        "           MOVE WS-A(1:2) TO WS-B.\n",
+        "           MOVE '10' TO WS-B\n",
+        "           DISPLAY '[' WS-B '][' WS-C ']' FUNCTION LENGTH(WS-B)\n",
+        "           GOBACK.\n",
+    ));
+    // cobc 3.2's output.
+    runs(&source, EXTENDED, "[010][1]3\n");
+    assert_eq!(ids_under(&source, &[]), ["IWC0261"]);
+}
+
+#[test]
+fn display_may_name_its_device_after_no_advancing() {
+    let source = under(concat!(
+        "       PROCEDURE DIVISION.\n",
+        "           DISPLAY 'A' WITH NO ADVANCING UPON SYSOUT\n",
+        "           DISPLAY 'B' UPON SYSOUT\n",
+        "           GOBACK.\n",
+    ));
+    runs(&source, EXTENDED, "AB\n");
+    assert!(ids_under(&source, EXTENDED).contains(&"IWX0117".to_owned()));
+    assert_eq!(ids_under(&source, &[]), ["IWS0001"]);
+}
+
+#[test]
+fn a_filler_record_of_an_external_file_is_read_under_extended() {
+    let source = under(concat!(
+        "       ENVIRONMENT DIVISION.\n",
+        "       INPUT-OUTPUT SECTION.\n",
+        "       FILE-CONTROL.\n",
+        "           SELECT F ASSIGN TO 'suite-filler.dat'.\n",
+        "       DATA DIVISION.\n",
+        "       FILE SECTION.\n",
+        "       FD F IS EXTERNAL.\n",
+        "       01 FILLER PIC X(10).\n",
+        "       PROCEDURE DIVISION.\n",
+        "           DISPLAY 'OK'\n",
+        "           GOBACK.\n",
+    ));
+    runs(&source, EXTENDED, "OK\n");
+    assert_eq!(ids_under(&source, EXTENDED), ["IWX0119"]);
+    assert_eq!(ids_under(&source, &[]), ["IWC0198"]);
+}
+
+#[test]
+fn an_alphabet_for_national_is_left_out_under_extended() {
+    let source = under(concat!(
+        "       ENVIRONMENT DIVISION.\n",
+        "       CONFIGURATION SECTION.\n",
+        "       SPECIAL-NAMES.\n",
+        "           ALPHABET UNI FOR NATIONAL IS UCS-4.\n",
+        "       PROCEDURE DIVISION.\n",
+        "           DISPLAY 'OK'\n",
+        "           GOBACK.\n",
+    ));
+    runs(&source, EXTENDED, "OK\n");
+    assert_eq!(ids_under(&source, EXTENDED), ["IWX0140"]);
+    assert_eq!(ids_under(&source, &[]), ["IWS0001"]);
+}
+
+#[test]
+fn a_sort_collating_sequence_may_name_a_code_set() {
+    let source = under(concat!(
+        "       DATA DIVISION.\n",
+        "       WORKING-STORAGE SECTION.\n",
+        "       01 Z PIC X(10) VALUE 'd4b2e1a3c5'.\n",
+        "       01 G.\n",
+        "          02 TBL OCCURS 10.\n",
+        "             03 X PIC X.\n",
+        "       PROCEDURE DIVISION.\n",
+        "           MOVE Z TO G\n",
+        "           SORT TBL ASCENDING KEY X SEQUENCE EBCDIC\n",
+        "           DISPLAY G\n",
+        "           GOBACK.\n",
+    ));
+    runs(&source, EXTENDED, "abcde12345\n");
+    assert!(ids_under(&source, EXTENDED).contains(&"IWX0141".to_owned()));
+    assert!(ids_under(&source, &[]).contains(&"IWC0204".to_owned()));
+}
+
+#[test]
+fn system_offset_is_zero_in_the_formatted_functions() {
+    let source = under(concat!(
+        "       DATA DIVISION.\n",
+        "       WORKING-STORAGE SECTION.\n",
+        "       01 STR PIC X(30).\n",
+        "       PROCEDURE DIVISION.\n",
+        "           MOVE FUNCTION FORMATTED-TIME('hhmmss+hhmm', 45296, SYSTEM-OFFSET) TO STR\n",
+        "           DISPLAY STR\n",
+        "           GOBACK.\n",
+    ));
+    runs(&source, EXTENDED, "123456+0000                   \n");
+    assert!(ids_under(&source, EXTENDED).contains(&"IWX0142".to_owned()));
+}

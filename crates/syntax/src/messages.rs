@@ -964,8 +964,14 @@ catalogue! {
     IWX0114 Warning "TYPEDEF STRONG (COBOL 2002; cobc 3.2 does not implement it and reads the type as weak): the type is read as weak, so no move or comparison is refused for its type";
     IWX0115 Warning "EXTERNAL AS \"{name}\" (GnuCOBOL; Enterprise COBOL shares an EXTERNAL record under its data-name): the record is shared under that name";
     IWX0116 Warning "FUNCTION {name} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such function): the largest or smallest value the argument's description allows";
+    IWX0117 Warning "DISPLAY ... WITH NO ADVANCING UPON (GnuCOBOL; Enterprise COBOL takes UPON before WITH NO ADVANCING): the device is read as if UPON came first";
+    IWX0118 Warning "PICTURE {text} (GnuCOBOL's boolean item; Enterprise COBOL has no such PICTURE symbol): one byte a position, held as the numeric PICTURE {alphanumeric}";
+    IWX0119 Warning "FD {file}: a FILLER record of an EXTERNAL or GLOBAL file (GnuCOBOL; Enterprise COBOL needs a data-name): the record is read, and no program can name it";
     IWX0120 Warning "ANY NUMERIC (GnuCOBOL; Enterprise COBOL's parameters have the class their entries give): {name} takes the class, digits, scale, sign and usage of the argument each CALL passes for it, and is read, never written";
     IWX0130 Warning "{PICTURE or literal} (GnuCOBOL; Enterprise COBOL allows 31 digits under ARITH(EXTEND), GnuCOBOL 38): the program is compiled with arithmetic as cobc does it, keeping up to 76 digits of an intermediate result";
+    IWX0140 Warning "ALPHABET {name} FOR NATIONAL (GnuCOBOL reads it and does not implement it; Enterprise COBOL has no national collating sequence): the alphabet is left out";
+    IWX0141 Warning "COLLATING SEQUENCE {name} (GnuCOBOL's code-name; Enterprise COBOL names an alphabet of SPECIAL-NAMES): the sequence is {name} unless SPECIAL-NAMES defines an alphabet of that name";
+    IWX0142 Warning "SYSTEM-OFFSET (GnuCOBOL's offset of the local time from UTC; Enterprise COBOL has no such argument): the run's clock is UTC, so it is 0";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

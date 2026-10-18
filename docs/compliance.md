@@ -1599,6 +1599,48 @@ which is the container's minimum (-32768). A trailing P counts among the nines a
 value again: `PIC 99PP` gives 999900, which is cobc 3.2's value (assumption C504). Strict refuses the
 function (IWC0343-S).
 
+### IWX0117-W DISPLAY ... WITH NO ADVANCING UPON
+
+`IWX0117-W DISPLAY ... WITH NO ADVANCING UPON (GnuCOBOL; Enterprise COBOL takes UPON before WITH NO
+ADVANCING): the device is read as if UPON came first`, at UPON.
+
+Strict refuses UPON after WITH NO ADVANCING as a syntax error, as before.
+
+### IWX0118-W A boolean PICTURE
+
+`IWX0118-W PICTURE {text} (GnuCOBOL's boolean item; Enterprise COBOL has no such PICTURE symbol): one
+byte a position, held as the numeric PICTURE {alphanumeric}`, at the PICTURE.
+
+`PIC 1(n)` without USAGE BIT is read as `PIC 9(n)`, which is how cobc 3.2 holds it: a MOVE of an
+alphanumeric value stores its leading characters, space-filled, as an elementary numeric DISPLAY
+item takes them. Strict refuses the symbol (IWC0261-S). USAGE BIT stays refused.
+
+### IWX0119-W A FILLER record of an EXTERNAL or GLOBAL file
+
+`IWX0119-W FD {file}: a FILLER record of an EXTERNAL or GLOBAL file (GnuCOBOL; Enterprise COBOL needs a
+data-name): the record is read, and no program can name it`, at the FD. Strict refuses it
+(IWC0198-S).
+
+### IWX0140-W ALPHABET FOR NATIONAL
+
+`IWX0140-W ALPHABET {name} FOR NATIONAL (GnuCOBOL reads it and does not implement it; Enterprise COBOL has
+no national collating sequence): the alphabet is left out`, at NATIONAL. Strict refuses it as before.
+
+### IWX0141-W A code-name as a SORT collating sequence
+
+`IWX0141-W COLLATING SEQUENCE {name} (GnuCOBOL's code-name; Enterprise COBOL names an alphabet of
+SPECIAL-NAMES): the sequence is {name} unless SPECIAL-NAMES defines an alphabet of that name`, at the name.
+
+EBCDIC, ASCII (STANDARD-1) and NATIVE name their sequences without a SPECIAL-NAMES entry (assumption
+C506). Strict refuses the name as IWC0204-S.
+
+### IWX0142-W SYSTEM-OFFSET
+
+`IWX0142-W SYSTEM-OFFSET (GnuCOBOL's offset of the local time from UTC; Enterprise COBOL has no such
+argument): the run's clock is UTC, so it is 0`, at the argument.
+
+cobc 3.2 gives the host's offset (+1100 on a host in Sydney); ironwork's clock is UTC (assumption C505).
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

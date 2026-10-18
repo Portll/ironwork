@@ -377,7 +377,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     if whole && program.oo.as_deref().and_then(Oo::method).is_none() {
         program.initial |= options.initial;
     }
-    scope::rules(&program, &mut errors);
+    scope::rules(&program, options.compliance != numeric::Compliance::Strict, &mut errors);
     if whole {
         program_names(&program, &options, &mut errors);
     }

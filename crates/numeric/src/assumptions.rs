@@ -417,6 +417,8 @@ pub const WIDE_ARITHMETIC: &str = "C515";
 pub const WIDE_FUNCTIONS: &str = "C516";
 pub const TYPEDEF_STRONG_WEAK: &str = "C503";
 pub const ALGEBRAIC_LIMITS: &str = "C504";
+pub const SYSTEM_OFFSET_UTC: &str = "C505";
+pub const CODE_NAME_SEQUENCES: &str = "C506";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2855,6 +2857,20 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[U(OccursDepending)]],
+    },
+    Assumption {
+        id: CODE_NAME_SEQUENCES,
+        claim: "A SORT's COLLATING SEQUENCE EBCDIC, ASCII or NATIVE names the sequence of that name, as GnuCOBOL's code-names do, under --compliance extended, unless SPECIAL-NAMES defines an alphabet of that name; ASCII is STANDARD-1",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended)]],
+    },
+    Assumption {
+        id: SYSTEM_OFFSET_UTC,
+        claim: "SYSTEM-OFFSET, GnuCOBOL's argument of the FORMATTED functions for the local time's offset from UTC, read under --compliance extended, is 0: the run's clock is UTC, as CURRENT-DATE's offset is",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended)]],
     },
     Assumption {
         id: ALGEBRAIC_LIMITS,

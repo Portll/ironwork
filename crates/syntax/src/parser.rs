@@ -483,6 +483,9 @@ struct Parser<'a> {
     typedefs: Vec<(String, Vec<DataEntry>)>,
     /// The names of the TYPEDEF entries read so far, including those whose entries are not yet read.
     typedef_names: Vec<String>,
+    /// The collating sequences EBCDIC, ASCII and NATIVE that a SORT's COLLATING SEQUENCE named
+    /// as GnuCOBOL's code-names, to join the program's alphabets.
+    code_names: Vec<(String, Alphabet)>,
     /// What the data entry just read said of types: TYPEDEF, and the type its TYPE clause names.
     entry_type: (bool, Option<String>),
 }
@@ -533,6 +536,7 @@ impl<'a> Parser<'a> {
             unstored: Vec::new(),
             typedefs: Vec::new(),
             typedef_names: Vec::new(),
+            code_names: Vec::new(),
             entry_type: (false, None),
         }
     }
@@ -867,6 +871,11 @@ impl Parser<'_> {
                 self.at += 1;
             }
             self.accept(&Tok::Period);
+        }
+        for (name, alphabet) in std::mem::take(&mut self.code_names) {
+            if !environment.alphabets.iter().any(|(n, _)| *n == name) {
+                environment.alphabets.push((name, alphabet));
+            }
         }
         out.push(Program {
             id,
@@ -1664,6 +1673,18 @@ impl Parser<'_> {
         block
     }
 
+    /// DISPLAY's UPON mnemonic-name, where written.
+    fn display_upon(&mut self) -> R<Option<Upon>> {
+        if !self.accept_word("UPON") {
+            return Ok(None);
+        }
+        let name = self.name("a mnemonic name")?;
+        let device = self.mnemonics.iter().find(|(m, _)| *m == name).map_or_else(|| name.clone(), |(_, e)| e.clone());
+        // GnuCOBOL's STDERR is the device SYSERR names.
+        let device = if self.extended && device == "STDERR" { "SYSERR".to_owned() } else { device };
+        Ok(Some(Upon { name, device }))
+    }
+
     fn data_entries(&mut self) -> R<Vec<DataEntry>> {
         let mut entries = Vec::new();
         let mut types = Vec::new();
@@ -1896,7 +1917,17 @@ impl Parser<'_> {
             }
             let clause = self.name("a data description clause or a period")?;
             match clause.as_str() {
-                "PIC" | "PICTURE" => e.picture = Some(self.picture()?),
+                "PIC" | "PICTURE" => {
+                    let at = self.pos();
+                    let text = self.picture()?;
+                    e.picture = Some(match boolean_picture(&text) {
+                        Some(alphanumeric) if self.extended => {
+                            self.messages.push(crate::messages::IWX0118.at(at, format!("PICTURE {text} (GnuCOBOL's boolean item; Enterprise COBOL has no such PICTURE symbol): one byte a position, held as the numeric PICTURE {alphanumeric}")));
+                            alphanumeric
+                        }
+                        _ => text,
+                    });
+                }
                 "USAGE" => {
                     self.accept_word("IS");
                     let w = self.name("a usage")?;
@@ -2699,15 +2730,7 @@ impl Parser<'_> {
                         screen = Some(self.screen_phrases(None)?.unwrap_or_else(|| Box::new(ScreenPhrases { pos, ..ScreenPhrases::default() })));
                     }
                 }
-                let mut upon = if self.accept_word("UPON") {
-                    let name = self.name("a mnemonic name")?;
-                    let device = self.mnemonics.iter().find(|(m, _)| *m == name).map_or_else(|| name.clone(), |(_, e)| e.clone());
-                    // GnuCOBOL's STDERR is the device SYSERR names.
-                    let device = if self.extended && device == "STDERR" { "SYSERR".to_owned() } else { device };
-                    Some(Upon { name, device })
-                } else {
-                    None
-                };
+                let mut upon = self.display_upon()?;
                 if upon.as_ref().is_some_and(|u| CRT_DEVICES.contains(&u.device.as_str())) {
                     upon = None;
                     screen.get_or_insert_with(|| Box::new(ScreenPhrases { pos, ..ScreenPhrases::default() }));
@@ -2718,7 +2741,15 @@ impl Parser<'_> {
                     self.expect_word("NO")?;
                     self.expect_word("ADVANCING")?;
                     if self.is_word("UPON") {
-                        return Err(self.error("the end of DISPLAY: Enterprise COBOL takes UPON before WITH NO ADVANCING"));
+                        if !self.extended || upon.is_some() {
+                            return Err(self.error("the end of DISPLAY: Enterprise COBOL takes UPON before WITH NO ADVANCING"));
+                        }
+                        self.messages.push(crate::messages::IWX0117.at(self.pos(), "DISPLAY ... WITH NO ADVANCING UPON (GnuCOBOL; Enterprise COBOL takes UPON before WITH NO ADVANCING): the device is read as if UPON came first"));
+                        upon = self.display_upon()?;
+                        if upon.as_ref().is_some_and(|u| CRT_DEVICES.contains(&u.device.as_str())) {
+                            upon = None;
+                            screen.get_or_insert_with(|| Box::new(ScreenPhrases { pos, ..ScreenPhrases::default() }));
+                        }
                     }
                 }
                 self.unreserved_terminator("END-DISPLAY", "DISPLAY");
@@ -4416,6 +4447,12 @@ impl Parser<'_> {
                     modifier = Some(m);
                     continue;
                 }
+                if self.extended && self.is_word("SYSTEM-OFFSET") && matches!(name.as_str(), "FORMATTED-DATETIME" | "FORMATTED-TIME" | "FORMATTED-CURRENT-DATE" | "COMBINED-DATETIME") {
+                    self.messages.push(crate::messages::IWX0142.at(self.pos(), "SYSTEM-OFFSET (GnuCOBOL's offset of the local time from UTC; Enterprise COBOL has no such argument): the run's clock is UTC, so it is 0"));
+                    self.at += 1;
+                    args.push(Expr::Operand(Operand::Literal(Literal::Number("0".into()))));
+                    continue;
+                }
                 if self.all_subscript_ahead() {
                     let (table, all) = self.table_with_all()?;
                     all_subscripts.push((args.len(), all));
@@ -4960,6 +4997,17 @@ const SELECT_CLAUSES: &[&str] = &[
 const FD_WORDS: &[&str] = &[
     "RECORDING", "RECORD", "BLOCK", "LABEL", "DATA", "VALUE", "CODE-SET", "LINAGE", "REPORT", "REPORTS", "IS", "EXTERNAL", "GLOBAL", "STYLE",
 ];
+
+/// The numeric PICTURE a boolean one, such as `1(5)`, is held as: cobc 3.2 gives a boolean
+/// item without USAGE BIT one byte a position.
+fn boolean_picture(text: &str) -> Option<String> {
+    let rest = text.strip_prefix('1')?;
+    let count = match rest {
+        "" => 1,
+        _ => rest.strip_prefix('(')?.strip_suffix(')')?.parse::<u32>().ok().filter(|n| *n > 0)?,
+    };
+    Some(format!("9({count})"))
+}
 
 fn is_clause_word(w: &str) -> bool {
     matches!(

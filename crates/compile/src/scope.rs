@@ -19,7 +19,7 @@ pub(crate) struct Inherited {
 }
 
 /// The rules for EXTERNAL and GLOBAL in a program's own DATA DIVISION.
-pub(crate) fn rules(program: &Program, errors: &mut Vec<Error>) {
+pub(crate) fn rules(program: &Program, extended: bool, errors: &mut Vec<Error>) {
     let contains = !program.nested.is_empty();
     let sections: [(&str, &[DataEntry]); 3] = [("WORKING-STORAGE", &program.working_storage), ("LOCAL-STORAGE", &program.local_storage), ("LINKAGE", &program.linkage)];
     let mut externals: Vec<&str> = Vec::new();
@@ -64,7 +64,11 @@ pub(crate) fn rules(program: &Program, errors: &mut Vec<Error>) {
     }
     for f in &program.files {
         if (f.external || f.global) && f.records.iter().any(|e| e.level == 1 && e.name.is_none()) {
-            errors.push(syntax::messages::IWC0198.at(f.pos, format!("FD {}: a record of an EXTERNAL or GLOBAL file needs a data-name, not FILLER", f.name)));
+            errors.push(if extended {
+                syntax::messages::IWX0119.at(f.pos, format!("FD {}: a FILLER record of an EXTERNAL or GLOBAL file (GnuCOBOL; Enterprise COBOL needs a data-name): the record is read, and no program can name it", f.name))
+            } else {
+                syntax::messages::IWC0198.at(f.pos, format!("FD {}: a record of an EXTERNAL or GLOBAL file needs a data-name, not FILLER", f.name))
+            });
         }
         if f.external && f.linage.is_some() {
             errors.push(syntax::messages::IWR0016.at(f.pos, format!("FD {}: LINAGE on an EXTERNAL file is not supported yet", f.name)));

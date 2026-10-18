@@ -38,7 +38,7 @@ impl Parser<'_> {
         if self.accept_word("ALPHABET") {
             let name = self.name("an alphabet-name")?;
             if self.accept_word("FOR") {
-                if self.loose && self.is_word("NATIONAL") {
+                if self.extended && self.is_word("NATIONAL") {
                     self.national_alphabet_left_out(&name)?;
                     return Ok(true);
                 }
@@ -76,8 +76,9 @@ impl Parser<'_> {
         Ok(true)
     }
 
-    /// Under `--compliance loose`, the national alphabet of ALPHABET `name` FOR, at NATIONAL, read
-    /// and left out with IWX0065-W: ironwork has no national collating sequence.
+    /// Under `--compliance extended`, the national alphabet of ALPHABET `name` FOR, at NATIONAL, read
+    /// and left out with IWX0140-W (IWX0065-W under loose): ironwork has no national collating
+    /// sequence, and cobc 3.2 reads the clause and does not implement it.
     fn national_alphabet_left_out(&mut self, name: &str) -> R<()> {
         let refusal = self.error(ALPHABETS);
         self.at += 1;
@@ -87,7 +88,11 @@ impl Parser<'_> {
         } else {
             self.alphabet_entries()?;
         }
-        self.messages.push(crate::messages::IWX0065.at(refusal.pos, format!("{} (--compliance loose): ALPHABET {name} FOR NATIONAL is left out", refusal.labelled())));
+        self.messages.push(if self.loose {
+            crate::messages::IWX0065.at(refusal.pos, format!("{} (--compliance loose): ALPHABET {name} FOR NATIONAL is left out", refusal.labelled()))
+        } else {
+            crate::messages::IWX0140.at(refusal.pos, format!("ALPHABET {name} FOR NATIONAL (GnuCOBOL reads it and does not implement it; Enterprise COBOL has no national collating sequence): the alphabet is left out"))
+        });
         Ok(())
     }
 
@@ -180,7 +185,19 @@ impl Parser<'_> {
         if self.accept_word("COLLATING") || self.is_word("SEQUENCE") {
             self.expect_word("SEQUENCE")?;
             self.accept_word("IS");
-            collating = Some(self.name("an alphabet-name")?);
+            let at = self.pos();
+            let name = self.name("an alphabet-name")?;
+            let code = match name.as_str() {
+                "EBCDIC" => Some(Alphabet::Ebcdic),
+                "ASCII" => Some(Alphabet::Standard1),
+                "NATIVE" => Some(Alphabet::Native),
+                _ => None,
+            };
+            if let Some(alphabet) = code.filter(|_| self.extended) {
+                self.messages.push(crate::messages::IWX0141.at(at, format!("COLLATING SEQUENCE {name} (GnuCOBOL's code-name; Enterprise COBOL names an alphabet of SPECIAL-NAMES): the sequence is {name} unless SPECIAL-NAMES defines an alphabet of that name")));
+                self.code_names.push((name.clone(), alphabet));
+            }
+            collating = Some(name);
         }
         let input = if self.accept_word("USING") {
             Some(SortIo::Files(self.sort_files("USING")?))

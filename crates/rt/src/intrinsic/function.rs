@@ -937,6 +937,8 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             let written = text_of(facts, &args[0], name, pos)?;
             let format = format_argument(facts, &args[0], name, pos)?;
             let value = text_of(facts, &args[1], name, pos)?;
+            // cobc reads a value padded with spaces beyond the format as the value alone.
+            let value = if name == "TEST-FORMATTED-DATETIME" && facts.options().emulates_cobc() { value.trim_end_matches(' ').to_owned() } else { value };
             match name {
                 "TEST-FORMATTED-DATETIME" => Ok(integer(format.read(&value, IntDate::Ansi).err().unwrap_or(0) as i128, 9)),
                 "INTEGER-OF-FORMATTED-DATE" => {
