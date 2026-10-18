@@ -79,6 +79,10 @@ impl<'p> Evaluator for Call<'_, 'p, '_, '_, '_> {
         self.machine.unit.argument_length_of(self.machine.me, position)
     }
 
+    fn argument_field(&mut self, position: usize) -> Option<(rt::storage::Kind, Vec<u8>)> {
+        self.machine.unit.argument_field(self.machine.me, position)
+    }
+
     fn argument_count(&mut self) -> usize {
         self.machine.unit.argument_count_of(self.machine.me)
     }

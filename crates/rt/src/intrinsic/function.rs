@@ -2,6 +2,7 @@
 //! value, and reference modification of the result. The executor evaluates the arguments, as a
 //! comparison evaluates an operand or expression, and ALL subscripts.
 
+use super::any_numeric;
 use super::numval::{self, Form};
 use super::real::Real;
 use super::{dates, datetime, math, text, unicode};
@@ -10,7 +11,7 @@ use crate::calendar::{SECONDS_PER_DAY, civil};
 use crate::display::utf16_text;
 use crate::fixed::{align, compare_fixed};
 use crate::lir::TrimSide;
-use crate::storage::Val;
+use crate::storage::{Kind, Val};
 use crate::store::{ProgramFacts, compare_national};
 use crate::vocab::{Figurative, Pos};
 use numeric::precision::{Fixed, Places};
@@ -47,6 +48,8 @@ pub trait Evaluator {
     /// The length of the argument in USING position `position`, from 1, of the running
     /// activation: 0 for one omitted or not passed, and in the main program.
     fn argument_length(&mut self, position: usize) -> usize;
+    /// The field the argument in USING position `position` is, with its bytes as they are now.
+    fn argument_field(&mut self, position: usize) -> Option<(Kind, Vec<u8>)>;
     /// The number of arguments the running activation's caller passed; in the main program, the
     /// number of the run's arguments.
     fn argument_count(&mut self) -> usize;
@@ -985,6 +988,11 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
         "CRT STATUS" => {
             arity(0..=0, args)?;
             Ok(Val::Num(Fixed::new(i128::from(x.crt_status()), Places::new(4, 0))))
+        }
+        "ARGUMENT NUMERIC" | "ARGUMENT NUMERIC CLASS" | "ARGUMENT NUMERIC DISPLAY" => {
+            arity(1..=1, args)?;
+            let position = usize::try_from(whole(&args[0], name, pos)?).unwrap_or_default();
+            any_numeric::evaluate(facts, name, x.argument_field(position), pos)
         }
         "CALL PARAMETERS" => {
             arity(0..=0, args)?;

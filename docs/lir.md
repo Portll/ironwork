@@ -1233,9 +1233,10 @@ unit.rs:150-171 (f2)), except under `--dialect gnucobol`, where it enters the on
   anything else, BY CONTENT or BY REFERENCE of a literal, LENGTH OF or ADDRESS OF, a copy. A
   `Content` literal's bytes are made at lowering as `content_argument` makes them: alphanumeric
   and hexadecimal bytes, national UTF-16 units, an ALL literal's bytes once, a figurative constant
-  as the collating sequence's one byte, and a number as unsigned zoned digits, as many as the
-  literal has, the last with a minus zone when it is negative. `Content(Value(o))` is LENGTH OF as
-  a binary fullword or ADDRESS OF as its four bytes.
+  as the collating sequence's one byte. `Content(Value(o))` is a number as unsigned zoned digits,
+  as many as the literal has, the last with a minus zone when it is negative, so that the call
+  knows the argument is a number (an ANY NUMERIC parameter reads it as cobc's field, C511);
+  LENGTH OF as a binary fullword; or ADDRESS OF as its four bytes.
 - **Through a pointer** (machine/oo.rs:563-672 (f2)) every argument is `Value` or `Omitted`: the JNI
   service takes each operand's value as it reads, OMITTED as NULL, whatever BY phrase is written.
   No depth is counted, ON EXCEPTION never runs, and `returning` receives the service's result.
@@ -1860,6 +1861,10 @@ functions! {
     CrtStatus = 89, "CRT STATUS", 0..=0;
     Substitute = 90, "SUBSTITUTE", 3..=usize::MAX;
     SubstituteCase = 91, "SUBSTITUTE-CASE", 3..=usize::MAX;
+    CallParameters = 92, "CALL PARAMETERS", 0..=0;
+    ArgumentNumeric = 93, "ARGUMENT NUMERIC", 1..=1;
+    ArgumentNumericClass = 94, "ARGUMENT NUMERIC CLASS", 1..=1;
+    ArgumentNumericDisplay = 95, "ARGUMENT NUMERIC DISPLAY", 1..=1;
 }
 ```
 
@@ -1872,7 +1877,11 @@ No source can name the rest: 83 ARGUMENT LENGTH, the length of the argument in a
 which compile's ANY LENGTH rewrite moves into a parameter's count as the procedure starts; 85 and
 86, ALLOCATE's and FREE's heap storage, the address of the bytes obtained and NULL once a block is
 released, which the parser's SET statements for ALLOCATE and FREE take; 88 CHAINING's argument in a
-position or the item's own bytes; and 89 the last screen key's CRT STATUS code.
+position or the item's own bytes; 89 the last screen key's CRT STATUS code; 92 the number of arguments
+the running program was called with; and 93 to 95 the value, the class test NUMERIC (1 or 0) and the
+DISPLAY text of the argument in a USING position, which compile's ANY NUMERIC rewrite makes of the
+parameter's uses (C510). Each reads the field the CALL passed, with the bytes as they are when it
+runs (`RunUnit::argument_field`).
 Every function the walker runs has a row.
 
 - **The walker's order** (machine.rs `function`): every argument by `expr_value`, which is

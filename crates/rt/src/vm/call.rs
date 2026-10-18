@@ -121,9 +121,9 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let mark = self.unit.mem.len();
         let mut addresses = std::mem::take(&mut self.spare.addresses);
         addresses.clear();
-        let mut lengths = std::mem::take(&mut self.spare.lengths);
-        lengths.clear();
-        let filled = callee::addresses_into(self, &plan.args, pos, &mut addresses, &mut lengths);
+        let mut passed = std::mem::take(&mut self.spare.passed);
+        passed.clear();
+        let filled = callee::addresses_into(self, &plan.args, pos, &mut addresses, &mut passed);
         self.settle(filled)?;
         self.parmcheck_set();
         let program = &lowered.program;
@@ -131,7 +131,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let by = By::Call { initial: program.initial };
         // A CALL with RETURNING does not set RETURN-CODE (Language Reference, CALL statement); cobc's does.
         let kept = plan.returning.filter(|_| !self.p.options.options.emulates_cobc()).map(|_| self.unit.kept_return_code());
-        let (ending, returned) = callee::run(self, &Callee { index, by, mark: Some(mark), pos, lengths: &lengths }, |caller| {
+        let (ending, returned) = callee::run(self, &Callee { index, by, mark: Some(mark), pos, passed: &passed }, |caller| {
             check_storage(lowered)?;
             let (base, fresh) = caller.unit.activate(index, program.initial);
             let stopped = match lowered.whole {
@@ -195,7 +195,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         }
         self.parmcheck_test(plan, &addresses, |unit| unit.programs[index].name.clone(), pos)?;
         self.spare.addresses = addresses;
-        self.spare.lengths = lengths;
+        self.spare.passed = passed;
         // A program with no RETURNING phrase gives its RETURN-CODE, compiled for GnuCOBOL (C491).
         let returned = returned.or_else(|| self.p.options.options.emulates_cobc().then(|| self.unit.return_code_value(true)));
         if let Some(kept) = kept {

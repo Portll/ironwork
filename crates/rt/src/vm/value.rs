@@ -542,6 +542,10 @@ impl<'p, L: Loader<Rc<Code>>> Evaluator for Call<'_, 'p, '_, '_, L> {
         self.vm.unit.argument_length_of(self.vm.me, position)
     }
 
+    fn argument_field(&mut self, position: usize) -> Option<(Kind, Vec<u8>)> {
+        self.vm.unit.argument_field(self.vm.me, position)
+    }
+
     fn argument_count(&mut self) -> usize {
         self.vm.unit.argument_count_of(self.vm.me)
     }
@@ -616,6 +620,9 @@ mod tests {
             String::new()
         }
         fn caller(&mut self) -> Option<String> {
+            None
+        }
+        fn argument_field(&mut self, _: usize) -> Option<(Kind, Vec<u8>)> {
             None
         }
         fn argument_length(&mut self, _: usize) -> usize {

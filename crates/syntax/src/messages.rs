@@ -373,6 +373,7 @@ catalogue! {
     IWC0326 Severe "CALL STATIC: GnuCOBOL's call convention, not Enterprise COBOL's; --compliance extended reads it";
     IWC0327 Severe "CALL ... GIVING: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's, which writes RETURNING; --compliance extended reads it";
     IWC0340 Severe "{name}: a table with no upper bound, OCCURS ... TO UNBOUNDED, is described in the LINKAGE SECTION";
+    IWC0350 Severe "ANY NUMERIC: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
     IWJ0002 Severe "an unbalanced ) in {text}";
     IWJ0003 Severe "unbalanced parentheses or quotes in {text}";
@@ -743,6 +744,7 @@ catalogue! {
     IWR0077 Severe "BASED on {name}: ironwork reads BASED on an 01 or 77 entry";
     IWR0090 Severe "INITIALIZE {name}: a group holding a table with no upper bound is not supported yet";
     IWR0091 Severe "{literal}: a floating-point literal of more than 31 digits in fixed point is not supported yet";
+    IWR0095 Severe "ANY NUMERIC on {name}: ironwork reads it as a parameter of a 01 or 77 entry that is compared, tested, moved from, used in arithmetic or displayed, and {why}";
     IWS0001 Severe "{what the syntax takes there}, found {the word or token there}";
     IWS0002 Severe "{COPY or a translator's INCLUDE} {name}: no such member in the copy libraries";
     IWS0003 Severe "COPY: {message}";
@@ -956,6 +958,7 @@ catalogue! {
     IWX0111 Warning "FUNCTION {name}: {figurative} as an argument (GnuCOBOL; Enterprise COBOL takes a figurative constant as an argument only inside an arithmetic expression): it is read as the literal '{character}'";
     IWX0112 Warning "UNSTRING FUNCTION {name} (GnuCOBOL; Enterprise COBOL's UNSTRING sends a data item): the function's value is the sending field";
     IWX0113 Warning "DISPLAY FUNCTION LENGTH({item}) (GnuCOBOL; Enterprise COBOL uses an integer function only in an arithmetic expression): it shows {n}, the length the program fixes, as cobc 3.2 shows it";
+    IWX0120 Warning "ANY NUMERIC (GnuCOBOL; Enterprise COBOL's parameters have the class their entries give): {name} takes the class, digits, scale, sign and usage of the argument each CALL passes for it, and is read, never written";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

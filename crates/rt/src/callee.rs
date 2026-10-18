@@ -7,11 +7,11 @@ use crate::abend::{Abend, AbendCode};
 use crate::fixed::{align, zoned_digits};
 use crate::host::{Host, Values};
 use crate::lir::{CallArg, Chars};
-use crate::storage::{Loc, Val};
+use crate::storage::{Kind, Loc, Val};
 use crate::store::{self, ProgramFacts};
 use crate::unit::{Loader, RunUnit, UnitHost};
 use crate::vocab::{Figurative, Pos};
-use numeric::Dialect;
+use numeric::{Dialect, Native};
 use zarch::decimal;
 
 type R<T> = Result<T, Abend>;
@@ -33,36 +33,100 @@ pub fn addresses<'w, P: Copy, O>(x: &mut impl Arguments<'w, P, O>, args: &[CallA
     Ok(arguments(x, args, pos)?.0)
 }
 
-/// `addresses`, with each argument's length.
-pub fn arguments<'w, P: Copy, O>(x: &mut impl Arguments<'w, P, O>, args: &[CallArg<P, O>], pos: Pos) -> R<(Vec<Option<usize>>, Vec<usize>)> {
-    let (mut addresses, mut lengths) = (Vec::with_capacity(args.len()), Vec::with_capacity(args.len()));
-    addresses_into(x, args, pos, &mut addresses, &mut lengths)?;
-    Ok((addresses, lengths))
+/// `addresses`, with each argument as the callee's activation can ask about it.
+pub fn arguments<'w, P: Copy, O>(x: &mut impl Arguments<'w, P, O>, args: &[CallArg<P, O>], pos: Pos) -> R<(Vec<Option<usize>>, Vec<Passed>)> {
+    let (mut addresses, mut passed) = (Vec::with_capacity(args.len()), Vec::with_capacity(args.len()));
+    addresses_into(x, args, pos, &mut addresses, &mut passed)?;
+    Ok((addresses, passed))
 }
 
-/// `arguments`, appended to `addresses` and `lengths`.
-pub fn addresses_into<'w, P: Copy, O>(x: &mut impl Arguments<'w, P, O>, args: &[CallArg<P, O>], pos: Pos, addresses: &mut Vec<Option<usize>>, lengths: &mut Vec<usize>) -> R<()> {
+/// `arguments`, appended to `addresses` and `passed`.
+pub fn addresses_into<'w, P: Copy, O>(x: &mut impl Arguments<'w, P, O>, args: &[CallArg<P, O>], pos: Pos, addresses: &mut Vec<Option<usize>>, passed: &mut Vec<Passed>) -> R<()> {
     for arg in args {
-        let (at, length) = match arg {
-            CallArg::Omitted => (None, 0),
+        let (at, length, shape) = match arg {
+            CallArg::Omitted => (None, 0, Shape::Unknown),
             CallArg::Reference(p) => {
                 let loc = x.locate(*p, false)?;
-                (Some(loc.offset), loc.len)
+                (Some(loc.offset), loc.len, Shape::Field(loc.kind))
             }
             CallArg::Value(o) => {
                 let val = x.value(o, pos)?;
                 let bytes = value_argument(val, pos)?;
-                (Some(x.unit().push_temporary(&bytes)), bytes.len())
+                (Some(x.unit().push_temporary(&bytes)), bytes.len(), Shape::Unknown)
             }
             CallArg::Content(c) => {
-                let bytes = content(x, c, pos)?;
-                (Some(x.unit().push_temporary(&bytes)), bytes.len())
+                let (bytes, shape) = content_shaped(x, c, pos)?;
+                (Some(x.unit().push_temporary(&bytes)), bytes.len(), shape)
             }
         };
         addresses.push(at);
-        lengths.push(length);
+        passed.push(Passed { at, length, shape });
     }
     Ok(())
+}
+
+/// An argument as the callee's activation can ask about it: where it is, how long it is, and what
+/// field it is.
+#[derive(Clone, Debug)]
+pub struct Passed {
+    pub at: Option<usize>,
+    pub length: usize,
+    pub shape: Shape,
+}
+
+impl Passed {
+    /// An argument known by its length alone.
+    pub fn sized(length: usize) -> Self {
+        Passed { at: None, length, shape: Shape::Unknown }
+    }
+}
+
+/// What an argument is, which an ANY NUMERIC parameter takes (assumption C510).
+#[derive(Clone, Debug)]
+pub enum Shape {
+    Unknown,
+    /// A data item of this kind, read where the argument sits.
+    Field(Kind),
+    /// A numeric literal BY CONTENT, as cobc holds one: a binary field of this kind and bytes.
+    Held(Kind, Vec<u8>),
+}
+
+/// `content`, with the field the bytes stand for.
+fn content_shaped<'w, P: Copy, O>(x: &mut impl Arguments<'w, P, O>, chars: &Chars<P, O>, pos: Pos) -> R<(Vec<u8>, Shape)> {
+    let alnum = Shape::Field(Kind::Alnum { justified: false });
+    match chars {
+        Chars::Literal(bytes) => Ok((bytes.clone(), alnum)),
+        Chars::Place(p) => {
+            let loc = x.content_item(*p)?;
+            Ok((store::bytes(x.mem(), loc).to_vec(), Shape::Field(loc.kind)))
+        }
+        Chars::Value(o) => {
+            let val = x.value(o, pos)?;
+            let length_of = x.length_of(o);
+            let shape = match &val {
+                Val::Bytes(_) | Val::All(_) => alnum,
+                Val::Num(f) => literal_shape(f, length_of),
+                _ => Shape::Unknown,
+            };
+            Ok((content_argument(&x.facts(), val, length_of), shape))
+        }
+    }
+}
+
+/// A numeric literal BY CONTENT as cobc 3.2 passes one (assumption C511): an integer that fits a
+/// signed fullword a binary fullword of nine digits, any other number eight bytes of twenty
+/// digits, its decimal point dropped, signed only when it is negative.
+fn literal_shape(f: &numeric::precision::Fixed, length_of: bool) -> Shape {
+    let magnitude = align(f, f.places.dec, false).and_then(|m| m.to_u128()).unwrap_or(0);
+    let signed_fullword = |n: i128| i32::try_from(n).is_ok();
+    let n = if f.negative { -(magnitude as i128) } else { magnitude as i128 };
+    if (f.places.dec == 0 || length_of) && signed_fullword(n) {
+        let kind = Kind::Binary { digits: 9, scale: 0, signed: true, native: Native::No };
+        return Shape::Held(kind, (n as i32).to_be_bytes().to_vec());
+    }
+    let kind = Kind::Binary { digits: 20, scale: 0, signed: f.negative, native: Native::No };
+    let bytes = if f.negative { (n as i64).to_be_bytes() } else { (magnitude as u64).to_be_bytes() };
+    Shape::Held(kind, bytes.to_vec())
 }
 
 /// A BY CONTENT argument's bytes: a data item's, a literal's as lowering made them, or another
@@ -197,8 +261,9 @@ pub struct Callee<'a> {
     /// returns; None when the caller releases them.
     pub mark: Option<usize>,
     pub pos: Pos,
-    /// Each argument's length, which an ANY LENGTH parameter takes (assumption C481).
-    pub lengths: &'a [usize],
+    /// Each argument, whose length an ANY LENGTH parameter takes (assumption C481) and whose field
+    /// an ANY NUMERIC one does (C510).
+    pub passed: &'a [Passed],
 }
 
 /// Runs program `callee.index`: `run` activates it, binds its LINKAGE, runs its procedure and reads
@@ -211,13 +276,13 @@ pub fn run<'w, X: UnitHost<'w>, O, T, E: From<Abend>>(x: &mut X, callee: &Callee
     let index = callee.index;
     let active = x.unit().programs[index].active;
     x.unit().calls.push(index);
-    let start = x.unit().argument_lengths.len();
+    let start = x.unit().arguments_passed.len();
     x.unit().argument_starts.push(start);
-    x.unit().argument_lengths.extend_from_slice(callee.lengths);
+    x.unit().arguments_passed.extend_from_slice(callee.passed);
     let ran = run(x);
     x.unit().calls.pop();
     x.unit().argument_starts.pop();
-    x.unit().argument_lengths.truncate(start);
+    x.unit().arguments_passed.truncate(start);
     let (ending, value) = ran?;
     let unit = x.unit();
     unit.programs[index].active = active;

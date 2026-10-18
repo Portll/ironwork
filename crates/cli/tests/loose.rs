@@ -62,8 +62,8 @@ const LEFT_OUT: &[(&str, &str, &str)] = &[
         "(--compliance loose): ALL REFERENCES OF I is left out of the USE statement",
     ),
     (
-        "ANYNUM",
-        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. ANYNUM.\n       DATA DIVISION.\n       LINKAGE SECTION.\n       01 BUF PIC X(4).\n       01 LEN ANY NUMERIC.\n       PROCEDURE DIVISION USING BUF LEN.\n           DISPLAY BUF\n           GOBACK.\n",
+        "WIDEPARM",
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. WIDEPARM.\n       DATA DIVISION.\n       LINKAGE SECTION.\n       01 BUF PIC X(4).\n       01 LEN PIC 9(40).\n       PROCEDURE DIVISION USING BUF LEN.\n           DISPLAY BUF\n           GOBACK.\n",
         "(--compliance loose): the parameter keeps its place, and a statement naming LEN compiles as a hole",
     ),
     (

@@ -364,6 +364,9 @@ functions! {
     Substitute = 90, "SUBSTITUTE", 3..=usize::MAX;
     SubstituteCase = 91, "SUBSTITUTE-CASE", 3..=usize::MAX;
     CallParameters = 92, "CALL PARAMETERS", 0..=0;
+    ArgumentNumeric = 93, "ARGUMENT NUMERIC", 1..=1;
+    ArgumentNumericClass = 94, "ARGUMENT NUMERIC CLASS", 1..=1;
+    ArgumentNumericDisplay = 95, "ARGUMENT NUMERIC DISPLAY", 1..=1;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

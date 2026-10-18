@@ -2,6 +2,7 @@
 //! WORKING-STORAGE laid out as IBM lays it out, ready for the interpreter or for lowering.
 
 pub mod any_length;
+pub mod any_numeric;
 pub mod arith;
 pub mod cics_bind;
 mod call_parameters;
@@ -376,6 +377,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     let own_linkage = scope::own_linkage(&program);
     omitted::rewrite(&mut program, &inherited.entries, options.compliance == numeric::Compliance::Extended, &mut errors);
     any_length::rewrite(&mut program, &mut errors);
+    any_numeric::rewrite(&mut program, &mut errors);
     if options.compliance == numeric::Compliance::Extended {
         value_pictures(&mut program, &mut errors);
         keys_in_records(&mut program, &inherited.entries, &mut errors);
@@ -1103,7 +1105,7 @@ fn top_level_tables(entries: &mut Vec<DataEntry>, errors: &mut Vec<Error>) -> Ve
         }
         let name = e.name.clone().unwrap_or_else(|| "FILLER".into());
         errors.push(syntax::messages::IWX0019.at(e.pos, format!("OCCURS at level {:02} (Micro Focus and GnuCOBOL; Enterprise COBOL takes OCCURS only at levels 02 to 49): {name} is read as a table in a record of its own", e.level)));
-        let record = DataEntry { level: 1, name: None, spelled: None, picture: None, usage: None, value: None, redefines: None, occurs: None, occurs_min: None, depending_on: None, sign: None, justified: false, sync: false, blank_when_zero: false, indexed_by: Vec::new(), keys: Vec::new(), condition_values: Vec::new(), false_value: None, renames: None, object_class: None, external: false, global: false, any_length: false, based: false, pos: e.pos };
+        let record = DataEntry { level: 1, name: None, spelled: None, picture: None, usage: None, value: None, redefines: None, occurs: None, occurs_min: None, depending_on: None, sign: None, justified: false, sync: false, blank_when_zero: false, indexed_by: Vec::new(), keys: Vec::new(), condition_values: Vec::new(), false_value: None, renames: None, object_class: None, external: false, global: false, any_length: false, any_numeric: false, based: false, pos: e.pos };
         for d in &mut entries[at..end] {
             if d.level != 88 {
                 d.level = if d.level == 77 { 2 } else { d.level + 1 };
@@ -2377,7 +2379,7 @@ impl Check<'_> {
     fn moved_function(&mut self, f: &FunctionCall) {
         let name = f.name.as_str();
         let numeric = !rt::intrinsic::CHARACTER_VALUED.contains(&name) || self.numeric_max_or_min(f);
-        if !self.intrinsic(name) || !numeric {
+        if !self.intrinsic(name) || !numeric || name.starts_with("ARGUMENT NUMERIC") {
             return;
         }
         if self.extended {

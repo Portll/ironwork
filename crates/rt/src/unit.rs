@@ -339,9 +339,9 @@ pub struct RunUnit<'w, H, L: Loader<H>> {
     pub main: Option<usize>,
     /// The programs CALLs, functions and INVOKEs in progress entered, outermost first.
     pub calls: Vec<usize>,
-    /// The length of each argument the entries in `calls` were passed, 0 for one omitted, each
-    /// entry's from its start in `argument_starts`.
-    pub argument_lengths: Vec<usize>,
+    /// Each argument the entries in `calls` were passed, each entry's from its start in
+    /// `argument_starts`.
+    pub arguments_passed: Vec<crate::callee::Passed>,
     pub argument_starts: Vec<usize>,
     /// The job step's program arguments, which ACCEPT ... FROM COMMAND-LINE and ARGUMENT-VALUE read
     /// under `--compliance extended`; empty without a PARM.
@@ -544,7 +544,7 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
             random: None,
             main: None,
             calls: Vec::new(),
-            argument_lengths: Vec::new(),
+            arguments_passed: Vec::new(),
             argument_starts: Vec::new(),
             arguments: Default::default(),
             crt: None,
@@ -729,16 +729,35 @@ impl<'w, H: Clone, L: Loader<H>> RunUnit<'w, H, L> {
     /// The length of the argument in USING position `position`, from 1, of program `me`'s latest
     /// activation: 0 for one omitted or not passed, and in the main program.
     pub fn argument_length_of(&self, me: usize, position: usize) -> usize {
-        let Some(k) = self.calls.iter().rposition(|&p| p == me) else { return 0 };
-        let end = self.argument_starts.get(k + 1).copied().unwrap_or(self.argument_lengths.len());
-        position.checked_sub(1).and_then(|i| self.argument_lengths[self.argument_starts[k]..end].get(i)).copied().unwrap_or(0)
+        self.argument_passed(me, position).map_or(0, |a| a.length)
+    }
+
+    /// The field argument `position` of program `me`'s latest activation is, and its bytes now:
+    /// None for one omitted, not passed, or passed BY VALUE.
+    pub fn argument_field(&self, me: usize, position: usize) -> Option<(crate::storage::Kind, Vec<u8>)> {
+        let passed = self.argument_passed(me, position)?;
+        match &passed.shape {
+            crate::callee::Shape::Unknown => None,
+            crate::callee::Shape::Held(kind, bytes) => Some((*kind, bytes.clone())),
+            crate::callee::Shape::Field(kind) => {
+                let at = passed.at?;
+                self.mem.get(at..at + passed.length).map(|b| (*kind, b.to_vec()))
+            }
+        }
+    }
+
+    /// Argument `position`, from 1, of program `me`'s latest activation.
+    pub fn argument_passed(&self, me: usize, position: usize) -> Option<&crate::callee::Passed> {
+        let k = self.calls.iter().rposition(|&p| p == me)?;
+        let end = self.argument_starts.get(k + 1).copied().unwrap_or(self.arguments_passed.len());
+        position.checked_sub(1).and_then(|i| self.arguments_passed[self.argument_starts[k]..end].get(i))
     }
 
     /// The number of arguments program `me`'s latest activation was called with; in the main
     /// program, the number of the run's arguments.
     pub fn argument_count_of(&self, me: usize) -> usize {
         let Some(k) = self.calls.iter().rposition(|&p| p == me) else { return self.arguments.words.len() };
-        self.argument_starts.get(k + 1).copied().unwrap_or(self.argument_lengths.len()) - self.argument_starts[k]
+        self.argument_starts.get(k + 1).copied().unwrap_or(self.arguments_passed.len()) - self.argument_starts[k]
     }
 
     /// Program `me`'s storage holds its initial values, and its GO TOs go where they are written.

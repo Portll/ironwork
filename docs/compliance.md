@@ -1503,6 +1503,40 @@ of a PIC X(10) item shows 10. Extended shows the same; a national item's length 
 DISPLAY of any other integer or numeric function, whose presentation cobc takes from its own
 intermediate fields, stays refused with IWC0101-S, as under strict.
 
+### IWX0120-W ANY NUMERIC
+
+`IWX0120-W ANY NUMERIC (GnuCOBOL; Enterprise COBOL's parameters have the class their entries give): V
+takes the class, digits, scale, sign and usage of the argument each CALL passes for it, and is read,
+never written`, at the entry.
+
+    01 identifier ANY NUMERIC.
+
+A 01 or 77 item of the LINKAGE SECTION named in PROCEDURE DIVISION USING, with no PICTURE or USAGE,
+is the field the argument in its position is on each CALL: zoned, packed or binary, signed or not,
+with its digits and scale. Its uses are read from that field and its bytes as they are when the use
+runs: a comparison, a sign condition, a MOVE from it, an operand of COMPUTE, ADD, SUBTRACT, MULTIPLY
+and DIVIDE, an EVALUATE subject or PERFORM TIMES and VARYING count read its value; `V NUMERIC` and
+`V NOT NUMERIC` test whether the digits and sign are valid for the usage; DISPLAY shows the argument
+as DISPLAY shows an item of its field (cobc 3.2's own forms: `-0077`, `+00123.4`); `V OMITTED` is the
+address test any parameter has. A numeric literal BY CONTENT is the field cobc passes for it: a
+signed binary of nine digits for an integer that fits a fullword, any other number eight bytes of
+twenty digits with its point dropped, so 1.25 reads as 125 (C511). An alphanumeric argument is
+numeric when every byte is a digit, and then has that value; an edited or floating-point item is not
+numeric. Each result matches cobc 3.2 on the probes checked, on the interpreter, the VM and a native
+build.
+
+Refused with IWR0095: an ANY NUMERIC entry that is not a named 01 or 77 parameter of PROCEDURE
+DIVISION USING with no PICTURE, USAGE or items below it, one that is RETURNING, BY VALUE, a user-defined
+function's, or named in an ENTRY statement; and each statement that writes the parameter (MOVE,
+ADD or COMPUTE to it, ACCEPT), passes it on in a CALL, reference-modifies, subscripts or names it in
+FUNCTION arguments, or does anything else with it than the reads above. ADD with one operand that
+is the parameter and no GIVING, and SUBTRACT likewise, are refused too: cobc 3.2 adds the integer
+part of a zoned or binary argument and the unscaled digits of a packed one for them (C512). A run
+ends with IWR0096 where the parameter's value is read from an alphanumeric item that is not all
+digits, an edited or floating-point item, or an argument omitted, not passed or passed BY VALUE
+(C513). A MOVE from the parameter moves its value, whatever the receiver (C514). Assumption C510.
+Strict refuses the clause (IWC0350).
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and
@@ -1549,7 +1583,7 @@ extended.
 - A report whose description the compile refuses, such as a subscripted CONTROL (IWR0026), is left
   out with its name in the file's REPORT clause, with `IWX0065-W`; INITIATE, GENERATE and TERMINATE
   naming it or its groups then compile as holes.
-- A PROCEDURE DIVISION USING name whose record was left out (ANY NUMERIC, say) keeps its
+- A PROCEDURE DIVISION USING name whose record was left out (a PICTURE of 40 digits, say) keeps its
   parameter's place, so the arguments after it still reach their parameters, with `IWX0065-W`; a
   statement naming it compiles as a hole.
 - The Communication feature: the COMMUNICATION SECTION's CD areas are declared as data, as under

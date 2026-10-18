@@ -3,7 +3,7 @@
 
 use super::*;
 use compile::function::Udf;
-use rt::callee::Bound;
+use rt::callee::{Bound, Passed};
 use std::rc::Rc;
 
 impl<'p> Machine<'p, '_, '_> {
@@ -24,7 +24,7 @@ impl<'p> Machine<'p, '_, '_> {
             Some(c) if c.program.function.as_ref().is_some_and(|g| !g.prototype) => c,
             _ => return Err(Abend::ironwork(format!("FUNCTION {}: {} is a program, not a user-defined function", udf.name, udf.external), pos)),
         };
-        let (mut bound, mut lengths) = (Vec::with_capacity(f.args.len()), Vec::with_capacity(f.args.len()));
+        let (mut bound, mut passed) = (Vec::with_capacity(f.args.len()), Vec::with_capacity(f.args.len()));
         for (arg, formal) in f.args.iter().zip(&udf.params) {
             let (b, length) = match arg {
                 Expr::Operand(Operand::Ref(r)) if !formal.by_value => {
@@ -41,12 +41,12 @@ impl<'p> Machine<'p, '_, '_> {
                 _ => (Bound::Value(self.expr_value(arg, pos)?), 0),
             };
             bound.push(b);
-            lengths.push(length);
+            passed.push(Passed::sized(length));
         }
         self.unit.enter(pos)?;
         let mark = self.unit.mem.len();
         let read_before = self.unit.pending();
-        let (outcome, ()) = callee::run(self, &Callee { index, by: By::Function, mark: Some(mark), pos, lengths: &lengths }, |m| {
+        let (outcome, ()) = callee::run(self, &Callee { index, by: By::Function, mark: Some(mark), pos, passed: &passed }, |m| {
             let outcome = run(&compiled, index, &mut *m.unit, &bound, pos);
             m.unit.resume_statement(read_before);
             Ok::<_, Abend>((outcome, ()))

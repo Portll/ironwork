@@ -879,7 +879,7 @@ fn call_plans_keep_each_argument_as_the_walker_passes_it() {
     assert_eq!(symbol(&p, name), "SUB1");
     assert!(matches!(calls[0].args[0], CallArg::Reference(_)) && matches!(calls[1].args[0], CallArg::Reference(_)));
     assert_eq!(calls[1].args[1], CallArg::Content(Chars::Literal(vec![0xC1, 0xC2])));
-    assert_eq!(calls[1].args[2], CallArg::Content(Chars::Literal(vec![0xF1, 0xF2])));
+    assert!(matches!(calls[1].args[2], CallArg::Content(Chars::Value(LirOperand::Const(_)))));
     assert_eq!(calls[1].args[3], CallArg::Content(Chars::Literal(vec![0xF0])));
     assert!(matches!(calls[1].args[4], CallArg::Content(Chars::Value(LirOperand::LengthOf(_)))));
     assert!(matches!(calls[1].args[5], CallArg::Value(LirOperand::Load(_))));

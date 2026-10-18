@@ -401,7 +401,7 @@ struct Spare {
     frames: Vec<Frame>,
     using: Vec<Option<usize>>,
     addresses: Vec<Option<usize>>,
-    lengths: Vec<usize>,
+    passed: Vec<crate::callee::Passed>,
     args: Vec<Val>,
 }
 

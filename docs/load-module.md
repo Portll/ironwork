@@ -607,7 +607,9 @@ hold the function 92, NUMBER-OF-CALL-PARAMETERS, which came after the bump. 1.4 
 2, `Literal`, an alphanumeric literal passed to an ANY LENGTH parameter under `--compliance
 extended` (lir.md §9.15). 1.5 adds the `UnstringValue` op, 41, an UNSTRING whose sending field is a
 function's value under `--compliance extended`, and `Const` 8, `Float`, a floating-point literal's
-value in the PROCEDURE DIVISION. A 0.x module is refused, and compiling the source again is the remedy (question 1).
+value in the PROCEDURE DIVISION. It also adds the functions 93 to 95, ARGUMENT NUMERIC, its class test
+and its DISPLAY text, which an ANY NUMERIC parameter's uses become under `--compliance extended`
+(lir.md §9.9), and holds a numeric literal BY CONTENT as `Chars::Value`, not `Chars::Literal`. A 0.x module is refused, and compiling the source again is the remedy (question 1).
 
 | The reader finds | It does |
 |---|---|

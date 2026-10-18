@@ -347,6 +347,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0326 | S | `CALL STATIC: GnuCOBOL's call convention, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0327 | S | `CALL ... GIVING: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's, which writes RETURNING; --compliance extended reads it` |
 | IWC0340 | S | `{name}: a table with no upper bound, OCCURS ... TO UNBOUNDED, is described in the LINKAGE SECTION` |
+| IWC0350 | S | `ANY NUMERIC: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
 | IWJ0003 | S | `unbalanced parentheses or quotes in {text}` |
@@ -717,6 +718,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWR0077 | S | `BASED on {name}: ironwork reads BASED on an 01 or 77 entry` |
 | IWR0090 | S | `INITIALIZE {name}: a group holding a table with no upper bound is not supported yet` |
 | IWR0091 | S | `{literal}: a floating-point literal of more than 31 digits in fixed point is not supported yet` |
+| IWR0095 | S | `ANY NUMERIC on {name}: ironwork reads it as a parameter of a 01 or 77 entry that is compared, tested, moved from, used in arithmetic or displayed, and {why}` |
 | IWS0001 | S | `{what the syntax takes there}, found {the word or token there}` |
 | IWS0002 | S | `{COPY or a translator's INCLUDE} {name}: no such member in the copy libraries` |
 | IWS0003 | S | `COPY: {message}` |
@@ -930,6 +932,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0111 | W | `FUNCTION {name}: {figurative} as an argument (GnuCOBOL; Enterprise COBOL takes a figurative constant as an argument only inside an arithmetic expression): it is read as the literal '{character}'` |
 | IWX0112 | W | `UNSTRING FUNCTION {name} (GnuCOBOL; Enterprise COBOL's UNSTRING sends a data item): the function's value is the sending field` |
 | IWX0113 | W | `DISPLAY FUNCTION LENGTH({item}) (GnuCOBOL; Enterprise COBOL uses an integer function only in an arithmetic expression): it shows {n}, the length the program fixes, as cobc 3.2 shows it` |
+| IWX0120 | W | `ANY NUMERIC (GnuCOBOL; Enterprise COBOL's parameters have the class their entries give): {name} takes the class, digits, scale, sign and usage of the argument each CALL passes for it, and is read, never written` |
 
 ## Run-time refusals
 
@@ -955,3 +958,4 @@ severity S before the text, under the abend code IRONWORK, EXEC or JAVA.
 | IWR0073 | S | `the VM does not run {construct} yet; run it with --interpret` |
 | IWR0074 | S | `{file}, a GLOBAL file of {declarer}, is written as a print file in one of {declarer} and {program} and not the other, which is not supported yet` |
 | IWR0078 | S | `{construct} was reached: under --compliance relaxed it compiled as a hole, since {why}` |
+| IWR0096 | S | `{what}: an ANY NUMERIC parameter reads only a numeric argument, and this one is {why}` |

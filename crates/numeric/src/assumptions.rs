@@ -407,6 +407,11 @@ pub const WIDE_PICTURES: &str = "C490";
 pub const SORT_FILE_ASSIGN_ITEM: &str = "C500";
 pub const UNBOUNDED_TABLES: &str = "C501";
 pub const FLOAT_LITERALS: &str = "C502";
+pub const ANY_NUMERIC: &str = "C510";
+pub const ANY_NUMERIC_LITERALS: &str = "C511";
+pub const ANY_NUMERIC_ADD_ALONE: &str = "C512";
+pub const ANY_NUMERIC_NOT_NUMERIC: &str = "C513";
+pub const ANY_NUMERIC_MOVES: &str = "C514";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2726,6 +2731,41 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[O(Extended), S(Call)], &[O(Extended), S(UserFunction)]],
+    },
+    Assumption {
+        id: ANY_NUMERIC,
+        claim: "Under --compliance extended, a 01 or 77 parameter written ANY NUMERIC, GnuCOBOL's, takes the class, digits, scale, sign and usage of the argument the CALL passes in its USING position, as cobc 3.2's field descriptor gives them. ironwork keeps the field the CALL passed for each argument of the running activation, and reads the parameter's uses as functions of that field and of the argument's bytes as they are when the use runs: a comparison, a sign condition, a MOVE from it, an arithmetic operand and an EVALUATE subject read its value; the class test NUMERIC holds when the digits and sign are valid for the usage; DISPLAY shows the argument as a DISPLAY of an item of its field would. OMITTED tests the address as for any parameter. Enterprise COBOL's parameters have the class their entries give",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), S(Call)]],
+    },
+    Assumption {
+        id: ANY_NUMERIC_LITERALS,
+        claim: "Under --compliance extended, a numeric literal BY CONTENT for an ANY NUMERIC parameter is the field cobc 3.2 passes for it: an integer literal that fits a signed fullword a binary field of nine digits, signed; any other numeric literal an eight-byte binary field of twenty digits, signed when the literal is negative, with its decimal point dropped, so 1.25 is read as 125. An alphanumeric literal is an alphanumeric field. The bytes the callee sees in a parameter that is not ANY NUMERIC are the literal's zoned digits, as for any literal BY CONTENT",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), S(Call)]],
+    },
+    Assumption {
+        id: ANY_NUMERIC_ADD_ALONE,
+        claim: "Under --compliance extended, ADD with one operand that is an ANY NUMERIC parameter and no GIVING, and SUBTRACT likewise, are refused: cobc 3.2 adds or subtracts for them the integer part or the unscaled digits of the argument rather than its value, by a rule that follows how its code generator optimizes the statement (ADD v TO r with v = -12.34 gives r - 12, with a packed 123.4 gives r + 1234). Every other arithmetic form reads the argument's value",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), S(Arithmetic)]],
+    },
+    Assumption {
+        id: ANY_NUMERIC_NOT_NUMERIC,
+        claim: "Under --compliance extended, an ANY NUMERIC parameter reads an argument that is not a numeric usage as far as cobc 3.2's results can be given: the class test NUMERIC holds for an alphanumeric item all of whose bytes are digits, and fails for an edited or floating-point item; the value of an alphanumeric item of digits is that integer. Reading the value of any other alphanumeric item, an edited item, a floating-point item, or an argument omitted, not passed or passed BY VALUE ends the run with IWR0096, where cobc reads the bytes by its own rules or ends the run on a bad address. The parameter is read, never written: a use that writes it, passes it on, reference-modifies or subscripts it, or names it in FUNCTION arguments is refused at compile time (IWR0095)",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), S(Call)]],
+    },
+    Assumption {
+        id: ANY_NUMERIC_MOVES,
+        claim: "Under --compliance extended, a MOVE from an ANY NUMERIC parameter moves the argument's numeric value, as a MOVE from a numeric function result does, whatever the receiver is; cobc 3.2 moves the argument's field, so a move to an alphanumeric receiver differs from it for a signed, scaled, packed or binary argument. A PICTURE P scaling position of the caller's item is not applied to the value",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended), S(Move)]],
     },
     Assumption {
         id: ASSIGN_TO_DISK,

@@ -5,7 +5,7 @@
 
 use super::{Code, Halt, Lowered, R, Stop, Vm, not_yet};
 use crate::abend::{Abend, AbendCode, Ending, Signal};
-use crate::callee::{self, Bindings, Bound, By, Callee};
+use crate::callee::{self, Bindings, Bound, By, Callee, Passed};
 use crate::le;
 use crate::lir::{FunctionDefinition, UserArgument, UserFunctionId};
 use crate::storage::Val;
@@ -30,7 +30,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let code = self.unit.programs[index].compiled.clone().ok_or_else(not_a_function)?;
         let lowered = code.lowered.as_ref().map_err(|why| not_yet(format!("a user-defined function that does not lower ({why})")))?;
         let definition = lowered.program.services.function.as_ref().ok_or_else(not_a_function)?;
-        let (mut bound, mut lengths) = (Vec::with_capacity(plan.args.len()), Vec::with_capacity(plan.args.len()));
+        let (mut bound, mut passed) = (Vec::with_capacity(plan.args.len()), Vec::with_capacity(plan.args.len()));
         for arg in &plan.args {
             let (b, length) = match arg {
                 UserArgument::Reference(q) => {
@@ -41,12 +41,12 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 UserArgument::Literal(b) => (Bound::Bytes(b.clone()), b.len()),
             };
             bound.push(b);
-            lengths.push(length);
+            passed.push(Passed::sized(length));
         }
         self.unit.enter(pos)?;
         let mark = self.unit.mem.len();
         let read_before = self.unit.pending();
-        let ran = callee::run(self, &Callee { index, by: By::Function, mark: Some(mark), pos, lengths: &lengths }, |caller| {
+        let ran = callee::run(self, &Callee { index, by: By::Function, mark: Some(mark), pos, passed: &passed }, |caller| {
             let outcome = caller.function_activation(lowered, definition, index, &bound, pos);
             caller.unit.resume_statement(read_before);
             match outcome.map_err(Stop::halt) {

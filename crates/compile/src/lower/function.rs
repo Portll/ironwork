@@ -283,6 +283,7 @@ fn result(func: Func, args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
         | Func::WhenCompiled
         | Func::ModuleCallerId
         | Func::Concatenate
+        | Func::ArgumentNumericDisplay
         | Func::ChainingArgument
         | Func::Substitute
         | Func::SubstituteCase => of(Value::Bytes),
@@ -346,6 +347,8 @@ fn result(func: Func, args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
         | Func::Uwidth
         | Func::ArgumentLength
         | Func::StoredCharLength => integer(9),
+        Func::ArgumentNumeric => num(None, 0),
+        Func::ArgumentNumericClass => integer(1),
         Func::CrtStatus => integer(4),
         Func::CallParameters => integer(9),
         Func::Factorial => integer(if arith == Arith::Extend { 31 } else { 30 }),
