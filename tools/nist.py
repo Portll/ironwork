@@ -58,7 +58,17 @@ and removed. --baseline lists each program whose class differs from an earlier r
 Exit status: 0; 1 when a program clean in the baseline now fails, is refused or abends, or with
 --vm when a program differs; 2 usage.
 """
-import argparse, calendar, collections, glob, os, re, shutil, subprocess, sys, tempfile, time
+import argparse
+import calendar
+import collections
+import glob
+import os
+import re
+import shutil
+import subprocess  # nosec B404 -- run with argument lists only, never a shell
+import sys
+import tempfile
+import time
 
 SELECTED_SWITCHES = set("AEHLYT")
 PRINT_FILE = "XXXXX055"
@@ -164,7 +174,7 @@ def execute(binary, workdir, name, env, include, sysin, timeout, command, *flags
     """A run's exit status (None when it timed out), standard output, and standard error with the
     work directory's path removed."""
     try:
-        r = subprocess.run([binary, command, os.path.join(workdir, f"{name}.CBL"), "-I", include, *flags],
+        r = subprocess.run([binary, command, os.path.join(workdir, f"{name}.CBL"), "-I", include, *flags],  # nosec B603 -- an argument list, no shell
                            cwd=workdir, env=env, input=sysin, capture_output=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return None, b"", ""

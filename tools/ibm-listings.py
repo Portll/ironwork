@@ -15,7 +15,12 @@ program IBM compiled at 4 or less, ironwork's class, naming every one ironwork r
 does not run. --source says where the listings come from, and each --note why IBM's compiler gave
 a message that stopped a listing, as found by reading it.
 """
-import argparse, collections, json, os, re, sys
+import argparse
+import collections
+import json
+import os
+import re
+import sys
 
 COMPILER = re.compile(r"IBM Enterprise COBOL for z/OS\s+(\S+)")
 PROGRAM = re.compile(r"End of compilation \d+,\s+program (\S+?),")
@@ -44,23 +49,23 @@ def read_results(path):
     return {row[0]: row[1] for row in rows}
 
 def summarise(listings, results):
-    by_code = collections.Counter(str(l["return_code"]) for l in listings)
-    compiled = [l for l in listings if l["return_code"] is not None and l["return_code"] <= 4]
-    classes = collections.Counter(results.get(l["program"], "not run") for l in compiled)
+    by_code = collections.Counter(str(listing["return_code"]) for listing in listings)
+    compiled = [listing for listing in listings if listing["return_code"] is not None and listing["return_code"] <= 4]
+    classes = collections.Counter(results.get(listing["program"], "not run") for listing in compiled)
     return {
-        "compilers": sorted({l["compiler"] for l in listings if l["compiler"]}),
+        "compilers": sorted({listing["compiler"] for listing in listings if listing["compiler"]}),
         "listings": len(listings),
         "return_codes": dict(sorted(by_code.items())),
         "compiled_by_ibm": len(compiled),
         "ironwork_classes": dict(sorted(classes.items())),
         "not_clean": sorted(
-            ({"program": l["program"], "ibm_return_code": l["return_code"], "ironwork": results.get(l["program"], "not run")}
-             for l in compiled if results.get(l["program"], "not run") not in ("clean", "called", "compiled")),
+            ({"program": listing["program"], "ibm_return_code": listing["return_code"], "ironwork": results.get(listing["program"], "not run")}
+             for listing in compiled if results.get(listing["program"], "not run") not in ("clean", "called", "compiled")),
             key=lambda x: x["program"]),
         "rejected_by_ibm": sorted(
-            ({"program": l["program"] or l["file"], "ibm_return_code": l["return_code"], "first_message": l["first_severe"],
-              "ironwork": results.get(l["program"], "not run") if l["program"] else "unnamed"}
-             for l in listings if l["return_code"] is None or l["return_code"] > 4),
+            ({"program": listing["program"] or listing["file"], "ibm_return_code": listing["return_code"], "first_message": listing["first_severe"],
+              "ironwork": results.get(listing["program"], "not run") if listing["program"] else "unnamed"}
+             for listing in listings if listing["return_code"] is None or listing["return_code"] > 4),
             key=lambda x: x["program"]),
     }
 

@@ -22,7 +22,16 @@ executable it links: tools/gcobol/gcobol installed as gcobol-exec runs it in the
 Linux, and with --cobc, leave it out. Exit status: 0 every program agrees, 1 some differ (with --vm,
 only a difference counts), 2 usage.
 """
-import argparse, calendar, os, re, shlex, shutil, subprocess, sys, tempfile, time
+import argparse
+import calendar
+import os
+import re
+import shlex
+import shutil
+import subprocess  # nosec B404 -- run with argument lists only, never a shell
+import sys
+import tempfile
+import time
 
 CLOCK = "2026-01-02T03:04:05"
 PROGRAM = (".cbl", ".cob")
@@ -61,15 +70,15 @@ def without_option_cards(text):
 def run(argv, stdin, timeout, cwd=None):
     with open(stdin, "rb") if stdin else open(os.devnull, "rb") as f:
         try:
-            r = subprocess.run(argv, stdin=f, capture_output=True, timeout=timeout, cwd=cwd)
+            r = subprocess.run(argv, stdin=f, capture_output=True, timeout=timeout, cwd=cwd)  # nosec B603 -- an argument list, no shell
         except subprocess.TimeoutExpired:
             return None, "", f"no answer in {timeout}s"
     return r.returncode, r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace")
 
 def first_line(text, pattern=None):
-    lines = [l for l in text.splitlines() if l.strip()]
+    lines = [line for line in text.splitlines() if line.strip()]
     if pattern:
-        lines = [l for l in lines if re.search(pattern, l)] or lines
+        lines = [line for line in lines if re.search(pattern, line)] or lines
     return lines[0].strip()[:160] if lines else "(no message)"
 
 TRANSLATED = re.compile(r"^.{6}[ D].*?\bEXEC\s+(CICS|SQL|DLI)\b", re.I | re.M)
@@ -197,7 +206,7 @@ def main():
         print(f"differ: {compiler[0] if not shutil.which(compiler[0]) else runner[0]} is not on PATH", file=sys.stderr)
         return 2
     # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args -- the compiler named on the command line, as an argument list
-    version = subprocess.run([*compiler, "--version"], capture_output=True, text=True).stdout.splitlines()
+    version = subprocess.run([*compiler, "--version"], capture_output=True, text=True).stdout.splitlines()  # nosec B603 -- an argument list, no shell
     print(f"# {version[0] if version else compiler[0]}; ironwork clock {CLOCK}")
     tally, differ = {}, False
     for path in programs(args.paths):

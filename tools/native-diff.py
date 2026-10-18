@@ -7,7 +7,14 @@ usage: native-diff.py <ironwork binary> <CCVS85 src directory> --runtime <crates
                       [--workdir dir] [--timeout seconds] [--only NAME,...]
 Exit status: 0 when no program differs, 1 when one does, 2 when the harness could not be built.
 """
-import argparse, calendar, os, shutil, subprocess, sys, tempfile, time
+import argparse
+import calendar
+import os
+import shutil
+import subprocess  # nosec B404 -- run with argument lists only, never a shell
+import sys
+import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import nist  # noqa: E402
@@ -26,7 +33,7 @@ def restore(workdir, files):
 
 def execute(command, workdir, env, sysin, timeout):
     try:
-        r = subprocess.run(command, cwd=workdir, env=env, input=sysin, capture_output=True, timeout=timeout)
+        r = subprocess.run(command, cwd=workdir, env=env, input=sysin, capture_output=True, timeout=timeout)  # nosec B603 -- an argument list, no shell
     except subprocess.TimeoutExpired:
         return None, b"", ""
     return r.returncode, r.stdout, nist.PANIC_THREAD.sub(r"\1", r.stderr.decode("utf-8", "replace").replace(workdir + os.sep, ""))
@@ -68,7 +75,7 @@ def main():
     called = {target for _, text in sources for target in nist.call_targets(text) - {nist.program_id(text)}}
     compiled = [name for name, text in sources if only is None or name in only or nist.program_id(text) in called]
     started = time.time()
-    build = subprocess.run([binary, "compile", *(f"{n}.CBL" for n in compiled), "-I", library, "-o", workdir, "--native-harness", "--runtime", os.path.abspath(a.runtime)], cwd=workdir, env=env, capture_output=True)
+    build = subprocess.run([binary, "compile", *(f"{n}.CBL" for n in compiled), "-I", library, "-o", workdir, "--native-harness", "--runtime", os.path.abspath(a.runtime)], cwd=workdir, env=env, capture_output=True)  # nosec B603 -- an argument list, no shell
     harness = os.path.join(workdir, "harness")
     if not os.path.exists(harness):
         sys.stderr.write(build.stderr.decode("utf-8", "replace")[-4000:])

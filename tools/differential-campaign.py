@@ -39,7 +39,19 @@ machines can share a corpus. `total` adds up the campaign.json of each shard and
 as JSON, with the programs fuzzed in each mode (modes) where the shards record them. Exit status:
 0 nothing differed, 1 some input differed, 2 usage.
 """
-import argparse, concurrent.futures, hashlib, json, os, re, shutil, signal, socket, subprocess, sys, threading, time
+import argparse
+import concurrent.futures
+import hashlib
+import json
+import os
+import re
+import shutil
+import signal
+import socket
+import subprocess  # nosec B404 -- run with argument lists only, never a shell
+import sys
+import threading
+import time
 
 PROGRAM = (".cbl", ".cob", ".cobol")
 COPYBOOK = (".cpy", ".copy", ".cbk", ".inc", ".bms")
@@ -94,7 +106,7 @@ def fuzz(binary, program, out, runs, seed, timeout):
         argv += ["-L", d]
     log = out + ".log"
     with open(log, "wb") as sink:
-        child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT, start_new_session=True)
+        child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT, start_new_session=True)  # nosec B603 -- an argument list, no shell
         # Minimizing what differs spends run pairs beyond --runs; the cap only ends a fuzz that hangs.
         cap = threading.Timer((runs + 2_100) * 2 * timeout, lambda: os.killpg(child.pid, signal.SIGKILL))
         cap.start()
@@ -114,8 +126,8 @@ def counted(text):
     return got
 
 def refusal(text):
-    lines = [l for l in text.strip().splitlines() if l.strip()]
-    said = next((l for l in reversed(lines) if l.startswith("ironwork fuzz: ")), lines[-1] if lines else "no output")
+    lines = [line for line in text.strip().splitlines() if line.strip()]
+    said = next((line for line in reversed(lines) if line.startswith("ironwork fuzz: ")), lines[-1] if lines else "no output")
     return re.sub(r"^ironwork fuzz: ", "", said)[:240]
 
 def total(paths):
@@ -212,7 +224,7 @@ def main():
                 kept = os.path.join(a.out, "divergences", name, f"seed-{seed}")
                 os.makedirs(os.path.dirname(kept), exist_ok=True)
                 shutil.move(out, kept)
-                divergences.append({"program": program["path"], "mode": program["mode"], "seed": seed, "differ": got["differ"], "kept": os.path.relpath(kept, a.out), "said": [l for l in text.splitlines() if "divergence-" in l]})
+                divergences.append({"program": program["path"], "mode": program["mode"], "seed": seed, "differ": got["differ"], "kept": os.path.relpath(kept, a.out), "said": [line for line in text.splitlines() if "divergence-" in line]})
             else:
                 shutil.rmtree(out, ignore_errors=True)
             if time.time() - state["said"] >= PROGRESS:
@@ -259,7 +271,7 @@ def main():
     wall = time.time() - began
     report = {
         "label": a.label,
-        "ironwork": subprocess.run([binary, "--version"], capture_output=True, text=True).stdout.strip(),
+        "ironwork": subprocess.run([binary, "--version"], capture_output=True, text=True).stdout.strip(),  # nosec B603 -- an argument list, no shell
         "host": {"name": socket.gethostname(), "cpus": os.cpu_count(), "loadBefore": [round(x, 1) for x in load_before], "loadAfter": [round(x, 1) for x in os.getloadavg()]},
         "shard": a.shard,
         "budgetCpuHours": a.cpu_hours,

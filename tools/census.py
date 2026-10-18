@@ -21,7 +21,13 @@ usage: census.py <ironwork binary> <corpus dir> [sample size] [seed] [--json tal
 many programs `ironwork check` ended with each return code: 8 is a compile with E-level messages,
 which still gives a program to run, and the tally counts it among the refused by its first message.
 """
-import collections, json, os, random, re, subprocess, sys
+import collections
+import json
+import os
+import random
+import re
+import subprocess  # nosec B404 -- run with argument lists only, never a shell
+import sys
 
 def copy_libraries(root):
     """For each repository under the corpus root, the directories that hold copybooks."""
@@ -139,7 +145,7 @@ def main():
     size = int(args[2]) if len(args) > 2 else 3000
     seed = int(args[3]) if len(args) > 3 else 20260927
     population = sorted(programs(root))
-    sample = random.Random(seed).sample(population, min(size, len(population)))
+    sample = random.Random(seed).sample(population, min(size, len(population)))  # nosec B311 -- seeded so the sample is reproducible; nothing secret depends on it
     libraries = copy_libraries(root)
     files, repositories = repository_files(root), {}
     tally, accepted, codes = collections.Counter(), 0, collections.Counter()
@@ -151,7 +157,7 @@ def main():
         flags = [arg for d in sorted(dirs) for arg in ("-I", d)]
         try:
             # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args -- an argument list, no shell
-            r = subprocess.run([binary, "check", path, *flags], capture_output=True, text=True, timeout=20)
+            r = subprocess.run([binary, "check", path, *flags], capture_output=True, text=True, timeout=20)  # nosec B603 -- an argument list, no shell
         except subprocess.TimeoutExpired:
             tally["(timeout)"] += 1
             codes["timeout"] += 1
@@ -165,7 +171,7 @@ def main():
     for why, n in tally.most_common(40):
         print(f"{n:6d}  {why}")
     if out:
-        version = subprocess.run([binary, "--version"], capture_output=True, text=True).stdout.strip()
+        version = subprocess.run([binary, "--version"], capture_output=True, text=True).stdout.strip()  # nosec B603 -- an argument list, no shell
         with open(out, "w") as f:
             json.dump({"ironwork": version, "corpus": os.path.basename(os.path.normpath(root)), "population": len(population),
                        "sample": len(sample), "seed": seed, "compiled": accepted,

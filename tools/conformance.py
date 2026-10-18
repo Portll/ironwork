@@ -15,7 +15,13 @@ It reads, beside the binary's own register of assumptions (`ironwork assumptions
 
 usage: conformance.py <ironwork binary> [--nist results.tsv] [--commit sha] [--out report.md]
 """
-import argparse, collections, json, os, re, subprocess, sys
+import argparse
+import collections
+import json
+import os
+import re
+import subprocess  # nosec B404 -- run with argument lists only, never a shell
+import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 INPUTS = os.path.join(ROOT, "docs", "conformance")
@@ -64,7 +70,7 @@ def read_json(path):
         return json.load(f)
 
 def assumptions(binary):
-    out = subprocess.run([binary, "assumptions"], capture_output=True, text=True, check=True).stdout
+    out = subprocess.run([binary, "assumptions"], capture_output=True, text=True, check=True).stdout  # nosec B603 -- an argument list, no shell
     return [dict(zip(("id", "basis", "settled_by", "claim"), line.split("\t", 3))) for line in out.splitlines() if line]
 
 def catalogue():
@@ -118,7 +124,7 @@ def vm_section(results):
     return out
 
 def differential_section(campaign):
-    by_commit = collections.Counter(l.split()[0][:8] for l in campaign.get("labels", []) if l)
+    by_commit = collections.Counter(label.split()[0][:8] for label in campaign.get("labels", []) if label)
     shards = ", ".join(f"{c}, {n} shard{'s' if n > 1 else ''}" for c, n in by_commit.items())
     as_what = {"batch": "as batch programs", "cics": "as CICS tasks", "interface": "as subprograms at their interface"}
     modes = campaign.get("modes", {})
@@ -142,28 +148,28 @@ def differential_section(campaign):
 def listings_section(listings, results):
     classes = {r["program"]: r["class"] for r in results}
     rows = listings["listings"]
-    codes = collections.Counter(str(l["return_code"]) for l in rows)
-    compiled = [l for l in rows if l["return_code"] is not None and l["return_code"] <= 4]
-    ironwork = collections.Counter(classes.get(l["program"], "not run") for l in compiled)
-    compilers = sorted({l["compiler"] for l in rows if l["compiler"]})
+    codes = collections.Counter(str(row["return_code"]) for row in rows)
+    compiled = [row for row in rows if row["return_code"] is not None and row["return_code"] <= 4]
+    ironwork = collections.Counter(classes.get(row["program"], "not run") for row in compiled)
+    compilers = sorted({row["compiler"] for row in rows if row["compiler"]})
     out = ["## IBM's compile listings of CCVS85", "",
            f"{len(rows)} listings Enterprise COBOL {', '.join(compilers)} wrote for CCVS85 programs, from {listings['source']}. "
            "They show what IBM's compiler did with each program's source; they hold no run, so no IBM run is witnessed.", "",
            table(["IBM's return code", "Listings"], [[c, n] for c, n in sorted(codes.items(), key=lambda x: (not x[0].isdigit(), int(x[0]) if x[0].isdigit() else 0))]), "",
            f"Of the {len(compiled)} programs IBM compiled at return code 4 or less, ironwork's results: "
            + ", ".join(f"{c} {n}" for c, n in sorted(ironwork.items())) + ".", ""]
-    rest = [l for l in compiled if classes.get(l["program"], "not run") not in ("clean", "called", "compiled")]
+    rest = [row for row in compiled if classes.get(row["program"], "not run") not in ("clean", "called", "compiled")]
     if rest:
-        out += [table(["Program", "IBM's return code", "ironwork"], [[l["program"], l["return_code"], classes.get(l["program"], "not run")] for l in rest]), "",
+        out += [table(["Program", "IBM's return code", "ironwork"], [[row["program"], row["return_code"], classes.get(row["program"], "not run")] for row in rest]), "",
                 "\"failed\" compiles and reports a failed test when run; \"not run\" is a program tools/nist.py does not run, "
                 "such as EXEC85, the suite's own executive routine.", ""]
-    rejected = [l for l in rows if l["return_code"] is None or l["return_code"] > 4]
+    rejected = [row for row in rows if row["return_code"] is None or row["return_code"] > 4]
     if rejected:
         why = listings.get("notes", {})
         out += ["The listings where IBM's compiler stopped:", "",
                 table(["Program", "IBM's return code", "First message", "Why", "ironwork"],
-                      [[l["program"] or l["file"], l["return_code"], l["first_severe"] or "", why.get(l["first_severe"] or "", ""),
-                        classes.get(l["program"], "-") if l["program"] else "-"] for l in rejected]), ""]
+                      [[row["program"] or row["file"], row["return_code"], row["first_severe"] or "", why.get(row["first_severe"] or "", ""),
+                        classes.get(row["program"], "-") if row["program"] else "-"] for row in rejected]), ""]
     return out
 
 def census_section(census, areas, messages):
@@ -217,7 +223,7 @@ def assumptions_section(register):
 
 def hercules_section(text, register, commit):
     lines = text.splitlines()
-    rows = [l.split() for l in lines if re.match(r"^[A-Z]+\s+\d+\s+\d+$", l)]
+    rows = [line.split() for line in lines if re.match(r"^[A-Z]+\s+\d+\s+\d+$", line)]
     total = re.search(r"^(\d+) agree, (\d+) disagree$", text, re.M)
     agree, disagree = (int(total.group(1)), int(total.group(2))) if total else (0, 0)
     differing = [r[0] for r in rows if r[2] != "0"]
@@ -240,7 +246,7 @@ def hercules_section(text, register, commit):
 def db2_section(register):
     path = os.path.join(ROOT, "tools", "db2-probe", "observed-12.1.5.txt")
     with open(path) as f:
-        sections = [l[3:].split(":")[0].strip() for l in f.read().splitlines() if l.startswith("== ")]
+        sections = [line[3:].split(":")[0].strip() for line in f.read().splitlines() if line.startswith("== ")]
     observed = [a for a in register if a["settled_by"] == "db2" and a["basis"] == "observed"]
     return ["## Db2 for Linux", "",
             "The SQL runtime's assumptions are settled by Db2 for z/OS, which no session here can reach. tools/db2-probe "
@@ -256,8 +262,8 @@ def main():
     p.add_argument("--out")
     a = p.parse_args()
     binary = os.path.abspath(a.binary)
-    version = subprocess.run([binary, "--version"], capture_output=True, text=True, check=True).stdout.strip()
-    commit = a.commit or subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
+    version = subprocess.run([binary, "--version"], capture_output=True, text=True, check=True).stdout.strip()  # nosec B603 -- an argument list, no shell
+    commit = a.commit or subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()  # nosec B603 B607 -- an argument list, git from PATH
     results = read_tsv(a.nist)
     register = assumptions(binary)
     areas, messages = catalogue()
