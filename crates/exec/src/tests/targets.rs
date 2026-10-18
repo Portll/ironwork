@@ -722,6 +722,32 @@ const FUNCTION_VALUES: &str = concat!(
     "           STOP RUN.\n",
 );
 
+/// EXP of an argument whose value is below f64's range, then of one whose value is past 2^256.
+const FUNCTION_EXTREMES: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. FNEXTREM.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 R PIC S9(3)V9(6).\n",
+    "       01 N PIC S9(4) VALUE -1000.\n",
+    "       01 M PIC S9(4) VALUE 200.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           COMPUTE R = FUNCTION EXP(N) DISPLAY R\n",
+    "           COMPUTE R = FUNCTION EXP(M) DISPLAY R\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn a_gnucobol_target_gives_a_tiny_function_value_as_zero_and_refuses_one_past_256_bits() {
+    let flags = numeric::Target::Gnucobol.flags();
+    let flags: Vec<&str> = flags.iter().map(String::as_str).collect();
+    for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+        let ran = Harness::source(FUNCTION_EXTREMES).flags(&flags).run(executor);
+        assert_eq!(ran.out, "+000.000000\n", "{name}: {}", ran.err);
+        assert!(ran.ending.as_ref().is_err_and(|a| a.message.contains("a value wider than 256 bits")), "{name}: {:?}", ran.ending);
+    }
+}
+
 /// Arguments outside a math function's domain, and MOD and REM by zero.
 const FUNCTION_DOMAIN: &str = concat!(
     "       IDENTIFICATION DIVISION.\n",

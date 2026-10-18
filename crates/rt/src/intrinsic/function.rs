@@ -530,24 +530,24 @@ fn long_numval(facts: &dyn ProgramFacts, name: &str, text: &str, pos: Pos) -> R<
 /// decimal, [`cobc_value`].
 fn float_result(r: Real, p: Precision, cobc: bool, pos: Pos) -> R<Val> {
     if cobc {
-        return Ok(cobc_value(r));
+        return cobc_value(r, pos);
     }
     Ok(Val::Float(r.to_hfp(p).map_err(|c| Abend::check(c, pos))?))
 }
 
 /// `r` as a decimal of 32 significant digits, rounded half away from zero: close enough to cobc's
 /// decimal value that truncating either into any receiver gives the same digits, and a value an
-/// exact decimal gives, such as a MEAN of 0.15, exactly.
-fn cobc_value(r: Real) -> Val {
+/// exact decimal gives, such as a MEAN of 0.15, exactly. A value from 2^256 is past the model.
+fn cobc_value(r: Real, pos: Pos) -> R<Val> {
     let (significand, exponent) = r.parts();
     if significand == 0 {
-        return integer(0, 1);
+        return Ok(integer(0, 1));
     }
-    let integer_digits = r.abs().to_f64().log10().floor() as i64 + 1;
-    let dec = (32 - integer_digits).clamp(0, 38) as u32;
+    let log10 = (significand as f64).log10() + f64::from(exponent) * std::f64::consts::LOG10_2;
+    let dec = (31 - log10.floor() as i64).clamp(0, 38) as u32;
     let scaled = U256::widening_mul(significand, U256::pow10(dec).to_u128().unwrap_or(1));
     let magnitude = match exponent {
-        e if e >= 0 => scaled.checked_mul(U256::from_u128(1) << e.unsigned_abs().min(127)).unwrap_or(scaled),
+        e if e >= 0 => u32::try_from(e).ok().filter(|&e| e < 256).and_then(|e| scaled.checked_mul(U256::from_u128(1) << e)).ok_or_else(|| Abend::ironwork("a value wider than 256 bits", pos))?,
         e if e <= -256 => U256::ZERO,
         e => {
             let shift = e.unsigned_abs();
@@ -555,7 +555,7 @@ fn cobc_value(r: Real) -> Val {
         }
     };
     let int = (magnitude.bits() as f64 * std::f64::consts::LOG10_2).ceil() as u32 + 1;
-    Val::Num(crate::fixed::fixed(r.is_negative(), magnitude, Places::new(int.saturating_sub(dec).max(1), dec)))
+    Ok(Val::Num(crate::fixed::fixed(r.is_negative(), magnitude, Places::new(int.saturating_sub(dec).max(1), dec))))
 }
 
 /// An integer argument's value, any fraction truncated.
@@ -1015,7 +1015,7 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             }
             let combined = Real::from_u128(date as u128) + seconds / Real::from_u128(100_000);
             if cobc {
-                return Ok(cobc_value(combined));
+                return cobc_value(combined, pos);
             }
             // A long-precision result whatever ARITH says (Language Reference SC27-8713-03, p. 541).
             let long = combined.to_hfp(Precision::Long).map_err(|c| Abend::check(c, pos))?;
