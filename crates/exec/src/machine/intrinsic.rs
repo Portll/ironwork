@@ -189,11 +189,16 @@ impl<'p> Machine<'p, '_, '_> {
     /// HEX-OF, BIT-OF and BYTE-LENGTH, which read an argument's bytes as stored, so that invalid
     /// data in a numeric item is shown rather than ending the run.
     pub(super) fn storage_function(&mut self, f: &FunctionCall) -> R<Option<Val>> {
-        if !matches!(f.name.as_str(), "HEX-OF" | "BIT-OF" | "BYTE-LENGTH") {
+        if !matches!(f.name.as_str(), "HEX-OF" | "BIT-OF" | "BYTE-LENGTH" | "HIGHEST-ALGEBRAIC" | "LOWEST-ALGEBRAIC") {
             return Ok(None);
         }
         if f.args.len() != 1 {
             return Err(Abend::ironwork(format!("FUNCTION {} takes one argument", f.name), f.pos));
+        }
+        if let Some(high) = match f.name.as_str() { "HIGHEST-ALGEBRAIC" => Some(true), "LOWEST-ALGEBRAIC" => Some(false), _ => None } {
+            let Expr::Operand(Operand::Ref(r)) = &f.args[0] else { return Err(Abend::ironwork(format!("FUNCTION {} takes a numeric item", f.name), f.pos)) };
+            let loc = self.locate(r)?;
+            return intrinsic_function::algebraic(&self.facts(), loc, high, &f.name, f.pos).map(Some);
         }
         let bytes = self.stored_bytes(&f.args[0], f.pos)?;
         intrinsic_function::storage(&self.facts(), &f.name, &bytes, f.pos).map(Some)

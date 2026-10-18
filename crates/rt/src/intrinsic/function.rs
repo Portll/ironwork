@@ -92,6 +92,38 @@ pub fn storage(facts: &dyn ProgramFacts, name: &str, bytes: &[u8], pos: Pos) -> 
     }
 }
 
+/// HIGHEST-ALGEBRAIC and LOWEST-ALGEBRAIC of a numeric item: the largest and smallest value its
+/// description allows, the PICTURE's nines and sign, or the container's range for a native binary
+/// item (GnuCOBOL's, from cobc 3.2).
+pub fn algebraic(facts: &dyn ProgramFacts, loc: crate::storage::Loc, high: bool, name: &str, pos: Pos) -> R<Val> {
+    use crate::storage::Kind;
+    let places = crate::store::places(facts, loc);
+    let scaling = crate::store::scaling(facts, loc);
+    // cobc counts the trailing P positions among the nines and scales by them again.
+    let nines = |digits: u32| 10u128.pow((digits + scaling).min(38)) - 1;
+    let (magnitude, signed) = match loc.kind {
+        Kind::Zoned { digits, signed, .. } | Kind::Packed { digits, signed, .. } => (nines(digits), signed),
+        Kind::Binary { digits, signed, native, .. } if native.is_native() => {
+            let bits = 8 * numeric::binary::Binary { digits: digits as u8, signed, native }.bytes() as u32;
+            match (signed, high) {
+                (true, true) => ((1u128 << (bits - 1)) - 1, true),
+                (true, false) => (1u128 << (bits - 1), true),
+                (false, _) => (u128::MAX >> (128 - bits), false),
+            }
+        }
+        Kind::Binary { digits, signed, .. } => (nines(digits), signed),
+        Kind::NumericEdited { edit, digits, .. } => {
+            let (symbols, _) = facts.edit(edit);
+            let signed = symbols.iter().any(|s| matches!(s, crate::picture::Sym::Sign(_) | crate::picture::Sym::Cr | crate::picture::Sym::Db | crate::picture::Sym::FloatLead('+' | '-')));
+            (nines(digits), signed)
+        }
+        _ => return Err(Abend::ironwork(format!("FUNCTION {name} takes a numeric item"), pos)),
+    };
+    let magnitude = if !high && !signed { 0 } else { magnitude };
+    let magnitude = U256::from_u128(magnitude).checked_mul(U256::pow10(scaling)).unwrap_or_default();
+    Ok(Val::Num(Fixed { negative: !high && signed && !magnitude.is_zero(), magnitude, places }))
+}
+
 /// The bytes of an argument that is not a data item, as DISPLAY would hold the value.
 pub fn stored_bytes(facts: &dyn ProgramFacts, val: Val, pos: Pos) -> R<Vec<u8>> {
     Ok(match val {

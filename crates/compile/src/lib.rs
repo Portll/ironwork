@@ -2551,6 +2551,14 @@ impl Check<'_> {
                         syntax::messages::IWC0321.at(f.pos, format!("FUNCTION {name}: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it"))
                     });
                 }
+                if matches!(f.name.as_str(), "HIGHEST-ALGEBRAIC" | "LOWEST-ALGEBRAIC") && self.intrinsic(&f.name) {
+                    let name = &f.name;
+                    self.errors.push(if self.extended {
+                        syntax::messages::IWX0116.at(f.pos, format!("FUNCTION {name} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such function): the largest or smallest value the argument's description allows"))
+                    } else {
+                        syntax::messages::IWC0343.at(f.pos, format!("FUNCTION {name}: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it"))
+                    });
+                }
                 if f.name == "STORED-CHAR-LENGTH" && self.intrinsic(&f.name) {
                     self.errors.push(if self.extended {
                         syntax::messages::IWX0042.at(f.pos, "FUNCTION STORED-CHAR-LENGTH (GnuCOBOL; Enterprise COBOL has no such function): the argument's length in characters without its trailing spaces")

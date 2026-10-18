@@ -1572,7 +1572,7 @@ type is read as weak, so no move or comparison is refused for its type`, at STRO
 TYPEDEF and the TYPE clause (and USAGE type-name) are read under strict as Enterprise COBOL reads them:
 a TYPEDEF entry has no storage, and each item that names the type takes the type's PICTURE, USAGE, SIGN,
 OCCURS and subordinate entries, its own VALUE and clauses winning. Under extended, STRONG is read as cobc
-3.2 reads it, with no type checking; strict still refuses it (IWR0003-S). A type named before a TYPEDEF
+3.2 reads it, with no type checking (assumption C503); strict still refuses it (IWR0003-S). A type named before a TYPEDEF
 defines it is IWC0341-S.
 
 ### IWX0115-W EXTERNAL AS
@@ -1583,6 +1583,21 @@ data-name): the record is shared under that name`, at AS.
 An EXTERNAL record written `EXTERNAL AS literal` is shared across the run unit under the literal, as
 cobc 3.2 shares it, so programs may refer to one record by different data-names. Strict refuses it
 (IWC0342-S).
+
+### IWX0116-W HIGHEST-ALGEBRAIC and LOWEST-ALGEBRAIC
+
+`IWX0116-W FUNCTION {name} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such function): the largest
+or smallest value the argument's description allows`, at the function.
+
+The argument is a numeric or numeric-edited item. The value is the PICTURE's nines with its sign and
+scale, as cobc 3.2 gives it: HIGHEST-ALGEBRAIC of `PIC S9(4) BINARY` is 9999, of `PIC 99V9(3)` 99.999, of
+`PIC $**,**9.99BCR` 99999.99. For a native binary item (COMP-5, BINARY-CHAR, COMP-X, BINARY-LONG) it is
+the range of the bytes: 32767 for `PIC S9(4) COMP-5`, 127 and 255 for BINARY-CHAR signed and unsigned.
+LOWEST-ALGEBRAIC is the negative of HIGHEST for a signed item and zero for an unsigned or unsigned-edited
+one (an edited PICTURE is signed with a sign symbol or CR or DB), except a native signed binary item's,
+which is the container's minimum (-32768). A trailing P counts among the nines and then scales the
+value again: `PIC 99PP` gives 999900, which is cobc 3.2's value (assumption C504). Strict refuses the
+function (IWC0343-S).
 
 ## Relaxed
 

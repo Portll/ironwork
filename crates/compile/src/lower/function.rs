@@ -34,7 +34,7 @@ impl Lower<'_> {
         let FunctionCall { name: _, args: _, modifier: _, refmod: _, all_subscripts: _, pos: _ } = f;
         let Some(func) = Func::named(&f.name) else { return unsupported("a FUNCTION the LIR does not name", f.pos) };
         let pos = f.pos;
-        let (args, sides) = if matches!(func, Func::HexOf | Func::BitOf | Func::ByteLength) { self.stored_argument(f)? } else { self.arguments(f)? };
+        let (args, sides) = if matches!(func, Func::HexOf | Func::BitOf | Func::ByteLength | Func::HighestAlgebraic | Func::LowestAlgebraic) { self.stored_argument(f)? } else { self.arguments(f)? };
         let count = sides.iter().try_fold(0u64, |n, a| Some(n + a.times?));
         let arity = match arity_message(func, &f.name, count, &sides, pos)? {
             Some(message) => Some(self.ironwork(&message)?),
@@ -197,7 +197,7 @@ fn arity_message(func: Func, name: &str, count: Option<u64>, sides: &[Arg], pos:
         return Ok(None);
     }
     Ok(Some(match func {
-        Func::HexOf | Func::BitOf | Func::ByteLength => format!("FUNCTION {name} takes one argument"),
+        Func::HexOf | Func::BitOf | Func::ByteLength | Func::HighestAlgebraic | Func::LowestAlgebraic => format!("FUNCTION {name} takes one argument"),
         Func::PresentValue => "FUNCTION PRESENT-VALUE needs a rate and at least one amount".to_owned(),
         _ if range.end() == &usize::MAX => format!("FUNCTION {name} needs arguments"),
         Func::Char
@@ -349,6 +349,7 @@ fn result(func: Func, args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
         | Func::StoredCharLength => integer(9),
         Func::ArgumentNumeric => num(None, 0),
         Func::ArgumentNumericClass => integer(1),
+        Func::HighestAlgebraic | Func::LowestAlgebraic => num(None, 0),
         Func::CrtStatus => integer(4),
         Func::CallParameters => integer(9),
         Func::Factorial => integer(if arith != Arith::Compat { 31 } else { 30 }),

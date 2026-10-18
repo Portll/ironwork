@@ -365,7 +365,16 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let plan = &self.p.plans.function[id as usize];
         let pos = self.pos(plan.at);
         let facts = self.facts();
-        let value = if matches!(plan.func, Func::HexOf | Func::BitOf | Func::ByteLength) {
+        let value = if let Func::HighestAlgebraic | Func::LowestAlgebraic = plan.func {
+            if let Some(abend) = plan.arity {
+                return Err(self.abend(abend, Some(plan.at)).into());
+            }
+            let [Argument::Value(Comparand::Operand(Operand::Load(p)))] = plan.args.as_slice() else {
+                return Err(not_yet("FUNCTION HIGHEST-ALGEBRAIC or LOWEST-ALGEBRAIC of anything but a numeric item"));
+            };
+            let loc = self.loc(*p)?;
+            intrinsic::algebraic(&facts, loc, plan.func == Func::HighestAlgebraic, plan.func.name(), pos)?
+        } else if matches!(plan.func, Func::HexOf | Func::BitOf | Func::ByteLength) {
             if let Some(abend) = plan.arity {
                 return Err(self.abend(abend, Some(plan.at)).into());
             }

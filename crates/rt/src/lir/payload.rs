@@ -367,6 +367,8 @@ functions! {
     ArgumentNumeric = 93, "ARGUMENT NUMERIC", 1..=1;
     ArgumentNumericClass = 94, "ARGUMENT NUMERIC CLASS", 1..=1;
     ArgumentNumericDisplay = 95, "ARGUMENT NUMERIC DISPLAY", 1..=1;
+    HighestAlgebraic = 96, "HIGHEST-ALGEBRAIC", 1..=1;
+    LowestAlgebraic = 97, "LOWEST-ALGEBRAIC", 1..=1;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

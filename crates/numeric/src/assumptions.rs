@@ -415,6 +415,8 @@ pub const ANY_NUMERIC_NOT_NUMERIC: &str = "C513";
 pub const ANY_NUMERIC_MOVES: &str = "C514";
 pub const WIDE_ARITHMETIC: &str = "C515";
 pub const WIDE_FUNCTIONS: &str = "C516";
+pub const TYPEDEF_STRONG_WEAK: &str = "C503";
+pub const ALGEBRAIC_LIMITS: &str = "C504";
 pub const DESCRIBED_COLUMNS: &str = "C403";
 pub const SQLDA_CHECKS: &str = "C404";
 pub const CLASS_ORDINALS: &str = "C430";
@@ -2853,6 +2855,20 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[U(OccursDepending)]],
+    },
+    Assumption {
+        id: ALGEBRAIC_LIMITS,
+        claim: "HIGHEST-ALGEBRAIC and LOWEST-ALGEBRAIC of a numeric item, read under --compliance extended, are the item's description's limits as cobc 3.2 gives them: the PICTURE's nines with its scale and sign, a native binary item's container range, zero for an unsigned LOWEST, and for a trailing P the nines counting the P positions and then scaled by them again (PIC 99PP gives 999900). Enterprise COBOL has no such functions",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended)]],
+    },
+    Assumption {
+        id: TYPEDEF_STRONG_WEAK,
+        claim: "Under --compliance extended, TYPEDEF STRONG is read as a weak type, as cobc 3.2 reads it ('TYPEDEF STRONG is not implemented'): an item of the type takes its clauses and entries, and no MOVE, comparison or argument is refused for its type. Enterprise COBOL checks a strongly typed group (Language Reference SC27-8713-03, TYPEDEF clause); strict refuses STRONG as not supported yet",
+        basis: Basis::Chosen,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[O(Extended)]],
     },
     Assumption {
         id: SORT_FILE_ASSIGN_ITEM,
