@@ -142,6 +142,7 @@ const ARGUMENT_CONDITIONS: &[&str] = &[
 pub fn evaluate(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args: &mut Vec<Val>, pos: Pos) -> R<Val> {
     let facts = x.facts();
     match checked(x, name, side, args, pos) {
+        Ok(Val::Num(f)) if facts.options().emulates_cobc() && COBC_ALLOCATED.contains(&name) => Ok(Val::Num(cobc_field(f))),
         Err(a) if facts.options().emulates_cobc() && (ARGUMENT_CONDITIONS.iter().any(|id| a.message.starts_with(id)) || matches!(name, "MOD" | "REM") && a.divides_by_zero()) => Ok(match name {
             "CHAR" => Val::Bytes(vec![0]),
             _ if super::CHARACTER_VALUED.contains(&name) => Val::Bytes(Vec::new()),
@@ -264,7 +265,7 @@ fn checked(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args: &mu
             let places = super::fixed_places(name, &given, facts.options().arith).expect("MOD, REM, INTEGER, INTEGER-PART and ABS have fixed places");
             let value = Fixed::new(result / 10i128.pow(dec - places.dec.min(dec)), places);
             // MOD's value has the digits of its shorter argument, high-order digits beyond them dropped.
-            Val::Num(if name == "MOD" { value.fit(places) } else { value })
+            Val::Num(if name == "MOD" && !cobc { value.fit(places) } else { value })
         }
         "INTEGER-OF-DATE" => {
             arity(1..=1)?;
@@ -410,6 +411,31 @@ fn real(v: &Val, p: Precision, name: &str, pos: Pos) -> R<Real> {
 
 fn reals(args: &[Val], p: Precision, name: &str, pos: Pos) -> R<Vec<Real>> {
     args.iter().map(|v| real(v, p, name, pos)).collect()
+}
+
+/// The numeric functions whose value cobc holds in a field of its own size ([`cobc_field`]).
+const COBC_ALLOCATED: &[&str] = &[
+    "FACTORIAL", "INTEGER", "INTEGER-OF-DATE", "INTEGER-OF-DAY", "INTEGER-PART", "MOD", "ORD", "ORD-MAX", "ORD-MIN", "RANGE", "REM", "SIGN", "SUM", "YEAR-TO-YYYY",
+];
+
+/// A function's value as cobc holds it (cob_alloc_field, libcob/intrinsic.c): its trailing zero
+/// decimal places dropped, then in nine digits where it fits a fullword with under ten decimal
+/// places, in twenty where it fits a doubleword with under nineteen, else in as many as it has.
+fn cobc_field(f: Fixed) -> Fixed {
+    let ten = U256::from_u128(10);
+    let (mut magnitude, mut dec) = (f.magnitude, f.places.dec);
+    while dec > 0 && magnitude.div_rem(ten).1.is_zero() {
+        magnitude = magnitude.div_rem(ten).0;
+        dec -= 1;
+    }
+    let bits = magnitude.bits() + u32::from(f.negative);
+    let digits = match () {
+        _ if bits < 33 && dec < 10 => 9,
+        _ if bits < 65 && dec < 19 => 20,
+        _ => (magnitude.bits() as f64 * std::f64::consts::LOG10_2).ceil() as u32 + 1,
+    };
+    let int = digits.saturating_sub(dec);
+    crate::fixed::fixed(f.negative, magnitude, Places::new(int, dec))
 }
 
 /// A floating-point function's value: floating point of `p`; for cobc, which computes it in
@@ -672,6 +698,8 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
                     }
                 }
                 _ if floating => float_result(real(&args[best], p, name, pos)?, p, cobc, pos),
+                // cobc gives the winning argument's own field.
+                _ if cobc => Ok(args.swap_remove(best)),
                 _ => Ok(match values_places(args, name, arith) {
                     Some(widest) => Val::Num(widened(&args[best], widest)),
                     None => args.swap_remove(best),

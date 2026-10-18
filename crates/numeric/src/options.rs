@@ -1310,6 +1310,20 @@ impl Options {
     /// Whether the program is compiled for GnuCOBOL: under `--dialect gnucobol`, or a compliance
     /// level that reads GnuCOBOL's and Micro Focus's forms. Behaviours IBM and cobc both define
     /// otherwise follow cobc then (docs/targets.md).
+    /// Whether the program is compiled as cobc -std=ibm-strict compiles it: GnuCOBOL's dialect
+    /// under strict compliance, the `gnucobol-ibm-strict` target.
+    pub fn emulates_cobc_ibm_strict(&self) -> bool {
+        self.dialect == Dialect::Gnucobol && self.compliance == Compliance::Strict
+    }
+
+    /// The options a target sets beyond its flags, which a card's outrank: cobc -std=ibm-strict
+    /// does not truncate a binary item to its PICTURE (`binary-truncate: no`), TRUNC(BIN).
+    pub fn derive_target_defaults(&mut self) {
+        if self.emulates_cobc_ibm_strict() {
+            self.trunc = Trunc::Bin;
+        }
+    }
+
     pub fn emulates_cobc(&self) -> bool {
         self.dialect == Dialect::Gnucobol || self.compliance != Compliance::Strict
     }

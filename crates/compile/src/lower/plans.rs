@@ -53,6 +53,10 @@ impl Lower<'_> {
         if to == Kind::Group && from.src.is_some() && matches!(from.value, Value::Num(_) | Value::Float | Value::Address) {
             return Ok(MovePlan::Alnum { image: Image::Stored, justified: false });
         }
+        // cobc moves a function value's own field as digits, whatever its decimal places.
+        if self.c.options.emulates_cobc() && from.src.is_none() && matches!(from.value, Value::Num(Some(_))) && matches!(to, Kind::Group | Kind::Alnum { .. }) {
+            return Ok(MovePlan::Alnum { image: Image::Digits { digits: from.digits }, justified: matches!(to, Kind::Alnum { justified: true }) });
+        }
         if from.value == Value::Num(None) && matches!(to, Kind::Group | Kind::Alnum { .. } | Kind::AlnumEdited { .. }) {
             return unsupported("a FUNCTION result whose digits are known only when it runs, moved to an alphanumeric item", syntax::Pos::default());
         }

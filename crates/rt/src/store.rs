@@ -1056,6 +1056,8 @@ pub fn alnum_image(facts: &dyn ProgramFacts, val: &Val, src: Option<Loc>, len: u
             let digits = src.and_then(|s| s.kind.digits_scale().map(|(d, _)| d + scaling(facts, s))).unwrap_or(f.places.total());
             zoned_digits(f.magnitude.to_u128().unwrap_or(0), digits as usize, decimal::UNSIGNED)
         }
+        // cobc moves a function value's field as digits, its decimal places among them.
+        Val::Num(f) if src.is_none() && facts.options().emulates_cobc() => zoned_digits(f.magnitude.to_u128().unwrap_or(0), f.places.total() as usize, decimal::UNSIGNED),
         Val::Dbcs(b) => b.clone(),
         Val::National(_) | Val::AllNational(_) => return Err(Abend::ironwork("a national value cannot be moved to an alphanumeric item", pos)),
         _ => return Err(Abend::ironwork("only an integer numeric value can be moved to an alphanumeric item", pos)),

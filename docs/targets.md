@@ -45,22 +45,22 @@ gnucobol`, or under `--compliance extended`, `relaxed` or `loose`.
 | RETURN-CODE after a CALL with RETURNING | kept as it was (Language Reference, CALL) | the called program's | yes, but after a program whose header says RETURNING OMITTED, where cobc keeps it |
 | The RETURN-CODE special register's size | `S9(4) BINARY` | a fullword, shown in nine digits: `+000000007` | yes |
 | DISPLAY of a zoned item holding other characters than digits | the bytes | under `gnucobol` a sign and the decimal point among the characters, each after the point shown as 0; under `gnucobol-ibm-strict` the sign after them, a space shown as 0 | yes |
-| A binary item larger than its PICTURE | cut under TRUNC(STD) | kept, as TRUNC(BIN); give `CBL TRUNC(BIN)` | by card |
+| A binary item larger than its PICTURE | cut under TRUNC(STD) | under `gnucobol` cut, cobc's `binary-truncate: yes`; under `gnucobol-ibm-strict` kept, TRUNC(BIN) unless a card sets TRUNC, its `binary-truncate: no` | yes |
 | ACCEPT into an item longer than a line (C261) | the next records fill it | one line, the rest spaces | yes |
 | ACCEPT into a numeric item | the characters as they come | the line moved as an alphanumeric MOVE moves it | yes |
 | MOVE of an alphanumeric item to a numeric one (C240) | an unsigned integer, each character's low half | one sign and the digits aligned on the decimal point; another character before the receiver is full gives zero | yes |
 | MOVE of a zoned item holding other characters than digits to a zoned one (C260) | each digit's low half, zone F | each byte copied, aligned on the decimal point, a space as 0 and the sign byte read as a comparison reads it | yes |
-| A receiving group holding its own OCCURS DEPENDING ON object | its maximum length | the object's current value | not yet |
+| A receiving group holding its own OCCURS DEPENDING ON object | its maximum length | under `gnucobol` its maximum length too; under `gnucobol-ibm-strict` the object's current value, its `odoslide: yes` | yes |
 | `ADD X TO X Y`, and SUBTRACT and MULTIPLY with one sending item | the sending item read once for every receiver | read again for each receiver, after the one before is stored; two or more sending operands summed once, as IBM sums them | yes |
 | A signed zoned item compared with an alphanumeric operand (C221) | the sign byte's zone made F under ZWB, so a space reads as 0 | a sign removed from a digit; a space kept; another character read as 0 | yes |
 | ORD, CHAR and a contained program under a PROGRAM COLLATING SEQUENCE | the program's sequence | native, ironwork's being EBCDIC's ([dialect.md](dialect.md) §5.1); ORD-MAX and ORD-MIN the program's; a contained program its own | yes |
-| CANCEL of a program CALLed by a literal | no action under NODYNAM | the program is reset; give `CBL DYNAM` | by card |
+| CANCEL of a program CALLed by a literal | no action under NODYNAM | the program is reset; give `CBL DYNAM` | by card: a derived DYNAM would also turn a CALL of a missing program from ironwork's link refusal into CEE3501S, an ending cobolwork reads as a program the input selects |
 | ALTER in an independent segment (C52) | put back on entry | never put back | yes |
 | The rest of a JSON or XML GENERATE receiver | kept | spaces, in the document's encoding | yes |
 | INSPECT of a national item (C230) | national characters | TALLYING FOR CHARACTERS in bytes, two to a character | yes |
 | An intermediate result of more than 30 digits (C1) | cut to 30 (31) | every digit kept, to 46 | yes |
 | The floating-point functions, MEAN, MEDIAN, NUMVAL, COMBINED-DATETIME, SQRT, LOG, PI and the rest, and a floating-point value stored in a fixed-point item (C111) | floating point, rounded into the receiver | decimal, to 32 significant digits, truncated unless ROUNDED; a fractional power stays floating point, where cobc takes a decimal base's power in decimal | yes |
-| MAX, MIN, RANGE, REM, SUM; INTEGER, INTEGER-PART, MOD of fixed-point arguments | IBM's places | cobc's fields | not yet |
+| MAX, MIN, RANGE, REM, SUM; INTEGER, INTEGER-PART, MOD and the other integer functions (C390 to C394) | IBM's places | cobc's fields: MAX and MIN the winning argument's own, ABS its argument's, the others nine digits where the value fits a fullword and twenty where a doubleword (`cob_alloc_field`); moved to an alphanumeric item as their digits, decimal places among them | yes, but an expression argument's: cobc gives it a field of its own, which ironwork keeps at the expression's places |
 | A zero divisor outside ON SIZE ERROR | S0CB, S0C9 or S0CF | the receiver kept as it was, and the run goes on | yes |
 | Invalid decimal data in arithmetic, comparisons, MOVE and DISPLAY | S0C7 | read as libcob reads it: a zoned character worth the low half of its ASCII code, a packed digit its half-byte's value, HIGH-VALUE and LOW-VALUE as plus and minus 10 to the item's size; the run goes on | yes |
 | An OPEN or CLOSE of an indexed or relative file that fails, with no FILE STATUS and no declarative (C451) | control returns; the next statement on the file is a logic error | the run ends at the OPEN or CLOSE, U4038 with IGZ0035S | yes |

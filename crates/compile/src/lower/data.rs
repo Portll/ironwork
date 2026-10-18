@@ -116,8 +116,10 @@ impl Lower<'_> {
     }
 
     /// A data reference as `Machine::locate_as` resolves it. `receiving` keeps a group that holds
-    /// the object of its own OCCURS DEPENDING ON at its maximum length.
+    /// the object of its own OCCURS DEPENDING ON at its maximum length, except for cobc
+    /// -std=ibm-strict, which takes the object's current value (`odoslide: yes`).
     pub(super) fn place(&mut self, r: &Ref, receiving: bool) -> R<PlaceId> {
+        let receiving = receiving && !self.c.options.emulates_cobc_ibm_strict();
         let key = format!("{receiving} {r:?}");
         if let Some(&id) = self.place_ids.get(&key) {
             return Ok(id);

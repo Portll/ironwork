@@ -292,6 +292,7 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
             errors.push(syntax::messages::IWO0005.at(Pos::default(), e.to_string()));
         }
     }
+    options.derive_target_defaults();
     for option in &program.options {
         if let Some(on) = numeric::options::switch(option, "SSRANGE") {
             ssrange = on;

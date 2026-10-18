@@ -518,16 +518,16 @@ fn constructs_outside_the_slice_are_refused_by_name() {
 }
 
 /// MAX and MIN of fixed-point items have places their descriptions fix (`rt::intrinsic::fixed_places`),
-/// so the move to an alphanumeric item is planned: the digits of an integer, a refusal of a value
-/// with decimal places, as the walker refuses it.
+/// so the move to an alphanumeric item is planned as digits; under extended, as cobc moves the
+/// winning argument's field, a value with decimal places too.
 #[test]
 fn max_of_items_of_different_sizes_moves_its_digits_to_an_alphanumeric_item() {
     let data = "       01  A PIC X(4).\n       01  N PIC 9.\n       01  M PIC 99.\n       01  D PIC 9V9.\n";
     let p = lowered_with(&program("", data, &[line("MOVE FUNCTION MAX(N M) TO A"), line("MOVE FUNCTION MIN(N D) TO A"), line("GOBACK.")].concat()), EXTENDED);
     let m = moves(&p);
     assert_eq!(m[0], MovePlan::Alnum { image: Image::Digits { digits: 2 }, justified: false });
-    let MovePlan::Refused(abend) = m[1] else { panic!("{:?}", m[1]) };
-    assert_eq!(symbol(&p, p.abends[abend as usize].message), "only an integer numeric value can be moved to an alphanumeric item");
+    // Under extended a value with decimal places moves its digits, as cobc moves its field.
+    assert_eq!(m[1], MovePlan::Alnum { image: Image::Digits { digits: 2 }, justified: false });
 }
 
 #[test]
@@ -1483,7 +1483,8 @@ fn each_function_s_result_reads_as_the_walker_s_value_does() {
     ];
     let source = program("", data, &body.iter().map(|s| line(s)).collect::<String>());
     let out = crate::testing::Harness::source(&source).flags(EXTENDED).run(crate::testing::Executor::Interpreter).out;
-    assert_eq!(out, "00008    \n0000     \n000000001\n000000000\n");
+    // cobc 3.2's output: each integer function's value in a field of nine digits.
+    assert_eq!(out, "000000008\n000000000\n000000001\n000000006\n");
     let p = lowered_with(&source, EXTENDED);
     let digits = |digits| MovePlan::Alnum { image: Image::Digits { digits }, justified: false };
     let m = moves(&p);

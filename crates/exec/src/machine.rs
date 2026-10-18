@@ -633,9 +633,10 @@ impl<'p, 'u, 'w> Machine<'p, 'u, 'w> {
 
     /// The receiving item of MOVE, ACCEPT, STRING, UNSTRING, READ and RETURN INTO, and WRITE,
     /// REWRITE and RELEASE FROM: a group holding the object of its own OCCURS DEPENDING ON is its
-    /// maximum length (Language Reference SC27-8713-03, pp. 205-206).
+    /// maximum length (Language Reference SC27-8713-03, pp. 205-206), except for cobc
+    /// -std=ibm-strict, which takes the object's current value.
     fn locate_receiving(&mut self, r: &Ref) -> R<Loc> {
-        self.locate_as(r, true)
+        self.locate_as(r, !self.options.emulates_cobc_ibm_strict())
     }
 
     fn locate_as(&mut self, r: &Ref, receiving: bool) -> R<Loc> {

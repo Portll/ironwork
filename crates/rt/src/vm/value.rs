@@ -233,7 +233,10 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
         let pos = self.pos(plan.at);
         let x = self.comparand_number(a, pos)?;
         let y = self.comparand_number(b, pos)?;
-        if let Some(n) = count_mod(x, y) {
+        // cobc's MOD keeps every digit, which only the intrinsic gives.
+        if !self.p.options.options.emulates_cobc()
+            && let Some(n) = count_mod(x, y)
+        {
             return Ok(Some(n));
         }
         let mut args = vec![Val::Num(x.fixed()), Val::Num(y.fixed())];
@@ -393,7 +396,7 @@ impl<'p, L: Loader<Rc<Code>>> Vm<'p, '_, '_, L> {
                 _ => {}
             }
             let counted = match (plan.func, args.as_slice()) {
-                (Func::Mod, [Val::Num(a), Val::Num(b)]) => count_mod(Number::of(*a), Number::of(*b)),
+                (Func::Mod, [Val::Num(a), Val::Num(b)]) if !self.p.options.options.emulates_cobc() => count_mod(Number::of(*a), Number::of(*b)),
                 _ => None,
             };
             let result = match counted {

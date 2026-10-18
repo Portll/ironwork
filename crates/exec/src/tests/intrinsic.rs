@@ -466,27 +466,29 @@ fn a_mixed_function_s_decimal_places_count_in_the_expression_s_dmax() {
 /// MAX and MIN have as many integer places as their widest argument (C391); INTEGER one digit more
 /// than its argument, INTEGER-PART as many, MOD as many as its shorter argument, high-order digits
 /// beyond them dropped (Language Reference SC27-8713-03, p. 601; Programming Guide SC27-8714-03,
-/// pp. 798-799; C392); RANGE and REM by the fixed-point table, and ABS its argument's (C393). An
-/// integer value moved to an alphanumeric item under `--compliance extended` shows each digit.
+/// pp. 798-799; C392); RANGE and REM by the fixed-point table, and ABS its argument's (C393): under
+/// strict MOD(N1 H3) into a 999 item is 7. Under `--compliance extended` each value has cobc's
+/// field, moved to an alphanumeric item as its digits: MAX, MIN and ABS the argument's own, the
+/// others nine digits, which an eight-byte item cuts to their first eight.
 #[test]
-fn each_numeric_function_s_value_has_ibm_s_digits() {
+fn each_numeric_function_s_value_has_ibm_s_places_and_cobc_s_field_under_extended() {
     let data = "       01  N3 PIC 999 VALUE 5.\n       01  M2 PIC 99 VALUE 3.\n       01  B3 PIC 999 VALUE 7.\n       01  C2 PIC 9V99 VALUE 8.25.\n       01  SN PIC S99 VALUE -5.\n       01  BIG PIC 9(5) VALUE 4.\n       01  N1 PIC S9 VALUE -3.\n       01  H3 PIC 999 VALUE 100.\n       01  X PIC X(8).\n";
     let functions = ["INTEGER(C2)", "INTEGER-PART(C2)", "MOD(B3 M2)", "MOD(N1 H3)", "MAX(N3 BIG)", "MIN(N3 M2)", "RANGE(N3 M2)", "REM(B3 M2)", "ABS(SN)", "SUM(N3 M2)"];
     let body: String = functions.iter().flat_map(|f| [line(&format!("MOVE FUNCTION {f} TO X")), line("DISPLAY '[' X ']'")]).chain([line("GOBACK.")]).collect();
     let out = on_both(&program("", data, &body), &["--compliance=extended"]);
-    assert_eq!(out, ["0008", "008", "01", "7", "00005", "003", "0002", "000001", "05", "00008"].map(|s| format!("[{s:<8}]\n")).concat());
+    assert_eq!(out, ["00000000", "00000000", "00000000", "00000009", "005", "03", "00000000", "00000000", "05", "00000000"].map(|s| format!("[{s:<8}]\n")).concat());
+    let computed = program("", "       01  N1 PIC S9 VALUE -3.\n       01  H3 PIC 999 VALUE 100.\n       01  R PIC 999.\n", &[line("COMPUTE R = FUNCTION MOD(N1 H3)"), line("DISPLAY R"), line("GOBACK.")].concat());
+    assert_eq!(on_both(&computed, &[]), "007\n");
 }
 
-/// A winning integer argument of MAX or MIN carries the other arguments' decimal places, so its
-/// value is no integer and cannot be moved to an alphanumeric item (Language Reference
-/// SC27-8713-03, p. 404); under `--compliance extended` both executors end the run there.
+/// A winning integer argument of MAX or MIN carries the other arguments' decimal places under IBM's
+/// rules, so its value is no integer and cannot be moved to an alphanumeric item (Language
+/// Reference SC27-8713-03, p. 404); under `--compliance extended` the value is the winning
+/// argument's own field, as cobc 3.2 gives it, and moves as its digit.
 #[test]
-fn max_of_an_integer_and_a_decimal_argument_is_no_integer() {
-    let source = program("", "       01  N PIC 9 VALUE 5.\n       01  D PIC 9V9 VALUE 1.\n       01  X PIC X(4).\n", &[line("MOVE FUNCTION MAX(N D) TO X"), line("GOBACK.")].concat());
-    let walker = Harness::source(&source).flags(&["--compliance=extended"]).run(Executor::Interpreter);
-    let vm = Harness::source(&source).flags(&["--compliance=extended"]).run(Executor::Vm);
-    assert_eq!(walker.ending, vm.ending);
-    assert_eq!(walker.ending.unwrap_err().message, "only an integer numeric value can be moved to an alphanumeric item");
+fn max_of_an_integer_and_a_decimal_argument_moves_the_winners_field_under_extended() {
+    let source = program("", "       01  N PIC 9 VALUE 5.\n       01  D PIC 9V9 VALUE 1.\n       01  X PIC X(4).\n", &[line("MOVE FUNCTION MAX(N D) TO X"), line("DISPLAY '[' X ']'"), line("GOBACK.")].concat());
+    assert_eq!(on_both(&source, &["--compliance=extended"]), "[5   ]\n");
 }
 
 /// MOVE of an integer or numeric function: refused under `--compliance strict`, whatever the
@@ -509,10 +511,12 @@ fn a_numeric_function_moves_under_extended_alone_alike_on_both_executors() {
         let walker = Harness::source(&source).flags(&flags).run(Executor::Interpreter);
         let vm = Harness::source(&source).flags(&flags).run(Executor::Vm);
         assert_eq!((&walker.out, &walker.ending), (&vm.out, &vm.ending), "{flags:?}");
-        // A separate sign stays where it is; extended under ibm shows cobc's decimal point, gnucobol cobc -std=ibm-strict's digits alone.
+        // cobc 3.2's output: MAX the winning argument's field, INTEGER nine digits, which X cuts,
+        // and MOD every digit. A separate sign stays where it is; extended under ibm shows cobc's
+        // decimal point, gnucobol cobc -std=ibm-strict's digits alone.
         let expected = match dialect {
-            "--dialect=ibm" => ["00005 |+00000.000", "00005 |+00001.500", "0008  |+00001.500", "0008  |+00012.500", "0008  |+00007.000", "0008  |+00005.500", "B     |+00005.500"],
-            _ => ["00005 |+00000000", "00005 |+00001500", "0008  |+00001500", "0008  |+00012500", "0008  |+00007000", "0008  |+00005500", "B     |+00005500"],
+            "--dialect=ibm" => ["005   |+00000.000", "005   |+00001.500", "000000|+00001.500", "000000|+00012.500", "000000|+00097.000", "000000|+00005.500", "B     |+00005.500"],
+            _ => ["005   |+00000000", "005   |+00001500", "000000|+00001500", "000000|+00012500", "000000|+00097000", "000000|+00005500", "B     |+00005500"],
         };
         assert_eq!(walker.out, expected.map(|s| format!("{s}\n")).concat(), "{flags:?}");
         let extended = compile(syntax::parse(&source).unwrap(), &flags.map(str::to_owned)).unwrap();

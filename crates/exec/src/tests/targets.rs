@@ -699,3 +699,122 @@ fn a_gnucobol_target_gives_zero_for_an_argument_outside_a_math_functions_domain_
         assert!(ibm.ending.as_ref().is_err_and(|a| a.message.starts_with("CEE2010E")), "{name}: {:?}", ibm.ending);
     }
 }
+
+/// A group receiving its own OCCURS DEPENDING ON object from a longer sender.
+const ODO_RECEIVER: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. ODOREC.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 SRC PIC X(20) VALUE '05ABCDEFGHIJKLMNOPQR'.\n",
+    "       01 G.\n",
+    "          05 N PIC 99.\n",
+    "          05 E PIC X OCCURS 1 TO 18 DEPENDING ON N.\n",
+    "       01 H PIC X(20).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE 3 TO N\n",
+    "           MOVE SRC TO G\n",
+    "           DISPLAY 'N=' N ' [' G ']'\n",
+    "           MOVE 2 TO N\n",
+    "           MOVE G TO H\n",
+    "           DISPLAY '[' H ']'\n",
+    "           MOVE 4 TO N\n",
+    "           MOVE 'XYZ' TO G\n",
+    "           DISPLAY 'N=' N\n",
+    "           STOP RUN.\n",
+);
+
+/// Binary items given values their PICTUREs do not hold.
+const BINARY_PAST_PICTURE: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. TRUNCB.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 B PIC 9(4) COMP.\n",
+    "       01 S PIC S9(2) COMP.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE 123456 TO B DISPLAY B\n",
+    "           COMPUTE S = 99 + 50 DISPLAY S\n",
+    "           ADD 9000 TO B DISPLAY B\n",
+    "           STOP RUN.\n",
+);
+
+/// MAX, MIN, MOD, INTEGER and the other numeric functions moved to an alphanumeric item.
+const FUNCTION_FIELDS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. FNMOVE.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 N PIC 999 VALUE 5.\n",
+    "       01 M PIC 9(5) VALUE 4.\n",
+    "       01 D PIC 9V99 VALUE 8.25.\n",
+    "       01 S PIC S9 VALUE -3.\n",
+    "       01 H PIC 999 VALUE 100.\n",
+    "       01 X PIC X(12).\n",
+    "       01 R PIC 99V9.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE FUNCTION MAX(N M) TO X DISPLAY '[' X ']'\n",
+    "           MOVE FUNCTION MIN(N M) TO X DISPLAY '[' X ']'\n",
+    "           MOVE FUNCTION MOD(S H) TO X DISPLAY '[' X ']'\n",
+    "           MOVE FUNCTION INTEGER(D) TO X DISPLAY '[' X ']'\n",
+    "           MOVE FUNCTION INTEGER-PART(D) TO X DISPLAY '[' X ']'\n",
+    "           MOVE FUNCTION MAX(D N) TO X DISPLAY '[' X ']'\n",
+    "           COMPUTE R = FUNCTION MOD(S H) DISPLAY R\n",
+    "           MOVE 12.5 TO X DISPLAY '[' X ']'\n",
+    "           STOP RUN.\n",
+);
+
+/// RANGE, REM, SUM, INTEGER, MOD and ABS moved to a long alphanumeric item.
+const FUNCTION_FIELD_SIZES: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. T4.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  N3 PIC 999 VALUE 5.\n",
+    "       01  M2 PIC 99 VALUE 3.\n",
+    "       01  B3 PIC 999 VALUE 7.\n",
+    "       01  C2 PIC 9V99 VALUE 8.25.\n",
+    "       01  D9 PIC 9(12) VALUE 123456789012.\n",
+    "       01  X PIC X(40).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE FUNCTION RANGE(N3 M2) TO X DISPLAY '[' X ']'\n",
+    "           MOVE FUNCTION REM(B3 M2) TO X DISPLAY '[' X ']'\n",
+    "           MOVE FUNCTION SUM(N3 M2) TO X DISPLAY '[' X ']'\n",
+    "           MOVE FUNCTION SUM(C2 M2) TO X DISPLAY '[' X ']'\n",
+    "           MOVE FUNCTION RANGE(C2 M2) TO X DISPLAY '[' X ']'\n",
+    "           MOVE FUNCTION REM(C2 M2) TO X DISPLAY '[' X ']'\n",
+    "           MOVE FUNCTION SUM(D9 D9) TO X DISPLAY '[' X ']'\n",
+    "           MOVE FUNCTION INTEGER(D9) TO X DISPLAY '[' X ']'\n",
+    "           MOVE FUNCTION MOD(D9 7) TO X DISPLAY '[' X ']'\n",
+    "           MOVE FUNCTION ABS(C2) TO X DISPLAY '[' X ']'\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn the_ibm_strict_target_receives_an_odo_group_at_its_objects_value_and_truncates_no_binary_item() {
+    // cobc 3.2 -std=ibm-strict's output (odoslide: yes, binary-truncate: no), then cobc's default
+    // dialect's and IBM's.
+    let flags = |target: numeric::Target| target.flags().to_vec();
+    for (source, strict, default, ibm) in [(ODO_RECEIVER, "N=05 [05ABC  ]\n[02AB                ]\nN=XY\n", "N=05 [05ABCDE]\n[02AB                ]\nN=XY\n", "N=05 [05ABCDE]\n[02AB                ]\nN=XY\n"), (BINARY_PAST_PICTURE, "57920\n+00149\n01384\n", "3456\n+49\n2456\n", "3456\n49\n2456\n")] {
+        for (flags, expected) in [(flags(numeric::Target::GnucobolIbmStrict), strict), (flags(numeric::Target::Gnucobol), default), (Vec::new(), ibm)] {
+            let flags: Vec<&str> = flags.iter().map(String::as_str).collect();
+            for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+                let ran = Harness::source(source).flags(&flags).run(executor);
+                assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{flags:?} {name}: {}", ran.err);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_gnucobol_target_gives_each_numeric_function_cobcs_field() {
+    // cobc 3.2's output: MAX and MIN the winning argument's own field, its decimal places among the
+    // digits; MOD, RANGE, REM, SUM and INTEGER nine digits where the value fits a fullword, twenty
+    // where it fits a doubleword (cob_alloc_field); ABS its argument's.
+    for (source, expected) in [(FUNCTION_FIELDS, "[005         ]\n[00004       ]\n[000000097   ]\n[000000008   ]\n[000000008   ]\n[825         ]\n97.0\n[125         ]\n"), (FUNCTION_FIELD_SIZES, "[000000002                               ]\n[000000001                               ]\n[000000008                               ]\n[000001125                               ]\n[000000525                               ]\n[000000225                               ]\n[00000000246913578024                    ]\n[00000000123456789012                    ]\n[000000004                               ]\n[825                                     ]\n")] {
+        for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+            let ran = Harness::source(source).flags(EXTENDED).run(executor);
+            assert_eq!((ran.out.as_str(), ran.ending.is_ok()), (expected, true), "{name}: {}", ran.err);
+        }
+    }
+}

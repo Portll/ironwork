@@ -526,6 +526,8 @@ impl Gen<'_> {
                 let (n, places) = const_number(&self.p.consts[c as usize])?;
                 Some((format!("{n}i64"), places))
             }
+            // cobc's MOD keeps every digit, which only the intrinsic gives.
+            Operand::Function(_) if self.p.options.options.emulates_cobc() => None,
             Operand::Function(f) => {
                 let plan = &self.p.plans.function[f as usize];
                 let (Func::Mod, None, [Argument::Value(a), Argument::Value(b)]) = (plan.func, &plan.refmod, plan.args.as_slice()) else { return None };

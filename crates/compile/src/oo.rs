@@ -146,6 +146,7 @@ pub fn class_code(program: &Program, flags: &[String], at: CompileTime) -> Resul
     for flag in flags {
         options.apply_flag(flag).ok();
     }
+    options.derive_target_defaults();
     for option in &program.options {
         options.apply(option).ok();
     }
