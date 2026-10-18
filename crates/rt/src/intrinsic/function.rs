@@ -15,7 +15,7 @@ use crate::refusal;
 use crate::storage::{Kind, Val};
 use crate::store::{ProgramFacts, compare_national};
 use crate::vocab::{Figurative, Pos};
-use numeric::precision::{Fixed, Places};
+use numeric::precision::{Carry, Fixed, Places};
 use numeric::{Arith, IntDate, float};
 use std::cmp::Ordering;
 use std::ops::{Add, Div, RangeInclusive, Sub};
@@ -340,7 +340,7 @@ fn checked(x: &mut impl Evaluator, name: &str, side: Option<TrimSide>, args: &mu
                     if other == "MOD" && r != 0 && (r < 0) != (b < 0) { r + b } else { r }
                 }
             };
-            let places = super::fixed_places(name, &given, facts.options().arith).expect("MOD, REM, INTEGER, INTEGER-PART and ABS have fixed places");
+            let places = super::fixed_places(name, &given, Carry::of(facts.options().arith, cobc)).expect("MOD, REM, INTEGER, INTEGER-PART and ABS have fixed places");
             let value = Fixed::new(result / 10i128.pow(dec - places.dec.min(dec)), places);
             // MOD's value has the digits of its shorter argument, high-order digits beyond them dropped.
             Val::Num(if name == "MOD" && !cobc { value.fit(places) } else { value })
@@ -594,7 +594,7 @@ fn compare_arguments(facts: &dyn ProgramFacts, a: &Val, b: &Val, name: &str, pos
 
 /// The places of a fixed-point MAX, MIN or RANGE value, when every argument is fixed point; ZERO
 /// is a one-digit integer.
-fn values_places(args: &[Val], name: &str, arith: Arith) -> Option<Places> {
+fn values_places(args: &[Val], name: &str, carry: Carry) -> Option<Places> {
     let places = args
         .iter()
         .map(|v| match v {
@@ -603,7 +603,7 @@ fn values_places(args: &[Val], name: &str, arith: Arith) -> Option<Places> {
             _ => None,
         })
         .collect::<Option<Vec<Places>>>()?;
-    super::fixed_places(name, &places, arith)
+    super::fixed_places(name, &places, carry)
 }
 
 /// A fixed-point argument at `places`, its decimal places filled out with zeros.
@@ -702,6 +702,7 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
     let arith = facts.options().arith;
     let intdate = facts.options().intdate;
     let cobc = facts.options().emulates_cobc();
+    let carry = Carry::of(arith, cobc);
     let p = arith.float_intermediate();
     let arity = |n: RangeInclusive<usize>, args: &[Val]| {
         if n.contains(&args.len()) { Ok(()) } else { Err(Abend::ironwork(format!("FUNCTION {name} takes {n:?} arguments, not {}", args.len()), pos)) }
@@ -774,10 +775,10 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
                 "ORD-MIN" | "ORD-MAX" => Ok(integer(best as i128 + 1, 9)),
                 "RANGE" => {
                     let least = extreme(facts, args, Ordering::Less, name, pos)?;
-                    match (values_places(args, "MAX", arith), &args[best], &args[least]) {
+                    match (values_places(args, "MAX", carry), &args[best], &args[least]) {
                         (Some(widest), hi, lo) if !floating => {
                             let (hi, lo) = (widened(hi, widest), widened(lo, widest));
-                            Ok(Val::Num(hi.sub(lo, widest.dec, arith).map_err(|_| Abend::ironwork("FUNCTION RANGE: a result beyond 256 bits", pos))?))
+                            Ok(Val::Num(hi.sub(lo, widest.dec, carry).map_err(|_| Abend::ironwork("FUNCTION RANGE: a result beyond 256 bits", pos))?))
                         }
                         (_, hi, lo) => {
                             let (hi, lo) = (real(hi, p, name, pos)?, real(lo, p, name, pos)?);
@@ -788,7 +789,7 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
                 _ if floating => float_result(real(&args[best], p, name, pos)?, p, cobc, pos),
                 // cobc gives the winning argument's own field.
                 _ if cobc => Ok(args.swap_remove(best)),
-                _ => Ok(match values_places(args, name, arith) {
+                _ => Ok(match values_places(args, name, carry) {
                     Some(widest) => Val::Num(widened(&args[best], widest)),
                     None => args.swap_remove(best),
                 }),
@@ -811,7 +812,7 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             let dmax = fixed.iter().map(|x| x.places.dec).max().unwrap_or(0);
             let mut sum = Fixed::new(0, Places::new(1, 0));
             for x in fixed {
-                sum = sum.add(x, dmax, arith).map_err(|_| Abend::ironwork("FUNCTION SUM: a result beyond 256 bits", pos))?;
+                sum = sum.add(x, dmax, carry).map_err(|_| Abend::ironwork("FUNCTION SUM: a result beyond 256 bits", pos))?;
             }
             Ok(Val::Num(sum))
         }

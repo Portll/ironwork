@@ -5,7 +5,7 @@ use super::data::{Side, Value, Within};
 use super::{Lower, R, push, unsupported};
 use crate::layout::Resolved;
 use numeric::Arith;
-use numeric::precision::{Places, carried, sum_places};
+use numeric::precision::{Carry, Places, carried, sum_places};
 use rt::lir::{Argument, Comparand, Count, Func, FunctionPlan, Mode, Odo, RefMod, TrimSide};
 use syntax::Pos;
 use syntax::ast::{self, Expr, Figurative, FunctionCall, Literal, Operand, Ref};
@@ -66,7 +66,7 @@ impl Lower<'_> {
                 Some(RefMod { start, length, check: false })
             }
         };
-        let result = result(func, &sides, self.c.options.arith, pos)?;
+        let result = result(func, &sides, self.c.options.arith, Carry::of(self.c.options.arith, self.c.options.emulates_cobc()), pos)?;
         let at = self.at(pos);
         let id = push(&mut self.plans.function, FunctionPlan { func, args, integer, side, refmod, arity, at }, "FUNCTION plans")?;
         Ok((rt::lir::Operand::Function(id), result))
@@ -255,7 +255,7 @@ fn fixed(value: Value) -> bool {
 /// or where an argument's places are not known here). A floating-point argument makes ABS, REM, MIN, MAX, RANGE and SUM
 /// floating-point, whatever count an OCCURS DEPENDING ON table gives where one is given once, and
 /// INTEGER and INTEGER-PART 30 digits, 31 under ARITH(EXTEND) (`float_function`).
-fn result(func: Func, args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
+fn result(func: Func, args: &[Arg], arith: Arith, carry: Carry, pos: Pos) -> R<Side> {
     let numeric = args.iter().all(|a| matches!(a.side.value, Value::Num(_) | Value::Float));
     let float_given = args.iter().any(|a| a.side.value == Value::Float && a.times.is_some_and(|n| n > 0));
     let float_at_any_count = numeric && float_given && matches!(func, Func::Abs | Func::Rem | Func::Min | Func::Max | Func::Sum | Func::Range);
@@ -362,7 +362,7 @@ fn result(func: Func, args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
             Some(a) => Side { src: None, ..a.side },
             None => num(None, 0),
         },
-        Func::Sum => sum(args, arith),
+        Func::Sum => sum(args, carry),
         Func::Range if !args.iter().all(|a| fixed(a.side.value)) => return unsupported("FUNCTION RANGE of fixed-point arguments with other ones", pos),
         Func::Min | Func::Max if !args.iter().all(|a| fixed(a.side.value)) => {
             let Some((first, rest)) = args.split_first() else { return Ok(num(None, 0)) };
@@ -374,7 +374,7 @@ fn result(func: Func, args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
         // `rt::intrinsic::fixed_places`, where every argument's places are known.
         Func::Min | Func::Max | Func::Range | Func::Mod | Func::Rem | Func::Integer | Func::IntegerPart | Func::Abs => {
             let given: Option<Vec<Places>> = args.iter().map(places).collect();
-            match given.and_then(|p| rt::intrinsic::fixed_places(func.name(), &p, arith)) {
+            match given.and_then(|p| rt::intrinsic::fixed_places(func.name(), &p, carry)) {
                 Some(p) => num(Some(p.dec), p.total()),
                 None => num(None, 0),
             }
@@ -384,14 +384,14 @@ fn result(func: Func, args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
 
 /// SUM of fixed-point values: `Fixed::add` from a one-digit zero, each argument in turn, the
 /// arguments' most decimal places kept.
-fn sum(args: &[Arg], arith: Arith) -> Side {
+fn sum(args: &[Arg], carry: Carry) -> Side {
     let terms: Option<Vec<(Places, u64)>> = args.iter().map(|a| Some((places(a)?, a.times?))).collect();
     let Some(terms) = terms else { return num(None, 0) };
     let dmax = terms.iter().map(|(p, _)| p.dec).max().unwrap_or(0);
     let mut total = Places::new(1, 0);
     for (p, times) in terms {
         for _ in 0..times {
-            let next = carried(sum_places(total, p), dmax, arith);
+            let next = carried(sum_places(total, p), dmax, carry);
             if next == total {
                 break;
             }

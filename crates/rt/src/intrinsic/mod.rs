@@ -1,7 +1,6 @@
 //! The intrinsic functions' semantics, apart from how an executor evaluates their arguments.
 
-use numeric::Arith;
-use numeric::precision::{Places, carried, product_places, quotient_places, sum_places};
+use numeric::precision::{Carry, Places, carried, product_places, quotient_places, sum_places};
 
 pub mod any_numeric;
 pub mod dates;
@@ -68,24 +67,24 @@ pub fn outer_dmax(name: &str, inner: u32) -> u32 {
 /// whose places do not follow from its arguments' alone. Each mixed function's step follows the
 /// fixed-point table (Programming Guide SC27-8714-03, pp. 795, 799); INTEGER, INTEGER-PART and MOD
 /// have the digits pp. 798-799 give them (assumptions C390 to C393).
-pub fn fixed_places(name: &str, args: &[Places], arith: Arith) -> Option<Places> {
+pub fn fixed_places(name: &str, args: &[Places], carry: Carry) -> Option<Places> {
     let first = *args.first()?;
     let widest = args.iter().fold(first, |p, a| Places::new(p.int.max(a.int), p.dec.max(a.dec)));
     Some(match name {
         "MAX" | "MIN" => widest,
-        "RANGE" => carried(sum_places(widest, widest), widest.dec, arith),
+        "RANGE" => carried(sum_places(widest, widest), widest.dec, carry),
         "ABS" => first,
-        "INTEGER" => carried(Places::new(first.total() + 1, 0), 0, arith),
-        "INTEGER-PART" => carried(Places::new(first.total(), 0), 0, arith),
+        "INTEGER" => carried(Places::new(first.total() + 1, 0), 0, carry),
+        "INTEGER-PART" => carried(Places::new(first.total(), 0), 0, carry),
         "MOD" => {
             let second = *args.get(1)?;
             Places::new(first.int.min(second.int), widest.dec)
         }
         "REM" => {
             let second = *args.get(1)?;
-            let quotient = carried(quotient_places(first, second, widest.dec), widest.dec, arith);
-            let product = carried(product_places(Places::new(quotient.int, 0), second), widest.dec, arith);
-            carried(sum_places(first, product), widest.dec, arith)
+            let quotient = carried(quotient_places(first, second, widest.dec), widest.dec, carry);
+            let product = carried(product_places(Places::new(quotient.int, 0), second), widest.dec, carry);
+            carried(sum_places(first, product), widest.dec, carry)
         }
         _ => return None,
     })
@@ -94,11 +93,12 @@ pub fn fixed_places(name: &str, args: &[Places], arith: Arith) -> Option<Places>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use numeric::Arith;
 
     #[test]
     fn each_fixed_point_function_has_the_places_ibm_gives_it() {
         let (n3, d2, s9, h3) = (Places::new(3, 0), Places::new(1, 2), Places::new(1, 0), Places::new(3, 0));
-        let of = |name: &str, args: &[Places]| fixed_places(name, args, Arith::Compat);
+        let of = |name: &str, args: &[Places]| fixed_places(name, args, Arith::Compat.into());
         assert_eq!(of("MAX", &[n3, d2]), Some(Places::new(3, 2)));
         assert_eq!(of("MIN", &[d2, Places::new(5, 0)]), Some(Places::new(5, 2)));
         assert_eq!(of("RANGE", &[n3, d2]), Some(Places::new(4, 2)));

@@ -661,6 +661,37 @@ fn a_gnucobol_target_keeps_an_intermediate_past_31_digits_and_ibm_cuts_it() {
     }
 }
 
+/// SUM and RANGE of 31-digit items, whose results need 32 digits, beside the same sum by ADD.
+const WIDE_SUM_AND_RANGE: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. SUMRANGE.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 A PIC S9(17)V9(14) VALUE 12345678901234567.12345678901234.\n",
+    "       01 B PIC S9(17)V9(14) VALUE 98765432109876543.98765432109876.\n",
+    "       01 N PIC S9(17)V9(14) VALUE -12345678901234567.12345678901234.\n",
+    "       01 R PIC 9(18)V9(13).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           COMPUTE R = FUNCTION SUM(A B) DISPLAY R\n",
+    "           COMPUTE R = FUNCTION RANGE(N B) DISPLAY R\n",
+    "           COMPUTE R = A + B DISPLAY R\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn a_gnucobol_target_keeps_every_digit_of_sum_and_range_as_of_an_addition() {
+    // cobc 3.2's output by default, then under -std=ibm-strict, where the card allows 31 digits.
+    let source = format!("       CBL ARITH(EXTEND)\n{WIDE_SUM_AND_RANGE}");
+    for (target, expected) in [(numeric::Target::Gnucobol, "111111111011111111.1111111101111\n".repeat(3)), (numeric::Target::GnucobolIbmStrict, "1111111110111111111111111101111\n".repeat(3))] {
+        let flags = target.flags();
+        let flags: Vec<&str> = flags.iter().map(String::as_str).collect();
+        for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+            let ran = Harness::source(&source).flags(&flags).run(executor);
+            assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), (expected.as_str(), Some(&Ending::StopRun)), "{} {name}: {}", target.name(), ran.err);
+        }
+    }
+}
+
 /// Floating-point functions, NUMVAL in a division, and a COMP-2 value moved to a fixed item.
 const FUNCTION_VALUES: &str = concat!(
     "       IDENTIFICATION DIVISION.\n",
