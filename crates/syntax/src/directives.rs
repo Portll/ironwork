@@ -1,7 +1,7 @@
 //! The compiler directives `--compliance extended` reads besides the source format: the COBOL 2002
 //! conditional compilation directives (>>DEFINE, >>IF, >>ELIF, >>ELSE, >>END-IF), GnuCOBOL's
-//! debugging line >>D, and >>TURN, >>LISTING, >>PAGE and a word after >>D that is no directive,
-//! read and of no effect.
+//! debugging line >>D, and >>TURN, >>LISTING, >>PAGE, >>CALL-CONVENTION and a word after >>D that
+//! is no directive, read and of no effect.
 
 use crate::messages::{IWC0318, IWX0048, IWX0049, IWX0050, IWX0067};
 use crate::{Error, Pos};
@@ -14,7 +14,7 @@ pub enum Directive {
     Elif(Vec<String>),
     Else,
     EndIf,
-    /// >>TURN, >>LISTING or >>PAGE, and its warning.
+    /// >>TURN, >>LISTING, >>PAGE or >>CALL-CONVENTION, and its warning.
     Ignored(Error),
     /// >>D: the rest of the line, a debugging line's text, and its warning.
     Debugging(Vec<char>, Error),
@@ -92,7 +92,7 @@ pub fn read(chars: &[char], pos: Pos, fixed: bool) -> Option<Result<Directive, E
         "ELIF" => Directive::Elif(tail()),
         "ELSE" if words.len() == 1 => Directive::Else,
         "END-IF" if words.len() == 1 => Directive::EndIf,
-        "TURN" | "LISTING" | "PAGE" => Directive::Ignored(IWX0049.at(pos, format!(">>{first} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such directive): it is read and has no effect"))),
+        "TURN" | "LISTING" | "PAGE" | "CALL-CONVENTION" => Directive::Ignored(IWX0049.at(pos, format!(">>{first} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such directive): it is read and has no effect"))),
         // cobc 3.2 ignores a word it does not know after >>D, as >>DMOVE, as an invalid directive.
         d if d.starts_with('D') && d.len() > 1 && d != "DEFINE" && d != "DISPLAY" => Directive::Ignored(IWX0049.at(pos, format!(">>{first} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such directive): it is read and has no effect"))),
         "D" => {

@@ -374,3 +374,137 @@ fn based_numeric_literals_are_read_under_extended() {
     assert!(ids_under(BASED_LITERALS, EXTENDED).iter().all(|i| i == "IWX0145"));
     assert!(!ids_under(BASED_LITERALS, &[]).is_empty());
 }
+
+const DISPLAYED_FUNCTIONS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. T.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY 'x ' FUNCTION INTEGER(-12.75)\n",
+    "           DISPLAY 'x ' FUNCTION INTEGER-PART(-12.75)\n",
+    "           DISPLAY 'x ' FUNCTION MOD(17 5)\n",
+    "           DISPLAY 'x ' FUNCTION REM(17.5 5)\n",
+    "           DISPLAY 'x ' FUNCTION REM(-17 5)\n",
+    "           DISPLAY 'x ' FUNCTION SUM(1.5 2.25)\n",
+    "           DISPLAY 'x ' FUNCTION SUM(0.1 0.2)\n",
+    "           DISPLAY 'x ' FUNCTION SIGN(-12.75)\n",
+    "           DISPLAY 'x ' FUNCTION FACTORIAL(5)\n",
+    "           DISPLAY 'x ' FUNCTION FACTORIAL(15)\n",
+    "           DISPLAY 'x ' FUNCTION INTEGER-OF-DATE(20240101)\n",
+    "           DISPLAY 'x ' FUNCTION DATE-OF-INTEGER(150000)\n",
+    "           DISPLAY 'x ' FUNCTION DAY-OF-INTEGER(150000)\n",
+    "           DISPLAY 'x ' FUNCTION INTEGER(2147483647)\n",
+    "           DISPLAY 'x ' FUNCTION INTEGER(-2147483648)\n",
+    "           DISPLAY 'x ' FUNCTION INTEGER(-5000000000)\n",
+    "           DISPLAY 'x ' FUNCTION SUM(0.0000000001 0)\n",
+    "           DISPLAY 'x ' FUNCTION RANGE(1 5 3)\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn display_shows_a_numeric_function_through_the_field_cobc_holds_it_in() {
+    // cobc 3.2's output.
+    runs(DISPLAYED_FUNCTIONS, EXTENDED, "x -000000013\nx -000000012\nx 000000002\nx 00000002.5\nx -000000002\nx 0000003.75\nx 00000000.3\nx -000000001\nx 000000120\nx 00000001307674368000\nx 000154498\nx 20110908\nx 2011251\nx 147483647\nx -00000000002147483648\nx -00000000005000000000\nx 0000000000.0000000001\nx 000000004\n");
+    assert_eq!(ids_under(DISPLAYED_FUNCTIONS, EXTENDED).iter().filter(|i| *i == "IWX0149").count(), 18);
+    assert!(ids_under(DISPLAYED_FUNCTIONS, &[]).iter().all(|i| i == "IWC0101"));
+}
+
+#[test]
+fn a_class_condition_on_a_literal_tests_its_characters() {
+    let source = under(concat!(
+        "       ENVIRONMENT DIVISION.\n",
+        "       CONFIGURATION SECTION.\n",
+        "       SPECIAL-NAMES.\n",
+        "           CLASS DIGITS IS '0' THROUGH '9'.\n",
+        "       PROCEDURE DIVISION.\n",
+        "           IF '7' IS DIGITS DISPLAY 'A-yes' ELSE DISPLAY 'A-no'.\n",
+        "           IF '7X' IS DIGITS DISPLAY 'B-yes' ELSE DISPLAY 'B-no'.\n",
+        "           IF '7X' IS NOT DIGITS DISPLAY 'C-yes' ELSE DISPLAY 'C-no'.\n",
+        "           IF '12' IS NUMERIC DISPLAY 'E-yes' ELSE DISPLAY 'E-no'.\n",
+        "           IF '1A' IS NUMERIC DISPLAY 'F-yes' ELSE DISPLAY 'F-no'.\n",
+        "           IF 'ab' IS ALPHABETIC DISPLAY 'G-yes' ELSE DISPLAY 'G-no'.\n",
+        "           GOBACK.\n",
+    ));
+    // cobc 3.2's output.
+    runs(&source, EXTENDED, "A-yes\nB-no\nC-yes\nE-yes\nF-no\nG-yes\n");
+    assert_eq!(ids_under(&source, EXTENDED).iter().filter(|i| *i == "IWX0147").count(), 6);
+    assert_eq!(ids_under(&source, &[]), ["IWC0086", "IWC0086", "IWC0086"]);
+}
+
+#[test]
+fn use_for_debugging_on_all_references_is_read_and_left_out() {
+    let source = under(concat!(
+        "       ENVIRONMENT DIVISION.\n",
+        "       CONFIGURATION SECTION.\n",
+        "       SOURCE-COMPUTER. X WITH DEBUGGING MODE.\n",
+        "       DATA DIVISION.\n",
+        "       WORKING-STORAGE SECTION.\n",
+        "       01 I PIC 9.\n",
+        "       PROCEDURE DIVISION.\n",
+        "       DECLARATIVES.\n",
+        "       D SECTION.\n",
+        "           USE FOR DEBUGGING ON ALL REFERENCES OF I.\n",
+        "           DISPLAY DEBUG-NAME.\n",
+        "       END DECLARATIVES.\n",
+        "       MAIN SECTION.\n",
+        "           MOVE 1 TO I\n",
+        "           DISPLAY 'BODY'\n",
+        "           GOBACK.\n",
+    ));
+    runs(&source, EXTENDED, "BODY\n");
+    assert!(ids_under(&source, EXTENDED).contains(&"IWX0146".to_owned()));
+    assert!(ids_under(&source, &[]).contains(&"IWS0067".to_owned()));
+}
+
+#[test]
+fn typedef_goes_on_a_level_01_or_77_entry() {
+    let source = under(concat!(
+        "       DATA DIVISION.\n",
+        "       WORKING-STORAGE SECTION.\n",
+        "       01 T-REC.\n",
+        "          05 T-A PIC X TYPEDEF.\n",
+        "       PROCEDURE DIVISION.\n",
+        "           GOBACK.\n",
+    ));
+    for flags in [&[][..], EXTENDED] {
+        assert_eq!(ids_under(&source, flags), ["IWC0345"]);
+    }
+}
+
+#[test]
+fn a_perform_thru_out_of_a_declarative_is_a_hole_under_extended() {
+    let source = under(concat!(
+        "       ENVIRONMENT DIVISION.\n",
+        "       INPUT-OUTPUT SECTION.\n",
+        "       FILE-CONTROL.\n",
+        "           SELECT F1 ASSIGN TO 'straddle.dat' ORGANIZATION SEQUENTIAL.\n",
+        "       DATA DIVISION.\n",
+        "       FILE SECTION.\n",
+        "       FD F1.\n",
+        "       01 F1-REC PIC X(10).\n",
+        "       WORKING-STORAGE SECTION.\n",
+        "       01 N PIC 9(4) VALUE 0.\n",
+        "       PROCEDURE DIVISION.\n",
+        "       DECLARATIVES.\n",
+        "       D-SEC SECTION.\n",
+        "           USE AFTER STANDARD ERROR PROCEDURE ON F1.\n",
+        "       D-P1.\n",
+        "           ADD 1 TO N.\n",
+        "       END DECLARATIVES.\n",
+        "       MAIN-SEC SECTION.\n",
+        "       MAIN-P.\n",
+        "           DISPLAY 'BEFORE'\n",
+        "           PERFORM D-P1 THRU MAIN-P2\n",
+        "           DISPLAY 'N=' N\n",
+        "           GOBACK.\n",
+        "       MAIN-P2.\n",
+        "           ADD 10 TO N.\n",
+    ));
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let o = Harness::source(&source).flags(EXTENDED).run(executor);
+        assert_eq!(o.out, "BEFORE\n", "{}", o.err);
+        let ended = format!("{:?}", o.ending);
+        assert!(ended.contains("IWR0078") && ended.contains("the statement at line 23 was reached"), "{ended}");
+    }
+    assert_eq!(ids_under(&source, EXTENDED), ["IWX0148"]);
+    assert_eq!(ids_under(&source, &[]), ["IWC0015"]);
+}

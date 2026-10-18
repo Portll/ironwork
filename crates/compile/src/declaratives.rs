@@ -208,6 +208,39 @@ fn procedure_references<'a>(stmts: &'a [Stmt], out: &mut Vec<(&'a ProcName, Opti
     }
 }
 
+/// Under `--compliance extended`, each PERFORM ... THRU that [`references`] would refuse for
+/// reaching out of a declarative section, made a hole that ends the run with IWR0078 when reached,
+/// with IWX0148-W: cobc 3.2 warns of it and fails at run time.
+pub(crate) fn straddling_performs(program: &mut Program, errors: &mut Vec<Error>) {
+    let declaratives_end = program.report_writer.procedure_start;
+    if declaratives_end == 0 {
+        return;
+    }
+    let section_of = |program: &Program, i: usize| (0..=i).rev().find(|&j| program.paragraphs[j].is_section);
+    let mut found = Vec::new();
+    for (i, p) in program.paragraphs.iter().enumerate() {
+        let mut named = Vec::new();
+        procedure_references(&p.statements, &mut named);
+        for (from, thru, perform, pos) in named {
+            let first = |n: &ProcName| crate::procedure(program, n).ok().map(|(at, _)| at);
+            let (Some(a), Some(b)) = (first(from), thru.and_then(first)) else { continue };
+            if perform && (a < declaratives_end || b < declaratives_end) && (b >= declaratives_end || a >= declaratives_end || section_of(program, a) != section_of(program, b)) {
+                found.push((i, pos));
+            }
+        }
+    }
+    for (i, pos) in found {
+        let mut path = Vec::new();
+        if !crate::statement_path(&program.paragraphs[i].statements, pos, &mut path) {
+            continue;
+        }
+        let construct = format!("the statement at line {}", pos.line);
+        let why = "PERFORM ... THRU: a declarative procedure and the other end of the range are not in the same declarative section".to_owned();
+        errors.push(syntax::messages::IWX0148.at(pos, format!("{construct} (GnuCOBOL warns and fails at run time; Enterprise COBOL refuses it): {why}; it compiles as a hole, and a run that reaches it ends with IWR0078")));
+        *crate::statement_at(&mut program.paragraphs[i].statements, &path) = Stmt::Hole { construct, why, pos };
+    }
+}
+
 /// A debugging section refers to no nondeclarative procedure (p. 716), and nothing outside the
 /// debugging sections refers into one (p. 771). A PERFORM ... THRU that names a declarative
 /// procedure names two in the same declarative section (p. 418). See

@@ -486,6 +486,8 @@ struct Parser<'a> {
     /// The collating sequences EBCDIC, ASCII and NATIVE that a SORT's COLLATING SEQUENCE named
     /// as GnuCOBOL's code-names, to join the program's alphabets.
     code_names: Vec<(String, Alphabet)>,
+    /// The hidden items holding the literals that class conditions test.
+    class_subjects: Vec<DataEntry>,
     /// What the data entry just read said of types: TYPEDEF, and the type its TYPE clause names.
     entry_type: (bool, Option<String>),
 }
@@ -537,6 +539,7 @@ impl<'a> Parser<'a> {
             typedefs: Vec::new(),
             typedef_names: Vec::new(),
             code_names: Vec::new(),
+            class_subjects: Vec::new(),
             entry_type: (false, None),
         }
     }
@@ -831,6 +834,7 @@ impl Parser<'_> {
         if std::mem::take(&mut self.accepts_omitted) {
             working_storage.push(DataEntry { value: None, ..register_entry(ACCEPT_OMITTED, "X", None, self.tokens.get(procedure_from).map_or_else(Pos::default, |t| t.pos)) });
         }
+        working_storage.extend(std::mem::take(&mut self.class_subjects));
         if let Some(pos) = call_parameters {
             self.messages.push(crate::messages::IWX0078.at(pos, "NUMBER-OF-CALL-PARAMETERS (GnuCOBOL's special register; Enterprise COBOL has none): it holds the number of arguments the program was called with, or of the run's arguments in the main program"));
             working_storage.push(register_entry(CALL_PARAMETERS, "S9(9)", Some(Usage::Binary), pos));
@@ -1942,6 +1946,9 @@ impl Parser<'_> {
                 }
                 "OBJECT" => self.object_reference(&mut e)?,
                 "TYPEDEF" => {
+                    if !matches!(level, 1 | 77) {
+                        return Err(crate::messages::IWC0345.at(self.tokens[self.at - 1].pos, "TYPEDEF goes on a level-01 or level-77 entry"));
+                    }
                     if self.is_word("STRONG") {
                         let at = self.pos();
                         self.at += 1;
@@ -4702,6 +4709,21 @@ impl Parser<'_> {
         Ok(Expr::Operand(self.operand()?))
     }
 
+    /// The subject of a class condition: under `--compliance extended` an alphanumeric literal,
+    /// which cobc tests character by character, becomes a hidden item holding it.
+    fn class_subject(&mut self, subject: Expr) -> Expr {
+        let Expr::Operand(Operand::Literal(Literal::Alnum(text))) = &subject else { return subject };
+        if !self.extended || text.is_empty() {
+            return subject;
+        }
+        let pos = self.pos();
+        let name = format!("CLASS-SUBJECT%{}", self.class_subjects.len() + 1);
+        self.messages.push(crate::messages::IWX0147.at(pos, format!("a class condition on the literal \"{text}\" (GnuCOBOL; Enterprise COBOL tests a data item): the literal's characters are tested as a data item holding them is")));
+        let entry = DataEntry { value: Some(Literal::Alnum(text.clone())), ..register_entry(&name, &format!("X({})", text.chars().count()), None, pos) };
+        self.class_subjects.push(entry);
+        Expr::Operand(Operand::Ref(Ref { name, qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos }))
+    }
+
     fn cond(&mut self) -> R<Cond> {
         let mut last = None;
         self.or_cond(&mut last)
@@ -4775,7 +4797,7 @@ impl Parser<'_> {
         }
         if let Some(name) = self.word().filter(|w| self.classes.iter().any(|c| c.name == *w)).map(str::to_owned) {
             self.at += 1;
-            return Ok(wrap(Cond::Class(left, Class::Named(name))));
+            return Ok(wrap(Cond::Class(self.class_subject(left), Class::Named(name))));
         }
         if let Some(class) = self.accept_any(&["NUMERIC", "ALPHABETIC", "ALPHABETIC-LOWER", "ALPHABETIC-UPPER", "DBCS", "KANJI", "POSITIVE", "NEGATIVE", "ZERO"]) {
             let class = match class.as_str() {
@@ -4789,7 +4811,8 @@ impl Parser<'_> {
                 "NEGATIVE" => Class::Negative,
                 _ => Class::Zero,
             };
-            return Ok(wrap(Cond::Class(left, class)));
+            let subject = if matches!(class, Class::Numeric | Class::Alphabetic | Class::AlphabeticLower | Class::AlphabeticUpper) { self.class_subject(left) } else { left };
+            return Ok(wrap(Cond::Class(subject, class)));
         }
         if let Expr::Operand(Operand::Ref(r)) = &left
             && self.is_word("OMITTED")

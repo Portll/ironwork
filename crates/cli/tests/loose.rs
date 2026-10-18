@@ -22,7 +22,7 @@ fn temp(name: &str) -> PathBuf {
 /// and a period missing before the PROCEDURE DIVISION; `n` decides whether the run reaches a hole.
 fn program(dir: &std::path::Path, n: u8) -> String {
     let text = format!(
-        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. LOOSE.\n       >>CALL-CONVENTION COBOL\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01 GOOD PIC X(3) VALUE 'ok'.\n       01 T-REC.\n          05 T-A PIC X TYPEDEF.\n          05 T-B PIC 9.\n       01 WIDE PIC 9(40).\n       01 N PIC 9 VALUE {n}\n       PROCEDURE DIVISION.\n           DISPLAY GOOD ' ' N $\n           IF N = 0\n               MOVE 1 TO T-B\n           END-IF\n           DISPLAY 'END'\n           GOBACK.\n"
+        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. LOOSE.\n       >>REPOSITORY EXAMPLE\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01 GOOD PIC X(3) VALUE 'ok'.\n       01 T-REC.\n          05 T-A PIC X TYPEDEF.\n          05 T-B PIC 9.\n       01 WIDE PIC 9(40).\n       01 N PIC 9 VALUE {n}\n       PROCEDURE DIVISION.\n           DISPLAY GOOD ' ' N $\n           IF N = 0\n               MOVE 1 TO T-B\n           END-IF\n           DISPLAY 'END'\n           GOBACK.\n"
     );
     let path = dir.join(format!("LOOSE{n}.cbl"));
     fs::write(&path, text).unwrap();
@@ -44,23 +44,13 @@ fn records_lines_and_characters_are_left_out_and_check_warns_of_each() {
     assert_eq!(ids.iter().filter(|i| **i == "IWX0064").count(), 2, "{said}");
     assert_eq!(ids.iter().filter(|i| **i == "IWX0065").count(), 2, "{said}");
     assert!(ids.contains(&"IWX0093") && ids.contains(&"IWX0059"), "{said}");
-    assert!(said.contains("the record T-REC (--compliance loose): IWR0003-S TYPEDEF"), "{said}");
+    assert!(said.contains("the record T-REC (--compliance loose): IWC0345-S TYPEDEF"), "{said}");
     assert_eq!(ironwork(&["check", &path, "--compliance", "relaxed"]).status.code(), Some(12));
     fs::remove_dir_all(dir).unwrap();
 }
 
 /// Sources relaxed refuses, each with the warning loose gives instead.
 const LEFT_OUT: &[(&str, &str, &str)] = &[
-    (
-        "NATIONAL",
-        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. NATIONAL.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       SPECIAL-NAMES.\n           ALPHABET UNI FOR NATIONAL IS UCS-4.\n       PROCEDURE DIVISION.\n           GOBACK.\n",
-        "(--compliance loose): ALPHABET UNI FOR NATIONAL is left out",
-    ),
-    (
-        "DEBUGALL",
-        "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. DEBUGALL.\n       ENVIRONMENT DIVISION.\n       CONFIGURATION SECTION.\n       SOURCE-COMPUTER. X WITH DEBUGGING MODE.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01 I PIC 9.\n       PROCEDURE DIVISION.\n       DECLARATIVES.\n       D SECTION.\n           USE FOR DEBUGGING ON ALL REFERENCES OF I MAIN.\n           DISPLAY DEBUG-NAME.\n       END DECLARATIVES.\n       MAIN SECTION.\n           MOVE 1 TO I\n           GOBACK.\n",
-        "(--compliance loose): ALL REFERENCES OF I is left out of the USE statement",
-    ),
     (
         "WIDEPARM",
         "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. WIDEPARM.\n       DATA DIVISION.\n       LINKAGE SECTION.\n       01 BUF PIC X(4).\n       01 LEN PIC 9(40).\n       PROCEDURE DIVISION USING BUF LEN.\n           DISPLAY BUF\n           GOBACK.\n",
@@ -74,7 +64,7 @@ const LEFT_OUT: &[(&str, &str, &str)] = &[
 ];
 
 #[test]
-fn alphabets_debugging_items_parameters_and_reports_are_left_out() {
+fn parameters_and_reports_are_left_out() {
     let dir = temp("forms");
     for (name, text, warned) in LEFT_OUT {
         let path = dir.join(format!("{name}.cbl"));
@@ -89,15 +79,10 @@ fn alphabets_debugging_items_parameters_and_reports_are_left_out() {
 }
 
 #[test]
-fn a_communication_statement_and_a_perform_into_declaratives_are_holes() {
+fn a_communication_statement_is_a_hole() {
     let dir = temp("holes");
     let sources = [
         ("CD", "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. CD.\n       DATA DIVISION.\n       COMMUNICATION SECTION.\n       CD COMM FOR INPUT.\n       01 IN-AREA PIC X(80).\n       PROCEDURE DIVISION.\n           DISPLAY 'before'\n           ENABLE INPUT COMM\n           DISPLAY 'after'\n           GOBACK.\n", "the ENABLE statement at line 9"),
-        (
-            "THRU",
-            "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. THRU.\n       PROCEDURE DIVISION.\n       DECLARATIVES.\n       D SECTION.\n           USE AFTER ERROR PROCEDURE ON INPUT.\n       D-1.\n           DISPLAY 'declarative'.\n       END DECLARATIVES.\n       MAIN SECTION.\n       M-1.\n           DISPLAY 'before'\n           PERFORM D-1 THRU M-2\n           DISPLAY 'after'\n           GOBACK.\n       M-2.\n           EXIT.\n",
-            "the statement at line 13",
-        ),
     ];
     for (name, text, hole) in sources {
         let path = dir.join(format!("{name}.cbl"));

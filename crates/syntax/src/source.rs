@@ -761,8 +761,8 @@ mod tests {
         assert_eq!(words, ["IDENTIFICATION", "DIVISION.", "PROGRAM-ID.", "P.", "DATA", "DIVISION."]);
         let spans: Vec<(u32, u32, Option<Pos>)> = s.free.iter().map(|f| (f.first, f.last, f.warning.as_ref().map(|w| w.pos))).collect();
         assert_eq!(spans, [(2, 2, Some(Pos { file: 0, line: 1, col: 7 })), (6, u32::MAX, Some(Pos { file: 0, line: 5, col: 3 }))]);
-        let Err(other) = extended("       >>CALL-CONVENTION COBOL\n") else { panic!("another directive is refused") };
-        assert!(other.message.starts_with(">>CALL-CONVENTION COBOL: the source-format directives"), "{}", other.message);
+        let Err(other) = extended("       >>REPOSITORY EXAMPLE\n") else { panic!("another directive is refused") };
+        assert!(other.message.starts_with(">>REPOSITORY EXAMPLE: the source-format directives"), "{}", other.message);
         assert_eq!(other.pos.col, 8);
     }
 

@@ -452,6 +452,9 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
     }
     let report_writer = report::resolve(&program, &layout, drafts, &mut errors);
     let carriage = printer::carriages(&program, &layout, options.adv);
+    if options.compliance != numeric::Compliance::Strict {
+        declaratives::straddling_performs(&mut program, &mut errors);
+    }
     let declaratives = declaratives::resolve(&program, &layout, &options, &mut errors);
     let debugging = declaratives::debugging_sections(&program);
     let functions = function::functions(&program, options.qualify, &mut errors);
@@ -1211,16 +1214,23 @@ fn based_items(program: &mut Program, declared: usize, errors: &mut Vec<Error>) 
 /// GnuCOBOL's DISPLAY of FUNCTION LENGTH of a data item whose length the program fixes: cobc 3.2
 /// folds it to a literal and shows its digits, which the DISPLAY here shows in its place (IWX0113).
 fn display_lengths(program: &mut Program, layout: &layout::Layout, errors: &mut Vec<Error>) {
-    fn statements(stmts: &mut [Stmt], layout: &layout::Layout, errors: &mut Vec<Error>) {
+    fn statements(stmts: &mut [Stmt], layout: &layout::Layout, own: &[String], errors: &mut Vec<Error>) {
         for s in stmts {
             for body in crate::oo::bodies_mut(s) {
-                statements(body, layout, errors);
+                statements(body, layout, own, errors);
             }
             let Stmt::Display { items, .. } = s else { continue };
             for item in items.iter_mut() {
                 let Operand::Function(f) = &*item else { continue };
+                if let Some(width) = displayed_width(&f.name).filter(|_| f.refmod.is_none() && !own.contains(&f.name)) {
+                    errors.push(syntax::messages::IWX0149.at(f.pos, format!("DISPLAY FUNCTION {} (GnuCOBOL; Enterprise COBOL uses a numeric function only in an arithmetic expression): it shows the digits of the field cobc 3.2 holds its result in", f.name)));
+                    let pos = f.pos;
+                    let shown = FunctionCall { name: "DISPLAYED NUMBER".into(), args: [Some(Expr::Operand(Operand::Function(f.clone()))), width.map(|w| Expr::Operand(Operand::Literal(Literal::Number(w.to_string()))))].into_iter().flatten().collect(), modifier: None, refmod: None, all_subscripts: Vec::new(), pos };
+                    *item = Operand::Function(shown);
+                    continue;
+                }
                 let [Expr::Operand(Operand::Ref(r))] = f.args.as_slice() else { continue };
-                if f.name != "LENGTH" || f.refmod.is_some() || r.refmod.is_some() {
+                if !matches!(f.name.as_str(), "LENGTH" | "BYTE-LENGTH") || f.refmod.is_some() || r.refmod.is_some() {
                     continue;
                 }
                 let Ok(layout::Resolved::Item(i)) = layout.resolve(&r.name, &r.qualifiers, r.pos) else { continue };
@@ -1228,14 +1238,28 @@ fn display_lengths(program: &mut Program, layout: &layout::Layout, errors: &mut 
                 if !it.odo.is_empty() {
                     continue;
                 }
-                let length = if matches!(it.kind, layout::Kind::National | layout::Kind::Dbcs { .. }) { it.size / 2 } else { it.size };
-                errors.push(syntax::messages::IWX0113.at(f.pos, format!("DISPLAY FUNCTION LENGTH({}) (GnuCOBOL; Enterprise COBOL uses an integer function only in an arithmetic expression): it shows {length}, the length the program fixes, as cobc 3.2 shows it", r.name)));
+                let length = if f.name == "LENGTH" && matches!(it.kind, layout::Kind::National | layout::Kind::Dbcs { .. }) { it.size / 2 } else { it.size };
+                errors.push(syntax::messages::IWX0113.at(f.pos, format!("DISPLAY FUNCTION {}({}) (GnuCOBOL; Enterprise COBOL uses an integer function only in an arithmetic expression): it shows {length}, the length the program fixes, as cobc 3.2 shows it", f.name, r.name)));
                 *item = Operand::Literal(Literal::Number(length.to_string()));
             }
         }
     }
+    let own = program.repository_functions.clone();
     for p in &mut program.paragraphs {
-        statements(&mut p.statements, layout, errors);
+        statements(&mut p.statements, layout, &own, errors);
+    }
+}
+
+/// The numeric functions DISPLAY shows through the field cobc 3.2 holds the result in, and the
+/// digits of a result it holds in a field of its own: MOD, INTEGER and the rest of the functions
+/// whose result is a decimal value. A function that returns its argument's field, or a long
+/// decimal, is not among them.
+fn displayed_width(name: &str) -> Option<Option<usize>> {
+    match name {
+        "INTEGER" | "INTEGER-PART" | "MOD" | "REM" | "ORD" | "SIGN" | "FACTORIAL" | "INTEGER-OF-DATE" | "INTEGER-OF-DAY" | "DATE-TO-YYYYMMDD" | "DAY-TO-YYYYDDD" | "YEAR-TO-YYYY" | "RANGE" | "ORD-MAX" | "ORD-MIN" | "SUM" | "TEST-DATE-YYYYMMDD" | "TEST-DAY-YYYYDDD" => Some(None),
+        "DATE-OF-INTEGER" => Some(Some(8)),
+        "DAY-OF-INTEGER" => Some(Some(7)),
+        _ => None,
     }
 }
 

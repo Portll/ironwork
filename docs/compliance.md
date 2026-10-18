@@ -1493,15 +1493,15 @@ written, as cobc 3.2 does. Strict refuses a function there as an identifier was 
 
 ### IWX0113-W DISPLAY FUNCTION LENGTH of an item
 
-`IWX0113-W DISPLAY FUNCTION LENGTH({item}) (GnuCOBOL; Enterprise COBOL uses an integer function only
+`IWX0113-W DISPLAY FUNCTION {name}({item}) (GnuCOBOL; Enterprise COBOL uses an integer function only
 in an arithmetic expression): it shows {n}, the length the program fixes, as cobc 3.2 shows it`, at
 the function.
 
 cobc 3.2 folds FUNCTION LENGTH of a data item whose length the program fixes, with no OCCURS
 DEPENDING ON in it, to a literal, and DISPLAY shows its digits: `DISPLAY FUNCTION LENGTH(NAME)`
-of a PIC X(10) item shows 10. Extended shows the same; a national item's length is its characters.
-DISPLAY of any other integer or numeric function, whose presentation cobc takes from its own
-intermediate fields, stays refused with IWC0101-S, as under strict.
+of a PIC X(10) item shows 10, and BYTE-LENGTH the same. Extended shows the same; a national item's length is its characters.
+DISPLAY of a numeric function of the kinds IWX0149 lists shows as it says; any other stays refused
+with IWC0101-S, as under strict.
 
 ### IWX0120-W ANY NUMERIC
 
@@ -1670,6 +1670,50 @@ X'..'): the numeric literal {value}, read in base {radix}`, at the literal.
 `x#1F` and `h#1F` are base 16, `o#17` base 8 and `b#101` base 2, each the numeric literal of its value.
 cobc 3.2 reads them under -std=mf. Strict has no such token.
 
+### IWX0146-W USE FOR DEBUGGING ON ALL REFERENCES OF
+
+`IWX0146-W USE FOR DEBUGGING ON ALL REFERENCES OF {item} (GnuCOBOL reads it and never runs it; Enterprise
+COBOL debugs procedures): the item is left out of the USE statement, and the section does not run for
+references to it`, at the item. A USE statement naming procedures as well keeps them. Strict refuses
+the form (IWS0067-S); loose gave it IWX0065-W before extended read it.
+
+### IWX0147-W A class condition on a literal
+
+`IWX0147-W a class condition on the literal "{text}" (GnuCOBOL; Enterprise COBOL tests a data item): the
+literal's characters are tested as a data item holding them is`, at the condition.
+
+`IF "7X" IS DIGITS`, `IS NUMERIC`, `IS ALPHABETIC`, `IS ALPHABETIC-LOWER` and `IS ALPHABETIC-UPPER` of
+an alphanumeric literal test its characters, as cobc 3.2 does: a hidden item holds the literal. The
+class-name test of a function's result stays refused (IWC0086-S).
+
+### IWX0148-W PERFORM THRU out of a declarative
+
+`IWX0148-W {construct} (GnuCOBOL warns and fails at run time; Enterprise COBOL refuses it): {why}; it
+compiles as a hole, and a run that reaches it ends with IWR0078`, at the PERFORM.
+
+A PERFORM ... THRU whose range starts or ends in a declarative section and does not stay in one is
+IWC0015-S under strict. cobc 3.2 warns and fails when the statement runs, so extended compiles it as a
+hole, as relaxed compiles a statement it cannot read.
+
+### IWX0149-W DISPLAY of a numeric function
+
+`IWX0149-W DISPLAY FUNCTION {name} (GnuCOBOL; Enterprise COBOL uses a numeric function only in an
+arithmetic expression): it shows the digits of the field cobc 3.2 holds its result in`, at the function.
+
+DISPLAY of INTEGER, INTEGER-PART, MOD, REM, ORD, SIGN, FACTORIAL, INTEGER-OF-DATE, INTEGER-OF-DAY,
+DATE-TO-YYYYMMDD, DAY-TO-YYYYDDD, YEAR-TO-YYYY, RANGE, ORD-MAX, ORD-MIN, SUM, TEST-DATE-YYYYMMDD,
+TEST-DAY-YYYYDDD, DATE-OF-INTEGER and DAY-OF-INTEGER shows the result as cobc 3.2 does through the field
+it allocates for it: four bytes of binary shown in 9 digits, truncated to them, where the value has fewer
+than 32 bits (31 if negative) and fewer than 10 decimal places; else eight bytes in 20 digits where it has
+fewer than 64 (63) bits and 19 places; else as many digits as it has. A negative value has a leading minus,
+the point shows where the places are, and trailing zeros in them are dropped. `DISPLAY FUNCTION
+INTEGER(-12.75)` shows `-000000013`, `MOD(17 5)` shows `000000002`, `REM(17.5 5)` shows `00000002.5`, and
+`INTEGER(2147483647)` shows `147483647`. DATE-OF-INTEGER shows 8 digits and DAY-OF-INTEGER 7. LENGTH and
+BYTE-LENGTH of an item whose length the program fixes show as IWX0113 says. A function that returns its
+argument's field (ABS, MAX, MIN, MEDIAN), a float (SQRT, PI, E, EXP, LOG, SIN, NUMVAL) or a long decimal
+(MEAN, VARIANCE, ANNUITY) stays refused with IWC0101-S, as under strict. Internally the DISPLAY operand is
+a call of DISPLAYED NUMBER, Func 102, no source can name.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and
@@ -1704,15 +1748,15 @@ extended.
   with `IWX0064-W {record} (--compliance loose): {why}; it is left out, and a statement naming one
   of its items compiles as a hole`. That covers an entry that does not parse (TYPEDEF, a clause
   ironwork does not read) and one the compile refuses (a PICTURE of more than 38 digits, a reserved
+  of its items compiles as a hole`. That covers an entry that does not parse (TYPEDEF on a level
+  other than 01 and 77, a clause ironwork does not read) and one the compile refuses (a PICTURE of more than 31 digits, a reserved
   word as its name). A record of a file, or a refusal naming the file (`FD F: ...`), leaves the file
   out. Only the whole record goes: an item left out of a group would move the items after it.
 - A statement naming an item that was left out then compiles as a hole, as relaxed compiles any
   statement that names no item (IWX0059-W), and a run that reaches it ends with IWR0078.
-- In the program's own file, a directive ironwork does not read (`>>CALL-CONVENTION`,
-  `>>COBOL-WORDS`), a character outside COBOL's set, or a stray period that stops the parse is left
+- In the program's own file, a directive ironwork does not read (`>>REPOSITORY`, say), a character outside COBOL's set, or a stray period that stops the parse is left
   out, the directive's line or the one character, with `IWX0065-W`, and the source is read again.
-- A statement a check across the program refuses, such as PERFORM ... THRU from a declarative
-  procedure into the rest of the program (IWC0015), compiles as a hole, with IWX0059-W.
+- A statement a check across the program refuses compiles as a hole, with IWX0059-W.
 - A report whose description the compile refuses, such as a subscripted CONTROL (IWR0026), is left
   out with its name in the file's REPORT clause, with `IWX0065-W`; INITIATE, GENERATE and TERMINATE
   naming it or its groups then compile as holes.
@@ -1722,9 +1766,6 @@ extended.
 - The Communication feature: the COMMUNICATION SECTION's CD areas are declared as data, as under
   every level, and ENABLE, DISABLE, RECEIVE, SEND, PURGE and ACCEPT MESSAGE COUNT compile as holes,
   each refusal given as `IWX0065-W` or IWX0059-W.
-- `USE FOR DEBUGGING ON ALL [REFERENCES OF] item`: the item is left out of the USE statement, with
-  `IWX0065-W`, and the section runs for the procedures it names. ALPHABET name FOR NATIONAL, which
-  ironwork has no collating sequence for, is left out the same way.
 - Messages of severity E are given as warnings, so a program whose worst message is an E-level
   recovery checks with return code 4.
 

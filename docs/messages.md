@@ -347,6 +347,11 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0326 | S | `CALL STATIC: GnuCOBOL's call convention, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0327 | S | `CALL ... GIVING: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's, which writes RETURNING; --compliance extended reads it` |
 | IWC0340 | S | `{name}: a table with no upper bound, OCCURS ... TO UNBOUNDED, is described in the LINKAGE SECTION` |
+| IWC0341 | S | `{name}: a TYPE clause or USAGE type-name names a type that is not defined by an earlier TYPEDEF` |
+| IWC0342 | S | `EXTERNAL AS: GnuCOBOL's, not Enterprise COBOL's, whose EXTERNAL record is shared under its data-name; --compliance extended reads it` |
+| IWC0343 | S | `FUNCTION {name}: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0344 | S | `START ... LENGTH: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0345 | S | `TYPEDEF goes on a level-01 or level-77 entry` |
 | IWC0350 | S | `ANY NUMERIC: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
@@ -931,9 +936,25 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0110 | W | `FUNCTION {name} argument {n} ({item}): {parameter} differs from it in digits alone, both COMP-5 of one size (GnuCOBOL passes BY REFERENCE whatever the PICTURE; Enterprise COBOL requires the argument's): the parameter reads and sets the argument's bytes` |
 | IWX0111 | W | `FUNCTION {name}: {figurative} as an argument (GnuCOBOL; Enterprise COBOL takes a figurative constant as an argument only inside an arithmetic expression): it is read as the literal '{character}'` |
 | IWX0112 | W | `UNSTRING FUNCTION {name} (GnuCOBOL; Enterprise COBOL's UNSTRING sends a data item): the function's value is the sending field` |
-| IWX0113 | W | `DISPLAY FUNCTION LENGTH({item}) (GnuCOBOL; Enterprise COBOL uses an integer function only in an arithmetic expression): it shows {n}, the length the program fixes, as cobc 3.2 shows it` |
+| IWX0113 | W | `DISPLAY FUNCTION {name}({item}) (GnuCOBOL; Enterprise COBOL uses an integer function only in an arithmetic expression): it shows {n}, the length the program fixes, as cobc 3.2 shows it` |
+| IWX0114 | W | `TYPEDEF STRONG (COBOL 2002; cobc 3.2 does not implement it and reads the type as weak): the type is read as weak, so no move or comparison is refused for its type` |
+| IWX0115 | W | `EXTERNAL AS "{name}" (GnuCOBOL; Enterprise COBOL shares an EXTERNAL record under its data-name): the record is shared under that name` |
+| IWX0116 | W | `FUNCTION {name} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such function): the largest or smallest value the argument's description allows` |
+| IWX0117 | W | `DISPLAY ... WITH NO ADVANCING UPON (GnuCOBOL; Enterprise COBOL takes UPON before WITH NO ADVANCING): the device is read as if UPON came first` |
+| IWX0118 | W | `PICTURE {text} (GnuCOBOL's boolean item; Enterprise COBOL has no such PICTURE symbol): one byte a position, held as the numeric PICTURE {alphanumeric}` |
+| IWX0119 | W | `FD {file}: a FILLER record of an EXTERNAL or GLOBAL file (GnuCOBOL; Enterprise COBOL needs a data-name): the record is read, and no program can name it` |
 | IWX0120 | W | `ANY NUMERIC (GnuCOBOL; Enterprise COBOL's parameters have the class their entries give): {name} takes the class, digits, scale, sign and usage of the argument each CALL passes for it, and is read, never written` |
 | IWX0130 | W | `{PICTURE or literal} (GnuCOBOL; Enterprise COBOL allows 31 digits under ARITH(EXTEND), GnuCOBOL 38): the program is compiled with arithmetic as cobc does it, keeping up to 76 digits of an intermediate result` |
+| IWX0140 | W | `ALPHABET {name} FOR NATIONAL (GnuCOBOL reads it and does not implement it; Enterprise COBOL has no national collating sequence): the alphabet is left out` |
+| IWX0141 | W | `COLLATING SEQUENCE {name} (GnuCOBOL's code-name; Enterprise COBOL names an alphabet of SPECIAL-NAMES): the sequence is {name} unless SPECIAL-NAMES defines an alphabet of that name` |
+| IWX0142 | W | `SYSTEM-OFFSET (GnuCOBOL's offset of the local time from UTC; Enterprise COBOL has no such argument): the run's clock is UTC, so it is 0` |
+| IWX0143 | W | `START ... LENGTH {n} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such phrase): the first {n} characters of the key are compared` |
+| IWX0144 | W | `{operator} (GnuCOBOL under -std=mf and Micro Focus; Enterprise COBOL has no boolean operators): bitwise on the unsigned 64-bit value of each operand, binding as * and / do` |
+| IWX0145 | W | `{literal} (ACUCOBOL-GT and Micro Focus; Enterprise COBOL writes a hexadecimal value in X'..'): the numeric literal {value}, read in base {radix}` |
+| IWX0146 | W | `USE FOR DEBUGGING ON ALL REFERENCES OF {item} (GnuCOBOL reads it and never runs it; Enterprise COBOL debugs procedures): the item is left out of the USE statement, and the section does not run for references to it` |
+| IWX0147 | W | `a class condition on the literal "{text}" (GnuCOBOL; Enterprise COBOL tests a data item): the literal's characters are tested as a data item holding them is` |
+| IWX0148 | W | `{construct} (GnuCOBOL warns and fails at run time; Enterprise COBOL refuses it): {why}; it compiles as a hole, and a run that reaches it ends with IWR0078` |
+| IWX0149 | W | `DISPLAY FUNCTION {name} (GnuCOBOL; Enterprise COBOL uses a numeric function only in an arithmetic expression): it shows the digits of the field cobc 3.2 holds its result in` |
 
 ## Run-time refusals
 

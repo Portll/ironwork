@@ -137,10 +137,10 @@ impl Parser<'_> {
         Err(self.error("AFTER, FOR DEBUGGING or BEFORE REPORTING after USE"))
     }
 
-    /// Under `--compliance loose`, ALL [REFERENCES] [OF] identifier in the USE FOR DEBUGGING
-    /// statement at `pos`, left out with IWX0065-W: whether one was.
+    /// Under `--compliance extended`, ALL [REFERENCES] [OF] identifier in the USE FOR DEBUGGING
+    /// statement at `pos`, left out with IWX0146-W (IWX0065-W under loose): whether one was.
     fn debugging_on_all_references(&mut self, pos: Pos) -> R<bool> {
-        if !self.loose || !self.is_word("ALL") || self.word_at(1) == Some("PROCEDURES") {
+        if !self.extended || !self.is_word("ALL") || self.word_at(1) == Some("PROCEDURES") {
             return Ok(false);
         }
         self.at += 1;
@@ -148,7 +148,11 @@ impl Parser<'_> {
         self.accept_word("OF");
         let item = self.reference()?;
         let refusal = crate::messages::IWS0067.at(pos, ON_ALL);
-        self.messages.push(crate::messages::IWX0065.at(item.pos, format!("{} (--compliance loose): ALL REFERENCES OF {} is left out of the USE statement, and the section does not run for references to it", refusal.labelled(), item.name)));
+        self.messages.push(if self.loose {
+            crate::messages::IWX0065.at(item.pos, format!("{} (--compliance loose): ALL REFERENCES OF {} is left out of the USE statement, and the section does not run for references to it", refusal.labelled(), item.name))
+        } else {
+            crate::messages::IWX0146.at(item.pos, format!("USE FOR DEBUGGING ON ALL REFERENCES OF {} (GnuCOBOL reads it and never runs it; Enterprise COBOL debugs procedures): the item is left out of the USE statement, and the section does not run for references to it", item.name))
+        });
         Ok(true)
     }
 }

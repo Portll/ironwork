@@ -92,6 +92,44 @@ pub fn storage(facts: &dyn ProgramFacts, name: &str, bytes: &[u8], pos: Pos) -> 
     }
 }
 
+/// The digits cobc 3.2 shows for a numeric function's result: its field is four bytes of binary,
+/// shown in 9 digits (truncated to them), where the value's magnitude has fewer than 32 bits (31
+/// for a negative value) and fewer than 10 decimal places, else eight bytes shown in 20 digits
+/// where it has fewer than 64 (63) and fewer than 19, else as many digits as the value has. A
+/// negative value has a leading minus, the decimal point shows where the places are, and trailing
+/// zeros in them are dropped. `width` gives a result cobc holds in a field of its own, such as
+/// DATE-OF-INTEGER's 8 digits.
+fn cobc_number_text(x: &Fixed, width: Option<usize>) -> String {
+    let (mut magnitude, mut scale) = (x.magnitude, x.places.dec);
+    while scale > 0 && magnitude.div_rem(U256::pow10(1)).1.is_zero() {
+        magnitude = magnitude.div_rem(U256::pow10(1)).0;
+        scale -= 1;
+    }
+    let negative = x.negative && !magnitude.is_zero();
+    let mut digits = Vec::new();
+    let mut rest = magnitude;
+    while !rest.is_zero() {
+        let (quotient, digit) = rest.div_rem(U256::pow10(1));
+        digits.push(b'0' + digit.to_u128().unwrap_or(0) as u8);
+        rest = quotient;
+    }
+    digits.reverse();
+    let bits = magnitude.bits().max(1);
+    let sign = u32::from(negative);
+    let size = match width {
+        Some(w) => w,
+        None if bits < 33 - sign && scale < 10 => 9,
+        None if bits < 65 - sign && scale < 19 => 20,
+        None => digits.len().max(1),
+    };
+    let text = String::from_utf8(digits).unwrap_or_default();
+    let shown = if text.len() > size { text[text.len() - size..].to_owned() } else { format!("{text:0>size$}") };
+    let shown = if scale as usize >= shown.len() { format!("{shown:0>width$}", width = scale as usize) } else { shown };
+    let point = shown.len() - scale as usize;
+    let body = if scale > 0 { format!("{}.{}", &shown[..point], &shown[point..]) } else { shown };
+    if negative { format!("-{body}") } else { body }
+}
+
 /// HIGHEST-ALGEBRAIC and LOWEST-ALGEBRAIC of a numeric item: the largest and smallest value its
 /// description allows, the PICTURE's nines and sign, or the container's range for a native binary
 /// item (GnuCOBOL's, from cobc 3.2).
@@ -1031,6 +1069,15 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
                 _ => return Err(crate::refusal::IWR0065.abend("FUNCTION STORED-CHAR-LENGTH of this argument is not supported yet", pos)),
             };
             Ok(Val::Num(Fixed::new(n as i128, Places::new(9, 0))))
+        }
+        "DISPLAYED NUMBER" => {
+            arity(1..=2, args)?;
+            let Val::Num(value) = &args[0] else { return Err(Abend::ironwork(format!("FUNCTION {name} takes a number"), pos)) };
+            let width = match args.get(1) {
+                Some(w) => Some(usize::try_from(whole(w, name, pos)?).unwrap_or(0)),
+                None => None,
+            };
+            text_value(facts, &cobc_number_text(value, width), pos)
         }
         "BIT AND" | "BIT OR" | "BIT XOR" | "BIT NOT" => {
             arity(if name == "BIT NOT" { 1..=1 } else { 2..=2 }, args)?;

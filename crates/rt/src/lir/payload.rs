@@ -373,6 +373,7 @@ functions! {
     BitOr = 99, "BIT OR", 2..=2;
     BitXor = 100, "BIT XOR", 2..=2;
     BitNot = 101, "BIT NOT", 1..=1;
+    DisplayedNumber = 102, "DISPLAYED NUMBER", 1..=2;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
