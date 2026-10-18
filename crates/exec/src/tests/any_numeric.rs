@@ -128,3 +128,35 @@ fn any_numeric_reads_an_argument_that_is_not_numeric_only_as_ironwork_can() {
     assert_eq!((walked.out.as_str(), format!("{:?}", walked.ending)), (vm.out.as_str(), format!("{:?}", vm.ending)));
     assert!(format!("{:?}", walked.ending).contains("IWR0096"), "{:?}", walked.ending);
 }
+
+const COMP_X_PAST_ITS_PICTURE: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. CXMAIN.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  X  PIC 9(2) COMP-X VALUE 99.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           ADD 1 TO X\n",
+    "           DISPLAY 'X=' X\n",
+    "           CALL 'CXSUB' USING X\n",
+    "           STOP RUN.\n",
+    "       END PROGRAM CXMAIN.\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. CXSUB.\n",
+    "       DATA DIVISION.\n",
+    "       LINKAGE SECTION.\n",
+    "       01  P  ANY NUMERIC.\n",
+    "       PROCEDURE DIVISION USING P.\n",
+    "           DISPLAY 'P=' P\n",
+    "           GOBACK.\n",
+    "       END PROGRAM CXSUB.\n",
+);
+
+#[test]
+fn any_numeric_shows_a_comp_x_argument_in_its_pictures_digits_as_its_caller_does() {
+    // cobc 3.2's output: the byte holds 100, and both show its PICTURE's two digits.
+    for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+        let ran = Harness::source(COMP_X_PAST_ITS_PICTURE).flags(EXTENDED).run(executor);
+        assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), ("X=00\nP=00\n", Some(&Ending::StopRun)), "{name}: {}", ran.err);
+    }
+}
