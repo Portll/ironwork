@@ -430,6 +430,46 @@ fn a_gnucobol_target_reads_invalid_decimal_data_as_cobc_does_and_ibm_ends_the_ru
     }
 }
 
+/// Negative signed items seen through unsigned ones: a REDEFINES, and a group MOVE of a record.
+const OVERPUNCH_UNSIGNED: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. OVERPUN.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 A PIC S9(3) VALUE -12.\n",
+    "       01 B REDEFINES A PIC 9(3).\n",
+    "       01 G.\n",
+    "          05 GA PIC S9(3) VALUE -45.\n",
+    "          05 GB PIC S9(3) VALUE +67.\n",
+    "       01 H.\n",
+    "          05 HA PIC 9(3).\n",
+    "          05 HB PIC 9(3).\n",
+    "       01 F PIC 9(5) COMP-3.\n",
+    "       01 X PIC 9(4).\n",
+    "       PROCEDURE DIVISION.\n",
+    "           COMPUTE X = B + 0 DISPLAY X\n",
+    "           IF B = 12 DISPLAY 'EQ 12' END-IF\n",
+    "           MOVE B TO F DISPLAY F\n",
+    "           MOVE G TO H\n",
+    "           COMPUTE X = HA + HB DISPLAY X\n",
+    "           IF HA = 45 DISPLAY 'EQ 45' END-IF\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn a_signed_items_overpunch_seen_through_an_unsigned_one_reads_as_its_digits_for_every_target() {
+    // cobc 3.2's output by default and under -std=ibm-strict, and Enterprise COBOL's.
+    let expected = "0012\nEQ 12\n00012\n0112\nEQ 45\n";
+    for target in numeric::Target::ALL {
+        let flags = target.flags();
+        let flags: Vec<&str> = flags.iter().map(String::as_str).collect();
+        for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+            let ran = Harness::source(OVERPUNCH_UNSIGNED).flags(&flags).run(executor);
+            assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{} {name}: {}", target.name(), ran.err);
+        }
+    }
+}
+
 /// RETURN-CODE given values its halfword and its fullword hold, and its length.
 const RETURN_CODE_SIZE: &str = concat!(
     "       IDENTIFICATION DIVISION.\n",

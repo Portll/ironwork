@@ -207,8 +207,8 @@ pub fn cobc_reads_otherwise(bytes: &[u8], kind: Kind) -> bool {
 }
 
 /// A zoned or packed item read as libcob reads it (cob_decimal_set_display
-/// and cob_decimal_set_packed, libcob/numeric.c). A zoned character other than a digit is worth the
-/// low half of its ASCII code, a space 0 and `*` 10; an item starting with HIGH-VALUE is 10 to the
+/// and cob_decimal_set_packed, libcob/numeric.c). An overpunched digit is worth its digit wherever
+/// it stands, and another character than a digit the low half of its ASCII code, a space 0 and `*` 10; an item starting with HIGH-VALUE is 10 to the
 /// power of its size and one starting with LOW-VALUE its negative; the sign is negative under a
 /// separate '-', an overpunch of B or D, or a character from 'p' to '~'. A packed digit half-byte
 /// is worth its own value up to 15, and the sign is negative only for D.
@@ -243,6 +243,8 @@ pub fn cobc_decimal(page: &CodePage, bytes: &[u8], kind: Kind) -> Option<Decimal
                         negative = matches!(b >> 4, 0xB | 0xD);
                         b & 0x0F
                     }
+                    // A signed item's overpunch seen through an unsigned one: cobc's byte there, a digit or 'p' to 'y', is worth the digit.
+                    0xC0..=0xC9 | 0xD0..=0xD9 => b & 0x0F,
                     _ => {
                         let code = ascii();
                         negative |= Some(i) == sign_at && code & 0xF0 == 0x70;
