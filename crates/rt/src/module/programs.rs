@@ -7,7 +7,7 @@ use numeric::governs::{Facts, Statement, Usage};
 use crate::bms::Mapset;
 use crate::codec_struct;
 use crate::lir::{AssignItem, 
-    AbendText, Block, Code, Cond, Const, Debug, Edit, Expr, Item, ParaId, Paragraph, Place, Plans, Program, ProgramOptions, Range,
+    AbendText, Base, Block, Code, Cond, Const, Debug, Edit, Expr, Item, ParaId, Paragraph, Place, Plans, Program, ProgramOptions, Range,
     RecordSpan, Services, SqlEntry, Storage, SymId, TableRange,
 };
 
@@ -227,7 +227,7 @@ impl Decode for LirRecord {
             procedure_start: Decode::decode(r)?,
             ranges: Decode::decode(r)?,
             blocks: Decode::decode(r)?,
-            places: Decode::decode(r)?,
+            places: halfword_return_code(Decode::decode(r)?),
             exprs: Decode::decode(r)?,
             conds: Decode::decode(r)?,
             consts: Decode::decode(r)?,
@@ -237,6 +237,15 @@ impl Decode for LirRecord {
             symbols: Decode::decode(r)?,
         })
     }
+}
+
+/// Enterprise COBOL's RETURN-CODE as a module from before the fullword places it, two bytes at
+/// offset 0, which no layout writes now: the halfword lies at `unit::RETURN_CODE_HALFWORD`.
+fn halfword_return_code(mut places: Vec<Place>) -> Vec<Place> {
+    for place in places.iter_mut().filter(|p| p.base == Base::ReturnCode && p.offset == 0 && p.len == 2) {
+        place.offset = (crate::unit::RETURN_CODE_HALFWORD - crate::unit::RETURN_CODE) as u32;
+    }
+    places
 }
 
 /// Program count, then one record per program.

@@ -4,7 +4,8 @@ mod common;
 
 use common::payroll;
 use ironwork_rt::bms::{Attrb, Field, Initial, Intensity, Map, Mapset, Mode, Protection};
-use ironwork_rt::lir::{Program, ProgramOptions, SqlEntry, SqlStatement};
+use ironwork_rt::lir::{Base, Place, Program, ProgramOptions, SqlEntry, SqlStatement};
+use ironwork_rt::storage::Kind;
 use ironwork_rt::module::codec::decode_all;
 use ironwork_rt::module::crc::{crc32, extend};
 use ironwork_rt::module::{
@@ -223,6 +224,25 @@ fn another_major_or_an_older_minor_is_refused_and_a_newer_minor_read() {
     let crc = extend(crc32(&newer[..28]), &newer[32..32 + count * 28]);
     newer[28..32].copy_from_slice(&crc.to_le_bytes());
     assert_eq!(read(&newer).unwrap().programs, two());
+}
+
+#[test]
+fn an_older_module_s_return_code_is_read_as_enterprise_cobol_s_halfword() {
+    let mut program = payroll();
+    let template = program.places[0].clone();
+    let return_code = |offset, len, digits, native| Place {
+        base: Base::ReturnCode,
+        offset,
+        len,
+        kind: Kind::Binary { digits, scale: 0, signed: true, native },
+        subscripts: Vec::new(),
+        ..template.clone()
+    };
+    let older = return_code(0, 2, 4, numeric::Native::No);
+    let (halfword, fullword) = (return_code(2, 2, 4, numeric::Native::No), return_code(0, 4, 9, numeric::Native::CompX));
+    program.places.extend([older, halfword.clone(), fullword.clone()]);
+    let read_back = read(&write(&[program])).unwrap().programs.remove(0).places;
+    assert_eq!(read_back[read_back.len() - 3..], [halfword.clone(), halfword, fullword]);
 }
 
 /// A module whose sections each hold a count: the directory's, OPTIONS' and BMS's as given, else zero.

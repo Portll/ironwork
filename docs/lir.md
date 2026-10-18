@@ -303,7 +303,7 @@ pub struct PlaceNumcheck { pub lax: Option<rt::store::LaxRedefinition>, pub remo
 
 | Form | LIR | Replaces in `locate` (machine.rs) |
 |---|---|---|
-| Undeclared RETURN-CODE | `Base::ReturnCode`, offset 0, length 2, BINARY S9(4) | 539-541 |
+| Undeclared RETURN-CODE | `Base::ReturnCode`, offset 2, length 2, BINARY S9(4), Enterprise COBOL's halfword; compiled for GnuCOBOL offset 0, length 4, cobc's fullword shown in nine digits (`rt::unit::return_code_place`) | 539-541 |
 | SELF, JNIENVPTR | `Base::SelfRef`, `Base::JniEnv` | 553-555 (int), calling oo.rs:71-81 (int) |
 | XML-TEXT, XML-NTEXT and the namespace registers, undeclared | `Base::Xml(register)` | `xml_register` (machine/xml.rs) |
 | Name lookup and its memo | Resolved at lowering; the compiler refuses a condition-name used as data | 528-536, 542-544 |
