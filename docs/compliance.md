@@ -1641,6 +1641,35 @@ argument): the run's clock is UTC, so it is 0`, at the argument.
 
 cobc 3.2 gives the host's offset (+1100 on a host in Sydney); ironwork's clock is UTC (assumption C505).
 
+### IWX0143-W START ... LENGTH
+
+`IWX0143-W START ... LENGTH {n} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such phrase): the first
+{n} characters of the key are compared`, at LENGTH.
+
+`START file KEY IS >= key [WITH] LENGTH n` compares the first n characters of the key with the file's
+keys, as cobc 3.2 does: `LENGTH 2` of AAZZ finds the first key starting AA. n is an integer literal not
+past the key's length; any other length is refused as not lowered yet. Strict refuses the phrase
+(IWC0344-S).
+
+### IWX0144-W Boolean operators
+
+`IWX0144-W {operator} (GnuCOBOL under -std=mf and Micro Focus; Enterprise COBOL has no boolean
+operators): bitwise on the unsigned 64-bit value of each operand, binding as * and / do`, at the operator.
+
+B-AND, B-OR, B-XOR and B-NOT in an arithmetic expression work on the unsigned 64-bit value of each
+operand's digits, its sign and decimal point ignored, as cobc 3.2 reads them (`A B-AND 2.9` is A and 29).
+They bind as * and / do, left to right, so `2 + 1 B-AND 1` is 3 and `2 * 3 B-AND 6` is 6. Each is an
+internal intrinsic function (Func 98 to 101) no source can name. Strict reads B-AND and the others as
+data-names, so an expression using one is a syntax error.
+
+### IWX0145-W A based numeric literal
+
+`IWX0145-W {literal} (ACUCOBOL-GT and Micro Focus; Enterprise COBOL writes a hexadecimal value in
+X'..'): the numeric literal {value}, read in base {radix}`, at the literal.
+
+`x#1F` and `h#1F` are base 16, `o#17` base 8 and `b#101` base 2, each the numeric literal of its value.
+cobc 3.2 reads them under -std=mf. Strict has no such token.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

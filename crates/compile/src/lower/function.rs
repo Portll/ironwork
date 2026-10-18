@@ -350,6 +350,7 @@ fn result(func: Func, args: &[Arg], arith: Arith, pos: Pos) -> R<Side> {
         Func::ArgumentNumeric => num(None, 0),
         Func::ArgumentNumericClass => integer(1),
         Func::HighestAlgebraic | Func::LowestAlgebraic => num(None, 0),
+        Func::BitAnd | Func::BitOr | Func::BitXor | Func::BitNot => integer(20),
         Func::CrtStatus => integer(4),
         Func::CallParameters => integer(9),
         Func::Factorial => integer(if arith != Arith::Compat { 31 } else { 30 }),

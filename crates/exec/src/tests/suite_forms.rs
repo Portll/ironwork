@@ -250,3 +250,127 @@ fn system_offset_is_zero_in_the_formatted_functions() {
     runs(&source, EXTENDED, "123456+0000                   \n");
     assert!(ids_under(&source, EXTENDED).contains(&"IWX0142".to_owned()));
 }
+
+const START_LENGTH: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. STARTLEN.\n",
+    "       ENVIRONMENT DIVISION.\n",
+    "       INPUT-OUTPUT SECTION.\n",
+    "       FILE-CONTROL.\n",
+    "           SELECT IXF ASSIGN TO 'IXDD'\n",
+    "               ORGANIZATION IS INDEXED\n",
+    "               ACCESS MODE IS DYNAMIC\n",
+    "               RECORD KEY IS IX-KEY\n",
+    "               FILE STATUS IS ST1.\n",
+    "       DATA DIVISION.\n",
+    "       FILE SECTION.\n",
+    "       FD IXF.\n",
+    "       01 IX-REC.\n",
+    "          05 IX-KEY PIC X(4).\n",
+    "          05 IX-VAL PIC X(4).\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 ST1 PIC XX.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           OPEN OUTPUT IXF\n",
+    "           MOVE 'AAAA' TO IX-KEY MOVE 'ONE ' TO IX-VAL WRITE IX-REC\n",
+    "           MOVE 'AAAB' TO IX-KEY MOVE 'TWO ' TO IX-VAL WRITE IX-REC\n",
+    "           MOVE 'BBBA' TO IX-KEY MOVE 'THRE' TO IX-VAL WRITE IX-REC\n",
+    "           CLOSE IXF\n",
+    "           OPEN INPUT IXF\n",
+    "           MOVE 'AAZZ' TO IX-KEY\n",
+    "           START IXF KEY IS >= IX-KEY LENGTH 2\n",
+    "           READ IXF NEXT RECORD\n",
+    "           DISPLAY 'L1=' IX-KEY '|' IX-VAL '|' ST1\n",
+    "           MOVE 'AAZZ' TO IX-KEY\n",
+    "           START IXF KEY IS >= IX-KEY WITH LENGTH 2\n",
+    "           READ IXF NEXT RECORD\n",
+    "           DISPLAY 'L2=' IX-KEY '|' IX-VAL '|' ST1\n",
+    "           MOVE 'AAZZ' TO IX-KEY\n",
+    "           START IXF KEY IS >= IX-KEY\n",
+    "           READ IXF NEXT RECORD\n",
+    "           DISPLAY 'N1=' IX-KEY '|' IX-VAL '|' ST1\n",
+    "           CLOSE IXF\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn start_length_compares_the_first_characters_of_the_key() {
+    let dir = temp("start-length");
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, executor) in [("interpreter", Executor::Interpreter), ("vm", Executor::Vm)] {
+        let file = dir.join(format!("{name}.dat"));
+        let _ = std::fs::remove_file(&file);
+        // cobc 3.2's output.
+        let ran = Harness::source(START_LENGTH).flags(EXTENDED).dds(&[format!("IXDD={}", file.display())]).run(executor);
+        assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), ("L1=AAAA|ONE |00\nL2=AAAA|ONE |00\nN1=BBBA|THRE|00\n", Some(&Ending::Goback)), "{name}: {}", ran.err);
+    }
+    assert_eq!(ids_under(START_LENGTH, &[]), ["IWC0344"]);
+    assert_eq!(ids_under(START_LENGTH, EXTENDED), ["IWX0143", "IWX0143"]);
+}
+
+const BOOLEAN_OPERATORS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. BPREC.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 R PIC S9(9) VALUE 0.\n",
+    "       01 A PIC S9(4) COMP-5 VALUE 6.\n",
+    "       01 B PIC S9(4) COMP-5 VALUE 3.\n",
+    "       01 N PIC S9(4) COMP-5 VALUE -5.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           COMPUTE R = 2 + 1 B-AND 1\n",
+    "           DISPLAY \"a \" R\n",
+    "           COMPUTE R = 1 B-AND 3 + 2\n",
+    "           DISPLAY \"b \" R\n",
+    "           COMPUTE R = 2 * 3 B-AND 6\n",
+    "           DISPLAY \"c \" R\n",
+    "           COMPUTE R = 6 B-AND 3 * 2\n",
+    "           DISPLAY \"d \" R\n",
+    "           COMPUTE R = 1 B-OR 2 B-AND 3\n",
+    "           DISPLAY \"e \" R\n",
+    "           COMPUTE R = 7 B-XOR 2 B-OR 1\n",
+    "           DISPLAY \"f \" R\n",
+    "           COMPUTE R = B-NOT A\n",
+    "           DISPLAY \"g \" R\n",
+    "           COMPUTE R = B-NOT A B-AND B\n",
+    "           DISPLAY \"h \" R\n",
+    "           COMPUTE R = N B-AND 255\n",
+    "           DISPLAY \"i \" R\n",
+    "           COMPUTE R = A B-AND 2.9\n",
+    "           DISPLAY \"j \" R\n",
+    "           COMPUTE R = - A B-OR 1\n",
+    "           DISPLAY \"k \" R\n",
+    "           COMPUTE R = A B-XOR N\n",
+    "           DISPLAY \"m \" R\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn boolean_operators_bind_as_multiplication_does() {
+    // cobc 3.2's output under -std=mf.
+    runs(BOOLEAN_OPERATORS, EXTENDED, "a +000000003\nb +000000003\nc +000000006\nd +000000004\ne +000000003\nf +000000005\ng +709551609\nh +000000001\ni +000000005\nj +000000004\nk +000000007\nm +000000003\n");
+    assert!(ids_under(BOOLEAN_OPERATORS, EXTENDED).contains(&"IWX0144".to_owned()));
+    assert!(ids_under(BOOLEAN_OPERATORS, &[]).iter().any(|i| i.starts_with("IWS")));
+}
+
+const BASED_LITERALS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. T.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 R PIC S9(9) VALUE 0.\n",
+    "       01 V1 PIC 9(4) VALUE x#1F.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           MOVE h#10 TO R DISPLAY R\n",
+    "           MOVE o#17 TO R DISPLAY R\n",
+    "           MOVE b#101 TO R DISPLAY R\n",
+    "           MOVE X#ff TO R DISPLAY R V1\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn based_numeric_literals_are_read_under_extended() {
+    runs(BASED_LITERALS, EXTENDED, "+000000016\n+000000015\n+000000005\n+0000002550031\n");
+    assert!(ids_under(BASED_LITERALS, EXTENDED).iter().all(|i| i == "IWX0145"));
+    assert!(!ids_under(BASED_LITERALS, &[]).is_empty());
+}

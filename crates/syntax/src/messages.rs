@@ -376,6 +376,7 @@ catalogue! {
     IWC0341 Severe "{name}: a TYPE clause or USAGE type-name names a type that is not defined by an earlier TYPEDEF";
     IWC0342 Severe "EXTERNAL AS: GnuCOBOL's, not Enterprise COBOL's, whose EXTERNAL record is shared under its data-name; --compliance extended reads it";
     IWC0343 Severe "FUNCTION {name}: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
+    IWC0344 Severe "START ... LENGTH: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0350 Severe "ANY NUMERIC: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
     IWJ0002 Severe "an unbalanced ) in {text}";
@@ -972,6 +973,9 @@ catalogue! {
     IWX0140 Warning "ALPHABET {name} FOR NATIONAL (GnuCOBOL reads it and does not implement it; Enterprise COBOL has no national collating sequence): the alphabet is left out";
     IWX0141 Warning "COLLATING SEQUENCE {name} (GnuCOBOL's code-name; Enterprise COBOL names an alphabet of SPECIAL-NAMES): the sequence is {name} unless SPECIAL-NAMES defines an alphabet of that name";
     IWX0142 Warning "SYSTEM-OFFSET (GnuCOBOL's offset of the local time from UTC; Enterprise COBOL has no such argument): the run's clock is UTC, so it is 0";
+    IWX0143 Warning "START ... LENGTH {n} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such phrase): the first {n} characters of the key are compared";
+    IWX0144 Warning "{operator} (GnuCOBOL under -std=mf and Micro Focus; Enterprise COBOL has no boolean operators): bitwise on the unsigned 64-bit value of each operand, binding as * and / do";
+    IWX0145 Warning "{literal} (ACUCOBOL-GT and Micro Focus; Enterprise COBOL writes a hexadecimal value in X'..'): the numeric literal {value}, read in base {radix}";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

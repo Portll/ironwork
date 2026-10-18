@@ -1867,6 +1867,10 @@ functions! {
     ArgumentNumericDisplay = 95, "ARGUMENT NUMERIC DISPLAY", 1..=1;
     HighestAlgebraic = 96, "HIGHEST-ALGEBRAIC", 1..=1;
     LowestAlgebraic = 97, "LOWEST-ALGEBRAIC", 1..=1;
+    BitAnd = 98, "BIT AND", 2..=2;
+    BitOr = 99, "BIT OR", 2..=2;
+    BitXor = 100, "BIT XOR", 2..=2;
+    BitNot = 101, "BIT NOT", 1..=1;
 }
 ```
 
@@ -1883,7 +1887,7 @@ position or the item's own bytes; 89 the last screen key's CRT STATUS code; 92 t
 the running program was called with; and 93 to 95 the value, the class test NUMERIC (1 or 0) and the
 DISPLAY text of the argument in a USING position, which compile's ANY NUMERIC rewrite makes of the
 parameter's uses (C510). Each reads the field the CALL passed, with the bytes as they are when it
-runs (`RunUnit::argument_field`). Under `--compliance extended` 96 and 97 are COBOL 2002's and GnuCOBOL's HIGHEST-ALGEBRAIC and LOWEST-ALGEBRAIC, which read their one argument's description (the place's kind), not its value, as HEX-OF reads its storage.
+runs (`RunUnit::argument_field`). Under `--compliance extended` 96 and 97 are COBOL 2002's and GnuCOBOL's HIGHEST-ALGEBRAIC and LOWEST-ALGEBRAIC, which read their one argument's description (the place's kind), not its value, as HEX-OF reads its storage; and 98 to 101 are the boolean operators B-AND, B-OR, B-XOR and B-NOT that the parser rewrites into calls, which no source can name.
 Every function the walker runs has a row.
 
 - **The walker's order** (machine.rs `function`): every argument by `expr_value`, which is

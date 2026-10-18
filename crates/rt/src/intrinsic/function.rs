@@ -1032,6 +1032,22 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             };
             Ok(Val::Num(Fixed::new(n as i128, Places::new(9, 0))))
         }
+        "BIT AND" | "BIT OR" | "BIT XOR" | "BIT NOT" => {
+            arity(if name == "BIT NOT" { 1..=1 } else { 2..=2 }, args)?;
+            // cobc takes the unsigned 64-bit value of each operand's digits, scale ignored.
+            let bits = |v: &Val| match v {
+                Val::Num(x) => Ok(x.magnitude.to_u128().unwrap_or(0) as u64),
+                other => whole(other, name, pos).map(|n| n.unsigned_abs() as u64),
+            };
+            let a = bits(&args[0])?;
+            let result = match name {
+                "BIT NOT" => !a,
+                "BIT AND" => a & bits(&args[1])?,
+                "BIT OR" => a | bits(&args[1])?,
+                _ => a ^ bits(&args[1])?,
+            };
+            Ok(integer(i128::from(result), 20))
+        }
         "CRT STATUS" => {
             arity(0..=0, args)?;
             Ok(Val::Num(Fixed::new(i128::from(x.crt_status()), Places::new(4, 0))))

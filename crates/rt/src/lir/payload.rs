@@ -369,6 +369,10 @@ functions! {
     ArgumentNumericDisplay = 95, "ARGUMENT NUMERIC DISPLAY", 1..=1;
     HighestAlgebraic = 96, "HIGHEST-ALGEBRAIC", 1..=1;
     LowestAlgebraic = 97, "LOWEST-ALGEBRAIC", 1..=1;
+    BitAnd = 98, "BIT AND", 2..=2;
+    BitOr = 99, "BIT OR", 2..=2;
+    BitXor = 100, "BIT XOR", 2..=2;
+    BitNot = 101, "BIT NOT", 1..=1;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

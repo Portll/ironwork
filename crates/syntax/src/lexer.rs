@@ -159,6 +159,20 @@ impl Lexer<'_> {
         self.chars.get(self.at + ahead).copied()
     }
 
+    /// An ACUCOBOL-GT based literal at the cursor, `x#1F`, `h#1F`, `o#17` or `b#101`: its radix,
+    /// the digits after the `#`, and its value; None where no digit follows or it overflows.
+    fn based_digits(&self, prefix: char) -> Option<(u32, usize, u128)> {
+        let radix = match prefix.to_ascii_uppercase() {
+            'X' | 'H' => 16,
+            'O' => 8,
+            _ => 2,
+        };
+        let digits = self.chars[self.at + 2..].iter().take_while(|c| c.is_digit(radix)).count();
+        let ends = self.chars.get(self.at + 2 + digits).is_none_or(|c| !(c.is_alphanumeric() || *c == '-' || *c == '_'));
+        let text: String = self.chars[self.at + 2..self.at + 2 + digits].iter().collect();
+        (digits > 0 && ends).then(|| u128::from_str_radix(&text, radix).ok()).flatten().map(|value| (radix, digits, value))
+    }
+
     fn pos(&self) -> Pos {
         self.positions.get(self.at).copied().unwrap_or_default()
     }
@@ -299,6 +313,13 @@ impl Lexer<'_> {
                     text = read.to_owned();
                 }
                 self.emit(Tok::Alnum(text), pos);
+            }
+            'X' | 'x' | 'H' | 'h' | 'O' | 'o' | 'B' | 'b' if self.extended && next == Some('#') && self.based_digits(c).is_some() => {
+                let (radix, digits, value) = self.based_digits(c).expect("checked in the guard");
+                let written: String = self.chars[self.at..self.at + 2 + digits].iter().collect();
+                self.at += 2 + digits;
+                self.pending.push(crate::messages::IWX0145.at(pos, format!("{written} (ACUCOBOL-GT and Micro Focus; Enterprise COBOL writes a hexadecimal value in X'..'): the numeric literal {value}, read in base {radix}")));
+                self.emit(Tok::Number(value.to_string()), pos);
             }
             'X' | 'x' if quote_next => {
                 self.at += 1;

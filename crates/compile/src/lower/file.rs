@@ -325,7 +325,22 @@ impl Lower<'_> {
                     (Organization::Indexed, None) => StartKey::Prime,
                     (Organization::Indexed, Some((_, r))) => {
                         let keys = self.index_keys(file, pos)?;
-                        let (key, span) = self.key_of_reference(file as usize, &keys, r, true)?;
+                        let (key, span) = match &r.refmod {
+                            None => self.key_of_reference(file as usize, &keys, r, true)?,
+                            Some(rm) => {
+                                let (Expr::Operand(Operand::Literal(syntax::ast::Literal::Number(start))), Some(Expr::Operand(Operand::Literal(syntax::ast::Literal::Number(length))))) = (&*rm.start, rm.length.as_deref()) else {
+                                    return unsupported("a START KEY with reference modification other than START ... LENGTH", r.pos);
+                                };
+                                let Ok(length) = length.parse::<u32>() else { return unsupported("a START ... LENGTH that is not a small integer", r.pos) };
+                                let whole = Ref { refmod: None, ..r.clone() };
+                                let (key, mut span) = self.key_of_reference(file as usize, &keys, &whole, true)?;
+                                if start != "1" || length == 0 || length > span.len {
+                                    return unsupported("a START KEY with reference modification other than START ... LENGTH", r.pos);
+                                }
+                                span.len = length;
+                                (key, span)
+                            }
+                        };
                         StartKey::Named { key, span }
                     }
                     (Organization::Relative, None) => StartKey::RelativeKey,

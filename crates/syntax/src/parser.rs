@@ -2976,7 +2976,21 @@ impl Parser<'_> {
                     } else {
                         self.relop()?.ok_or_else(|| self.error("a relation after START KEY"))?
                     };
-                    Some((op, self.reference()?))
+                    let mut key = self.reference()?;
+                    if (self.is_word("LENGTH") || self.is_word("WITH") && self.word_at(1) == Some("LENGTH")) && key.refmod.is_none() {
+                        let at = self.pos();
+                        if !self.extended {
+                            return Err(crate::messages::IWC0344.at(at, "START ... LENGTH: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it"));
+                        }
+                        self.accept_word("WITH");
+                        self.at += 1;
+                        let Some(Tok::Number(n)) = self.peek().cloned() else { return Err(self.error("an integer literal after START ... LENGTH")) };
+                        self.at += 1;
+                        self.messages.push(crate::messages::IWX0143.at(at, format!("START ... LENGTH {n} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such phrase): the first {n} characters of the key are compared")));
+                        let one = Expr::Operand(Operand::Literal(Literal::Number("1".into())));
+                        key.refmod = Some(RefMod { start: Box::new(one), length: Some(Box::new(Expr::Operand(Operand::Literal(Literal::Number(n))))) });
+                    }
+                    Some((op, key))
                 } else {
                     None
                 };
@@ -4641,6 +4655,15 @@ impl Parser<'_> {
     fn term(&mut self) -> R<Expr> {
         let mut left = self.power()?;
         loop {
+            if self.extended && matches!(self.word(), Some("B-AND" | "B-OR" | "B-XOR")) {
+                let pos = self.pos();
+                let written = self.name("a boolean operator")?;
+                self.messages.push(crate::messages::IWX0144.at(pos, format!("{written} (GnuCOBOL under -std=mf and Micro Focus; Enterprise COBOL has no boolean operators): bitwise on the unsigned 64-bit value of each operand, binding as * and / do")));
+                let right = self.power()?;
+                let name = format!("BIT {}", &written[2..]);
+                left = Expr::Operand(Operand::Function(FunctionCall { name, args: vec![left, right], modifier: None, refmod: None, all_subscripts: Vec::new(), pos }));
+                continue;
+            }
             let op = match self.peek() {
                 Some(Tok::Star) => BinOp::Mul,
                 Some(Tok::Slash) => BinOp::Div,
@@ -4660,6 +4683,13 @@ impl Parser<'_> {
     }
 
     fn unary(&mut self) -> R<Expr> {
+        if self.extended && self.is_word("B-NOT") {
+            let pos = self.pos();
+            self.at += 1;
+            self.messages.push(crate::messages::IWX0144.at(pos, "B-NOT (GnuCOBOL under -std=mf and Micro Focus; Enterprise COBOL has no boolean operators): bitwise on the unsigned 64-bit value of the operand, binding as * and / do"));
+            let operand = self.unary()?;
+            return Ok(Expr::Operand(Operand::Function(FunctionCall { name: "BIT NOT".into(), args: vec![operand], modifier: None, refmod: None, all_subscripts: Vec::new(), pos })));
+        }
         if self.accept(&Tok::Minus) {
             return Ok(Expr::Neg(Box::new(self.unary()?)));
         }
