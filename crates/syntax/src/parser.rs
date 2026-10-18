@@ -2153,12 +2153,32 @@ impl Parser<'_> {
     /// IWX0033-W (assumption C480); refused under strict.
     fn returning_code(&mut self, verb: &str) -> R<()> {
         let at = self.pos();
+        if verb == "STOP RUN" && matches!((self.word(), self.word_at(1)), (Some("NORMAL" | "ERROR"), _) | (Some("WITH"), Some("NORMAL" | "ERROR"))) {
+            return self.stop_status(at);
+        }
         let Some(word) = self.accept_any(&["RETURNING", "GIVING"]) else { return Ok(()) };
         if !self.extended {
             return Err(crate::messages::IWC0306.at(at, format!("{verb} {word}: GnuCOBOL's and Micro Focus's, not Enterprise COBOL's, where a MOVE to RETURN-CODE comes first; --compliance extended reads it")));
         }
         let from = self.operand()?;
         self.messages.push(crate::messages::IWX0033.at(at, format!("{verb} {word} (GnuCOBOL and Micro Focus; Enterprise COBOL moves the value to RETURN-CODE first): the value is moved to RETURN-CODE, then {verb} ends the program")));
+        let to = Ref { name: "RETURN-CODE".into(), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos: at };
+        self.before.push(Stmt::Move { from, to: vec![to], pos: at });
+        Ok(())
+    }
+
+    /// STOP RUN [WITH] NORMAL|ERROR [STATUS] [value], COBOL 2002's and GnuCOBOL's: under
+    /// `--compliance extended` a MOVE to RETURN-CODE of the value, or of 0 for NORMAL and 1 for
+    /// ERROR where none is written, ahead of the statement, with IWX0150-W; refused under strict.
+    fn stop_status(&mut self, at: Pos) -> R<()> {
+        self.accept_word("WITH");
+        let word = self.name("NORMAL or ERROR")?;
+        self.accept_word("STATUS");
+        if !self.extended {
+            return Err(crate::messages::IWC0346.at(at, format!("STOP RUN {word}: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it")));
+        }
+        let from = if self.starts_operand() { self.operand()? } else { Operand::Literal(Literal::Number(if word == "ERROR" { "1" } else { "0" }.into())) };
+        self.messages.push(crate::messages::IWX0150.at(at, format!("STOP RUN {word} (COBOL 2002 and GnuCOBOL; Enterprise COBOL's STOP RUN ends with RETURN-CODE): the value, or {} where none is written, is moved to RETURN-CODE, then STOP RUN ends the run", if word == "ERROR" { 1 } else { 0 })));
         let to = Ref { name: "RETURN-CODE".into(), qualifiers: Vec::new(), subscripts: Vec::new(), refmod: None, pos: at };
         self.before.push(Stmt::Move { from, to: vec![to], pos: at });
         Ok(())

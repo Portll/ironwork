@@ -1714,6 +1714,16 @@ argument's field (ABS, MAX, MIN, MEDIAN), a float (SQRT, PI, E, EXP, LOG, SIN, N
 (MEAN, VARIANCE, ANNUITY) stays refused with IWC0101-S, as under strict. Internally the DISPLAY operand is
 a call of DISPLAYED NUMBER, Func 102, no source can name.
 
+### IWX0150-W STOP RUN NORMAL and ERROR
+
+`IWX0150-W STOP RUN {word} (COBOL 2002 and GnuCOBOL; Enterprise COBOL's STOP RUN ends with RETURN-CODE):
+the value, or {default} where none is written, is moved to RETURN-CODE, then STOP RUN ends the run`, at
+the phrase.
+
+`STOP RUN [WITH] NORMAL [STATUS] [value]` ends with the value, or 0, and `STOP RUN [WITH] ERROR [STATUS]
+[value]` with the value, or 1, whatever RETURN-CODE held, as cobc 3.2 ends. Strict refuses the phrase
+(IWC0346-S).
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

@@ -508,3 +508,28 @@ fn a_perform_thru_out_of_a_declarative_is_a_hole_under_extended() {
     assert_eq!(ids_under(&source, EXTENDED), ["IWX0148"]);
     assert_eq!(ids_under(&source, &[]), ["IWC0015"]);
 }
+
+#[test]
+fn stop_run_with_a_status_sets_return_code_alike_on_both_executors() {
+    // cobc 3.2's exit statuses.
+    for (statement, expected) in [
+        ("STOP RUN ERROR", 1),
+        ("STOP RUN NORMAL", 0),
+        ("STOP RUN WITH NORMAL STATUS", 0),
+        ("STOP RUN WITH ERROR", 1),
+        ("STOP RUN ERROR STATUS 5", 5),
+        ("STOP RUN WITH NORMAL STATUS N", 2),
+        ("MOVE 7 TO RETURN-CODE STOP RUN NORMAL", 0),
+        ("MOVE 7 TO RETURN-CODE STOP RUN WITH ERROR", 1),
+        ("MOVE 7 TO RETURN-CODE STOP RUN", 7),
+    ] {
+        let source = under(&format!("       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01 N PIC 9 VALUE 2.\n       PROCEDURE DIVISION.\n           {statement}.\n"));
+        for executor in [Executor::Interpreter, Executor::Vm] {
+            let o = Harness::source(&source).flags(EXTENDED).run(executor);
+            assert_eq!((o.ending.as_ref().ok(), o.return_code), (Some(&Ending::StopRun), expected), "{statement}: {}", o.err);
+        }
+    }
+    let source = under("       PROCEDURE DIVISION.\n           STOP RUN ERROR.\n");
+    assert_eq!(ids_under(&source, &[]), ["IWC0346"]);
+    assert_eq!(ids_under(&source, EXTENDED), ["IWX0150"]);
+}

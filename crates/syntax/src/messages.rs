@@ -378,6 +378,7 @@ catalogue! {
     IWC0343 Severe "FUNCTION {name}: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0344 Severe "START ... LENGTH: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0345 Severe "TYPEDEF goes on a level-01 or level-77 entry";
+    IWC0346 Severe "STOP RUN {word}: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0350 Severe "ANY NUMERIC: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
     IWJ0002 Severe "an unbalanced ) in {text}";
@@ -981,6 +982,7 @@ catalogue! {
     IWX0147 Warning "a class condition on the literal \"{text}\" (GnuCOBOL; Enterprise COBOL tests a data item): the literal's characters are tested as a data item holding them is";
     IWX0148 Warning "{construct} (GnuCOBOL warns and fails at run time; Enterprise COBOL refuses it): {why}; it compiles as a hole, and a run that reaches it ends with IWR0078";
     IWX0149 Warning "DISPLAY FUNCTION {name} (GnuCOBOL; Enterprise COBOL uses a numeric function only in an arithmetic expression): it shows the digits of the field cobc 3.2 holds its result in";
+    IWX0150 Warning "STOP RUN {word} (COBOL 2002 and GnuCOBOL; Enterprise COBOL's STOP RUN ends with RETURN-CODE): the value, or {default} where none is written, is moved to RETURN-CODE, then STOP RUN ends the run";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

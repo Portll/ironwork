@@ -352,6 +352,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0343 | S | `FUNCTION {name}: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0344 | S | `START ... LENGTH: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0345 | S | `TYPEDEF goes on a level-01 or level-77 entry` |
+| IWC0346 | S | `STOP RUN {word}: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0350 | S | `ANY NUMERIC: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
@@ -955,6 +956,7 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0147 | W | `a class condition on the literal "{text}" (GnuCOBOL; Enterprise COBOL tests a data item): the literal's characters are tested as a data item holding them is` |
 | IWX0148 | W | `{construct} (GnuCOBOL warns and fails at run time; Enterprise COBOL refuses it): {why}; it compiles as a hole, and a run that reaches it ends with IWR0078` |
 | IWX0149 | W | `DISPLAY FUNCTION {name} (GnuCOBOL; Enterprise COBOL uses a numeric function only in an arithmetic expression): it shows the digits of the field cobc 3.2 holds its result in` |
+| IWX0150 | W | `STOP RUN {word} (COBOL 2002 and GnuCOBOL; Enterprise COBOL's STOP RUN ends with RETURN-CODE): the value, or {default} where none is written, is moved to RETURN-CODE, then STOP RUN ends the run` |
 
 ## Run-time refusals
 
