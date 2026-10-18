@@ -408,6 +408,9 @@ pub(crate) fn compile_program(mut program: Program, flags: &[String], whole: boo
         pointer_moves::rewrite(&mut program, &layout, &mut errors);
         display_lengths(&mut program, &layout, &mut errors);
     }
+    if options.emulates_cobc() {
+        cobc_lengths(&mut program, &layout, options.compliance == numeric::Compliance::Extended);
+    }
     condition_subjects(&mut program, &layout);
     dbcs_values(&layout, &mut errors);
     numeric_values(&layout, &mut errors);
@@ -1225,6 +1228,54 @@ fn display_lengths(program: &mut Program, layout: &layout::Layout, errors: &mut 
     }
     for p in &mut program.paragraphs {
         statements(&mut p.statements, layout, errors);
+    }
+}
+
+/// The length cobc 3.2 folds to a literal: LENGTH OF, or FUNCTION LENGTH under extended, of a data
+/// item whose length the program fixes, LENGTH OF in bytes and the function in characters.
+fn fixed_length(operand: &Operand, layout: &layout::Layout, functions: bool) -> Option<u32> {
+    let (r, characters) = match operand {
+        Operand::LengthOf(r) => (r, false),
+        Operand::Function(f) if functions && f.name == "LENGTH" && f.refmod.is_none() => match f.args.as_slice() {
+            [Expr::Operand(Operand::Ref(r))] => (r, true),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    if r.refmod.is_some() {
+        return None;
+    }
+    let Ok(layout::Resolved::Item(i)) = layout.resolve(&r.name, &r.qualifiers, r.pos) else { return None };
+    let it = &layout.items[i];
+    if !it.odo.is_empty() {
+        return None;
+    }
+    Some(if characters && matches!(it.kind, layout::Kind::National | layout::Kind::Dbcs { .. }) { it.size / 2 } else { it.size })
+}
+
+/// cobc 3.2 folds the length of a data item whose length the program fixes to a literal, which
+/// DISPLAY shows and MOVE sends as its digits alone, `12` where Enterprise COBOL's nine-digit
+/// LENGTH OF shows `000000012` (C492).
+fn cobc_lengths(program: &mut Program, layout: &layout::Layout, functions: bool) {
+    fn statements(stmts: &mut [Stmt], layout: &layout::Layout, functions: bool) {
+        for s in stmts {
+            for body in crate::oo::bodies_mut(s) {
+                statements(body, layout, functions);
+            }
+            let operands: Vec<&mut Operand> = match s {
+                Stmt::Display { items, .. } => items.iter_mut().collect(),
+                Stmt::Move { from, .. } => vec![from],
+                _ => continue,
+            };
+            for operand in operands {
+                if let Some(length) = fixed_length(operand, layout, functions) {
+                    *operand = Operand::Literal(Literal::Number(length.to_string()));
+                }
+            }
+        }
+    }
+    for p in &mut program.paragraphs {
+        statements(&mut p.statements, layout, functions);
     }
 }
 

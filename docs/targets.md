@@ -66,6 +66,7 @@ gnucobol`, or under `--compliance extended`, `relaxed` or `loose`.
 | An OPEN or CLOSE of an indexed or relative file that fails, with no FILE STATUS and no declarative (C451) | control returns; the next statement on the file is a logic error | the run ends at the OPEN or CLOSE, U4038 with IGZ0035S | yes |
 | Zero to a negative power, with or without ON SIZE ERROR (C334) | a size error; without the phrase U4038 with IGZ0050S | zero, and the run goes on | yes |
 | A function argument outside what it takes, such as `CHAR(0)` (C452) | U4038 with LE's message | CHAR the sequence's first character, a function of characters none, any other zero, RANDOM the seed's magnitude; the run goes on | yes |
+| LENGTH OF, and FUNCTION LENGTH, of an item of fixed length, shown or moved (C492) | nine digits, `000000012` | a literal of the length, `12` | yes, but an item with an OCCURS DEPENDING ON table, which cobc shows as a signed fullword |
 | C112, an argument outside a math function's domain, MOD and REM by zero | U4038 with Language Environment's message, or the divide program check | 0, with no size error; SIN, COS and TAN of any argument | yes |
 | C16, C54, C99, C181, C333 ([dialect.md](dialect.md) §5.5) | ironwork's chosen result | cobc's | not emulated: §5.5 gives each one's reason |
 

@@ -493,8 +493,9 @@ const RENAMES_INSIDE: &str = concat!(
 
 #[test]
 fn a_level_66_entry_inside_its_record_is_read_after_the_record_alike_on_both_executors() {
+    // cobc 3.2 -std=mf's output, LENGTH OF DW folded to a literal (C492).
     let walked = Harness::source(RENAMES_INSIDE).flags(EXTENDED).run(Executor::Interpreter);
-    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("2410|Y|000000009|241007YZZ\n991207YZZ|AB\n", Some(&Ending::Goback)), "{}", walked.err);
+    assert_eq!((walked.out.as_str(), walked.ending.as_ref().ok()), ("2410|Y|9|241007YZZ\n991207YZZ|AB\n", Some(&Ending::Goback)), "{}", walked.err);
     let vm = Harness::source(RENAMES_INSIDE).flags(EXTENDED).run(Executor::Vm);
     assert_eq!((vm.out, vm.ending), (walked.out, walked.ending));
     assert_eq!(diagnostics_under(RENAMES_INSIDE, numeric::Compliance::Extended), [(10, 12, Some("IWX0032"), Severity::Warning)]);

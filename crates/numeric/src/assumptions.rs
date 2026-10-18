@@ -393,6 +393,7 @@ pub const COMP_X: &str = "C467";
 pub const PIC_X_COMP_5: &str = "C468";
 pub const GNUCOBOL_FLOATS: &str = "C469";
 pub const RETURNING_WITHOUT_PHRASE: &str = "C491";
+pub const LENGTH_OF_FOLDED: &str = "C492";
 pub const RETURNING_ON_STOP: &str = "C480";
 pub const ANY_LENGTH: &str = "C481";
 pub const ASSIGN_TO_DISK: &str = "C482";
@@ -2696,6 +2697,13 @@ pub const ASSUMPTIONS: &[Assumption] = &[
         basis: Basis::Chosen,
         oracle: Oracle::EnterpriseCobol,
         governs: &[&[O(Extended), U(NativeBinary)]],
+    },
+    Assumption {
+        id: LENGTH_OF_FOLDED,
+        claim: "LENGTH OF an item is a special register holding its length in bytes, PIC 9(9) BINARY, which DISPLAY shows and a MOVE to an alphanumeric item sends as its nine digits. Compiled for GnuCOBOL, LENGTH OF, and under extended FUNCTION LENGTH, of an item whose length the program fixes is a literal of its length, as cobc 3.2 folds it: DISPLAY shows 12, not 000000012, and a MOVE sends those digits alone; an item with an OCCURS DEPENDING ON table keeps the special register",
+        basis: Basis::Recalled,
+        oracle: Oracle::EnterpriseCobol,
+        governs: &[&[S(Display)], &[S(Move)]],
     },
     Assumption {
         id: RETURNING_WITHOUT_PHRASE,

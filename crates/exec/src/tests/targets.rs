@@ -818,3 +818,68 @@ fn a_gnucobol_target_gives_each_numeric_function_cobcs_field() {
         }
     }
 }
+
+/// LENGTH OF and FUNCTION LENGTH of items of fixed length, shown, moved and computed.
+const FIXED_LENGTHS: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. LENFOLD.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 N PIC 9 VALUE 3.\n",
+    "       01 X PIC X(12).\n",
+    "       01 NT PIC N(4).\n",
+    "       01 G.\n",
+    "          05 E PIC X(4) OCCURS 1 TO 5 DEPENDING ON N.\n",
+    "       01 A PIC X(12).\n",
+    "       01 B PIC S9(4) COMP.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY LENGTH OF X\n",
+    "           DISPLAY 'L=' LENGTH OF X '.'\n",
+    "           DISPLAY LENGTH OF NT\n",
+    "           MOVE LENGTH OF X TO A DISPLAY '[' A ']'\n",
+    "           MOVE FUNCTION LENGTH(NT) TO A DISPLAY '[' A ']'\n",
+    "           MOVE LENGTH OF X TO B DISPLAY B\n",
+    "           COMPUTE B = LENGTH OF X + 1 DISPLAY B\n",
+    "           STOP RUN.\n",
+);
+
+/// LENGTH OF items of fixed length, which -std=ibm-strict takes as a MOVE's sender too.
+const FIXED_LENGTHS_STRICT: &str = concat!(
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. LENFOLD2.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01 N PIC 9 VALUE 3.\n",
+    "       01 X PIC X(12).\n",
+    "       01 NT PIC N(4).\n",
+    "       01 G.\n",
+    "          05 E PIC X(4) OCCURS 1 TO 5 DEPENDING ON N.\n",
+    "       01 A PIC X(12).\n",
+    "       01 B PIC S9(4) COMP.\n",
+    "       PROCEDURE DIVISION.\n",
+    "           DISPLAY LENGTH OF X\n",
+    "           DISPLAY 'L=' LENGTH OF X '.'\n",
+    "           DISPLAY LENGTH OF NT\n",
+    "           MOVE LENGTH OF X TO A DISPLAY '[' A ']'\n",
+    "           MOVE LENGTH OF X TO B DISPLAY B\n",
+    "           COMPUTE B = LENGTH OF X + 1 DISPLAY B\n",
+    "           STOP RUN.\n",
+);
+
+#[test]
+fn a_gnucobol_target_folds_a_fixed_length_to_a_literal_and_ibm_shows_nine_digits() {
+    // cobc 3.2's output by default and under -std=ibm-strict (C492).
+    let flags = |target: numeric::Target| target.flags().to_vec();
+    let cases = [
+        (FIXED_LENGTHS, flags(numeric::Target::Gnucobol), "12\nL=12.\n8\n[12          ]\n[4           ]\n+0012\n+0013\n"),
+        (FIXED_LENGTHS_STRICT, flags(numeric::Target::GnucobolIbmStrict), "12\nL=12.\n8\n[12          ]\n+00012\n+00013\n"),
+        (FIXED_LENGTHS_STRICT, Vec::new(), "000000012\nL=000000012.\n000000008\n[000000012   ]\n0012\n0013\n"),
+    ];
+    for (source, flags, expected) in cases {
+        let flags: Vec<&str> = flags.iter().map(String::as_str).collect();
+        for (name, executor) in [("interpreter", Executor::Interpreter), ("VM", Executor::Vm)] {
+            let ran = Harness::source(source).flags(&flags).run(executor);
+            assert_eq!((ran.out.as_str(), ran.ending.as_ref().ok()), (expected, Some(&Ending::StopRun)), "{flags:?} {name}: {}", ran.err);
+        }
+    }
+}
