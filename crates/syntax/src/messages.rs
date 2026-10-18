@@ -991,6 +991,7 @@ catalogue! {
     IWX0152 Warning "FUNCTION BOOLEAN-OF-INTEGER (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such function): GnuCOBOL declares it and fails when a run reaches it, and so does this program";
     IWX0153 Warning "FUNCTION {name} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such function): it reports the last exception condition a statement raised";
     IWX0154 Warning "SET LAST EXCEPTION TO OFF (COBOL 2014 and GnuCOBOL; Enterprise COBOL has no exception status): the last exception FUNCTION EXCEPTION-STATUS reports is cleared";
+    IWX0155 Warning "{directive} (COBOL 2014 and GnuCOBOL; Enterprise COBOL has no such directive): from the next line {what}";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

@@ -51,13 +51,16 @@ const FIGURATIVES: &[&str] = &["ZERO", "ZEROS", "ZEROES", "SPACE", "SPACES", "HI
 /// concatenations joined, the binary usages rewritten and RETURNING OMITTED taken out of a
 /// program's PROCEDURE DIVISION header. `cards` are the CBL and PROCESS options, whose code page
 /// reads a hexadecimal literal joined to an alphanumeric one.
-pub fn rewrite(tokens: Vec<Token>, cards: &[String], directed: &[crate::directives::Constant]) -> Result<Vec<Token>, Error> {
+pub fn rewrite(tokens: Vec<Token>, cards: &[String], directed: &[crate::directives::Constant], reworded: &[crate::directives::WordChange]) -> Result<Vec<Token>, Error> {
     let mut options = numeric::Options::default();
     for card in cards {
         options.apply(card).ok();
     }
     let mut r = Rewrite { tokens, at: 0, out: Vec::new(), constants: HashMap::new(), pending: Vec::new(), options, assigned: Vec::new() };
     let mut directed: Vec<&crate::directives::Constant> = directed.iter().collect();
+    let mut reworded: Vec<&crate::directives::WordChange> = reworded.iter().collect();
+    // The word a `>>COBOL-WORDS` change gives up, and the word it puts in its place.
+    let mut changes: Vec<(String, Option<String>, bool)> = Vec::new();
     // `program`: the last ID paragraph was a PROGRAM-ID, not a function's, class's or method's.
     let (mut data, mut program, mut header) = (false, false, false);
     while r.at < r.tokens.len() {
@@ -72,6 +75,25 @@ pub fn rewrite(tokens: Vec<Token>, cards: &[String], directed: &[crate::directiv
             }
             false
         });
+        reworded.retain(|c| {
+            if c.pos.file != at.file || c.pos.line >= at.line {
+                return true;
+            }
+            changes.push((c.from.clone(), c.to.clone(), c.keeps));
+            false
+        });
+        if !changes.is_empty()
+            && let Tok::Word(w) = &r.tokens[r.at].tok
+        {
+            let renamed = changes.iter().rev().find_map(|(from, to, keeps)| match to {
+                Some(to) if to == w => Some(from.clone()),
+                _ if from == w && !keeps => Some(format!("{w}%")),
+                _ => None,
+            });
+            if let Some(word) = renamed {
+                r.tokens[r.at].tok = Tok::Word(word);
+            }
+        }
         let division = r.tokens.get(r.at + 1).is_some_and(|t| matches!(&t.tok, Tok::Word(w) if w == "DIVISION"));
         if let Tok::Word(w) = &r.tokens[r.at].tok
             && matches!(w.as_str(), "PROGRAM-ID" | "FUNCTION-ID" | "METHOD-ID" | "CLASS-ID" | "INTERFACE-ID")

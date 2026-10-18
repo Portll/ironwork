@@ -20,6 +20,8 @@ pub struct Source {
     pub notes: Vec<Error>,
     /// The constants `>>DEFINE CONSTANT` and `$SET CONSTANT` give, in order.
     pub constants: Vec<crate::directives::Constant>,
+    /// The changes `>>COBOL-WORDS` makes to the reserved words, in order.
+    pub words: Vec<crate::directives::WordChange>,
 }
 
 /// Lines `first` to `last` of file `file`, read in free form, and the warning that says so; a
@@ -194,7 +196,7 @@ fn read_with_margin(input: &str, file: u16, debugging: bool, extended: bool, cop
 /// Reads the lines, a tab as one column; under extended a file is free form from its first line
 /// where `copied_free` says so, or where `detect` lets [`free_from_the_start`] find it is.
 fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_free: bool, detect: bool) -> Result<Source, Error> {
-    let mut out = Source { text: String::new(), positions: Vec::new(), options: Vec::new(), debugging: debugging.then(Vec::new), free: Vec::new(), notes: Vec::new(), constants: Vec::new() };
+    let mut out = Source { text: String::new(), positions: Vec::new(), options: Vec::new(), debugging: debugging.then(Vec::new), free: Vec::new(), notes: Vec::new(), constants: Vec::new(), words: Vec::new() };
     let mut conditions = crate::directives::Conditions::default();
     let mut seen_program = false;
     let mut open_quote: Option<char> = None;
@@ -230,6 +232,13 @@ fn read_lines(input: &str, file: u16, debugging: bool, extended: bool, copied_fr
                     if conditions.active() {
                         out.notes.push(note);
                         out.constants.push(constant);
+                    }
+                    continue;
+                }
+                crate::directives::Directive::Words(change, note) => {
+                    if conditions.active() {
+                        out.notes.push(note);
+                        out.words.push(change);
                     }
                     continue;
                 }

@@ -3,7 +3,7 @@
 //! debugging line >>D, and >>TURN, >>LISTING, >>PAGE, >>CALL-CONVENTION and a word after >>D that
 //! is no directive, read and of no effect.
 
-use crate::messages::{IWC0318, IWX0048, IWX0049, IWX0050, IWX0067};
+use crate::messages::{IWC0318, IWX0048, IWX0049, IWX0050, IWX0067, IWX0155};
 use crate::{Error, Pos};
 use std::collections::HashMap;
 
@@ -21,6 +21,19 @@ pub enum Directive {
     /// `>>DEFINE CONSTANT name [AS] literal [OVERRIDE]` or `$SET CONSTANT name literal`, and its
     /// warning.
     Constant(Constant, Error),
+    /// `>>COBOL-WORDS UNDEFINE "word"` or `SUBSTITUTE "word" BY "word"`, and its warning.
+    Words(WordChange, Error),
+}
+
+/// A change `>>COBOL-WORDS` makes to the reserved words from the line after it on: the word `from`
+/// stops being reserved unless `keeps` says it stays so, and where `to` is given that word stands
+/// for it.
+#[derive(Clone, Debug)]
+pub struct WordChange {
+    pub from: String,
+    pub to: Option<String>,
+    pub keeps: bool,
+    pub pos: Pos,
 }
 
 /// A constant the program text may name from the line after the directive on: its literal as
@@ -92,6 +105,27 @@ pub fn read(chars: &[char], pos: Pos, fixed: bool) -> Option<Result<Directive, E
         "ELIF" => Directive::Elif(tail()),
         "ELSE" if words.len() == 1 => Directive::Else,
         "END-IF" if words.len() == 1 => Directive::EndIf,
+        "COBOL-WORDS" => {
+            let literal = |w: Option<&String>| w.map(|w| unquote(w).to_ascii_uppercase()).filter(|w| !w.is_empty());
+            let change = match words.iter().skip(1).map(|w| w.to_ascii_uppercase()).collect::<Vec<_>>().iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+                ["UNDEFINE", _] => literal(words.get(2)).map(|from| WordChange { from, to: None, keeps: false, pos }),
+                ["SUBSTITUTE", _, "BY", _] => literal(words.get(2)).zip(literal(words.get(4))).map(|(from, to)| WordChange { from, to: Some(to), keeps: false, pos }),
+                ["EQUATE", _, "WITH", _] => literal(words.get(2)).zip(literal(words.get(4))).map(|(from, to)| WordChange { from, to: Some(to), keeps: true, pos }),
+                _ => None,
+            };
+            match change {
+                Some(change) => {
+                    let what = match &change.to {
+                        Some(to) if change.keeps => format!("{to} is also spelled {}", change.from),
+                        Some(to) => format!("{} is spelled {to}", change.from),
+                        None => format!("{} is no longer reserved", change.from),
+                    };
+                    let note = IWX0155.at(pos, format!("{shown} (COBOL 2014 and GnuCOBOL; Enterprise COBOL has no such directive): from the next line {what}"));
+                    Directive::Words(change, note)
+                }
+                None => return Some(Err(IWC0318.at(pos, format!("{shown}: >>COBOL-WORDS takes UNDEFINE \"word\" or SUBSTITUTE \"word\" BY \"word\" or EQUATE \"word\" WITH \"word\"")))),
+            }
+        }
         "TURN" | "LISTING" | "PAGE" | "CALL-CONVENTION" => Directive::Ignored(IWX0049.at(pos, format!(">>{first} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such directive): it is read and has no effect"))),
         // cobc 3.2 ignores a word it does not know after >>D, as >>DMOVE, as an invalid directive.
         d if d.starts_with('D') && d.len() > 1 && d != "DEFINE" && d != "DISPLAY" => Directive::Ignored(IWX0049.at(pos, format!(">>{first} (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such directive): it is read and has no effect"))),
@@ -227,7 +261,7 @@ impl Conditions {
             Directive::EndIf => {
                 self.open.pop().ok_or_else(|| IWC0318.at(pos, ">>END-IF with no >>IF before it"))?;
             }
-            Directive::Ignored(_) | Directive::Debugging(..) | Directive::Constant(..) => {}
+            Directive::Ignored(_) | Directive::Debugging(..) | Directive::Constant(..) | Directive::Words(..) => {}
         }
         Ok(())
     }

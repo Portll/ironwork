@@ -342,7 +342,7 @@ fn parse_from(text: &str, libraries: &copy::Libraries, start: source::Start) -> 
     };
     let cut = source::cut_at_the_margin(text, &source);
     if compliance == numeric::Compliance::Extended {
-        tokens = extended::rewrite(tokens, &source.options, &source.constants).map_err(|e| e.in_files(&files))?;
+        tokens = extended::rewrite(tokens, &source.options, &source.constants, &source.words).map_err(|e| e.in_files(&files))?;
     }
     let mut programs = parser::parse(&tokens, source.options, compliance, libraries.relaxed(), libraries.loose(), libraries.program_stem()).map_err(|e| e.in_files(&files))?;
     for p in &mut programs {

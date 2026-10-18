@@ -1765,6 +1765,17 @@ selector.
 status): the last exception FUNCTION EXCEPTION-STATUS reports is cleared`, at SET. Strict refuses it
 (IWC0370-S). It is LIR op 46, `ClearException`.
 
+### IWX0155-W COBOL-WORDS
+
+`IWX0155-W {directive} (COBOL 2014 and GnuCOBOL; Enterprise COBOL has no such directive): from the next line
+{what}`, at the directive.
+
+`>>COBOL-WORDS UNDEFINE "word"` takes a word out of the reserved words, `SUBSTITUTE "word" BY "other"` writes it
+as `other` and takes it out, and `EQUATE "word" WITH "other"` lets `other` stand for it too. Each holds from the
+line after it to the end of the source, in any case, and does not reach COPY and REPLACE, which are read
+before the words are, nor the directives. A word taken out is an ordinary name from there on, and the
+other forms of the directive (ALIAS) are refused (IWC0318-S). Strict does not read the directive.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

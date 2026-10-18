@@ -657,3 +657,32 @@ fn a_file_status_is_an_exception_condition_with_its_file() {
         assert_eq!((o.out.as_str(), o.ending.as_ref().ok()), ("0[00]\n0[ ]\n0[                               ]\n0[                               ]\n1[35FILE-ONE]\n1[EXC3; ; 0]\n1[EC-I-O-PERMANENT-ERROR         ]\n2[00]\n2[ ]\n", Some(&Ending::Goback)), "{name}: {}", o.err);
     }
 }
+
+const COBOL_WORDS: &str = concat!(
+    "       >>COBOL-WORDS EQUATE \"display\" WITH \"show\"\n",
+    "       >>COBOL-WORDS SUBSTITUTE \"Move\" BY \"putval\"\n",
+    "       >>COBOL-WORDS UNDEFINE \"add\"\n",
+    "       IDENTIFICATION DIVISION.\n",
+    "       PROGRAM-ID. WORDS.\n",
+    "       DATA DIVISION.\n",
+    "       WORKING-STORAGE SECTION.\n",
+    "       01  ADD   PIC 9  VALUE 0.\n",
+    "       01  move  PIC XX VALUE SPACES.\n",
+    "       PROCEDURE DIVISION.\n",
+    "       MAIN-P.\n",
+    "           Show \"EQ-1\".\n",
+    "           sHoW \"EQ-2\".\n",
+    "           PUTVAL 7 TO ADD.\n",
+    "           Putval \"OK\" TO MOVE.\n",
+    "           SHOW ADD \" \" MOVE.\n",
+    "           DISPLAY \"PLAIN\".\n",
+    "           GOBACK.\n",
+);
+
+#[test]
+fn cobol_words_respells_and_frees_reserved_words() {
+    // cobc 3.2's output.
+    runs(COBOL_WORDS, EXTENDED, "EQ-1\nEQ-2\n7 OK\nPLAIN\n");
+    assert_eq!(ids_under(COBOL_WORDS, EXTENDED).iter().filter(|i| *i == "IWX0155").count(), 3);
+    assert_eq!(ids_under(COBOL_WORDS, &[]), ["IWS0001"]);
+}
