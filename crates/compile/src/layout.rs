@@ -51,6 +51,8 @@ pub struct Item {
     /// Stride and count of each OCCURS on the item and its ancestors, outermost first.
     pub dims: Vec<(u32, u32)>,
     pub redefines: Option<String>,
+    /// EXTERNAL AS: the name the record is shared under.
+    pub external_name: Option<String>,
     /// The file whose record area holds the item, for a FILE SECTION record.
     pub file: Option<u16>,
     /// The LINKAGE record the item belongs to, by its position among LINKAGE 01 and 77 items; its
@@ -247,6 +249,7 @@ pub fn build(
                 value: None,
                 dims: Vec::new(),
                 redefines: None,
+                external_name: None,
                 file,
                 linkage: items[record].linkage,
                 object_class: None,
@@ -297,6 +300,7 @@ pub fn build(
             value: e.value.clone().filter(|_| file.is_none() && !in_linkage),
             dims: Vec::new(),
             redefines: e.redefines.clone(),
+            external_name: e.external_name.clone(),
             file,
             linkage: if in_linkage {
                 Some(match (parent, &e.redefines) {
@@ -377,6 +381,7 @@ pub fn build(
                 value: None,
                 dims: Vec::new(),
                 redefines: None,
+                external_name: None,
                 file: None,
                 linkage: None,
                 object_class: None,
@@ -516,7 +521,7 @@ pub fn build(
                 Binding::ExternalFile(k)
             }
             None => {
-                let name = items[r].redefines.clone().or_else(|| items[r].name.clone()).unwrap_or_default();
+                let name = items[r].external_name.clone().or_else(|| items[r].redefines.clone()).or_else(|| items[r].name.clone()).unwrap_or_default();
                 let size = bound_roots.iter().find(|&&t| items[t].name.as_deref() == Some(name.as_str())).map_or(items[r].size, |&t| items[t].size);
                 Binding::External { name, size }
             }

@@ -381,6 +381,7 @@ fn register_entry(name: &str, picture: &str, usage: Option<Usage>, pos: Pos) -> 
         renames: None,
         object_class: None,
         external: false,
+        external_name: None,
         global: false,
         any_length: false,
         any_numeric: false,
@@ -477,6 +478,13 @@ struct Parser<'a> {
     /// The 01 and 77 items of the program being parsed that have no storage of their own: its
     /// LINKAGE SECTION's and, under `--compliance extended`, its BASED ones, which FREE may name.
     unstored: Vec<String>,
+    /// The TYPEDEF entries read so far, each with the entries beneath it, which a TYPE clause or
+    /// USAGE type-name copies.
+    typedefs: Vec<(String, Vec<DataEntry>)>,
+    /// The names of the TYPEDEF entries read so far, including those whose entries are not yet read.
+    typedef_names: Vec<String>,
+    /// What the data entry just read said of types: TYPEDEF, and the type its TYPE clause names.
+    entry_type: (bool, Option<String>),
 }
 
 /// The WHENEVER actions in force, which carry on in listing order, and the EXEC SQL blocks the
@@ -523,6 +531,9 @@ impl<'a> Parser<'a> {
             procedure_assumed: false,
             cds: Vec::new(),
             unstored: Vec::new(),
+            typedefs: Vec::new(),
+            typedef_names: Vec::new(),
+            entry_type: (false, None),
         }
     }
 }
@@ -1655,18 +1666,88 @@ impl Parser<'_> {
 
     fn data_entries(&mut self) -> R<Vec<DataEntry>> {
         let mut entries = Vec::new();
+        let mut types = Vec::new();
         loop {
             if self.data_exec()? {
                 continue;
             }
             let Some((level, pos)) = self.level_number()? else { break };
+            self.entry_type = (false, None);
             match self.data_entry(level, pos) {
-                Ok(entry) => entries.push(entry),
-                Err(e) if self.loose => self.data_hole(level, pos, e, &mut entries),
+                Ok(entry) => {
+                    entries.push(entry);
+                    types.push(std::mem::take(&mut self.entry_type));
+                }
+                Err(e) if self.loose => {
+                    self.data_hole(level, pos, e, &mut entries);
+                    types.truncate(entries.len());
+                }
                 Err(e) => return Err(e),
             }
         }
+        if types.iter().any(|(typedef, name)| *typedef || name.is_some()) {
+            return self.expand_types(entries, types);
+        }
         Ok(entries)
+    }
+
+    /// The entries with each TYPEDEF removed and each item naming a type given that type's clauses
+    /// and entries: the item's own clauses and VALUE win.
+    fn expand_types(&mut self, entries: Vec<DataEntry>, types: Vec<(bool, Option<String>)>) -> R<Vec<DataEntry>> {
+        let beneath = |from: usize| {
+            let level = entries[from].level;
+            (from + 1..entries.len()).take_while(|&j| entries[j].level == 88 || entries[j].level == 66 || (entries[j].level > level && entries[j].level < 50)).count()
+        };
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < entries.len() {
+            let (typedef, named) = &types[i];
+            let own = beneath(i);
+            if *typedef {
+                if let Some(name) = entries[i].name.clone() {
+                    self.typedefs.retain(|(n, _)| *n != name);
+                    self.typedefs.push((name, entries[i..=i + own].to_vec()));
+                }
+                i += own + 1;
+                continue;
+            }
+            let Some(type_name) = named else {
+                out.push(entries[i].clone());
+                i += 1;
+                continue;
+            };
+            let Some((_, definition)) = self.typedefs.iter().find(|(n, _)| n == type_name) else {
+                return Err(crate::messages::IWC0341.at(entries[i].pos, format!("TYPE {type_name}: no TYPEDEF of that name is defined before this entry")));
+            };
+            let (d, below) = (&definition[0], &definition[1..]);
+            let mut e = entries[i].clone();
+            e.picture = e.picture.or_else(|| d.picture.clone());
+            e.usage = e.usage.or(d.usage);
+            e.value = e.value.or_else(|| d.value.clone());
+            e.sign = e.sign.or(d.sign);
+            if e.occurs.is_none() {
+                (e.occurs, e.occurs_min, e.depending_on, e.keys, e.indexed_by) = (d.occurs, d.occurs_min, d.depending_on.clone(), d.keys.clone(), d.indexed_by.clone());
+            }
+            e.justified |= d.justified;
+            e.sync |= d.sync;
+            e.blank_when_zero |= d.blank_when_zero;
+            e.object_class = e.object_class.or_else(|| d.object_class.clone());
+            let shift = i32::from(e.level) - i32::from(d.level);
+            out.push(e);
+            for child in below {
+                let mut c = child.clone();
+                if !matches!(c.level, 66 | 88) {
+                    let level = i32::from(c.level) + shift;
+                    if !(1..=49).contains(&level) {
+                        return Err(crate::messages::IWC0341.at(entries[i].pos, format!("TYPE {type_name}: its entries do not fit beneath level {}", entries[i].level)));
+                    }
+                    c.level = level as u8;
+                }
+                out.push(c);
+            }
+            i += 1;
+        }
+        Ok(out)
     }
 
     /// Under `--compliance loose`, the record holding the entry at `pos` that gave `error` left out:
@@ -1774,6 +1855,7 @@ impl Parser<'_> {
             renames: None,
             object_class: None,
             external: false,
+            external_name: None,
             global: false,
             any_length: false,
             any_numeric: false,
@@ -1820,12 +1902,30 @@ impl Parser<'_> {
                     let w = self.name("a usage")?;
                     if w == "OBJECT" {
                         self.object_reference(&mut e)?;
+                    } else if usage_word(&w).is_none() && self.typedef_names.contains(&w) {
+                        self.entry_type.1 = Some(w);
                     } else {
                         let usage = usage_word(&w).ok_or_else(|| gnucobol_float(&w, pos).unwrap_or_else(|| crate::messages::IWR0004.at(pos, format!("USAGE {w} is not supported yet"))))?;
                         e.usage = Some(self.signedness(usage));
                     }
                 }
                 "OBJECT" => self.object_reference(&mut e)?,
+                "TYPEDEF" => {
+                    if self.is_word("STRONG") {
+                        let at = self.pos();
+                        self.at += 1;
+                        if !self.extended {
+                            return Err(crate::messages::IWR0003.at(at, "TYPEDEF STRONG is not a data description clause ironwork for COBOL supports yet"));
+                        }
+                        self.messages.push(crate::messages::IWX0114.at(at, "TYPEDEF STRONG (COBOL 2002; cobc 3.2 does not implement it and reads the type as weak): the type is read as weak, so no move or comparison is refused for its type"));
+                    }
+                    self.entry_type.0 = true;
+                    self.typedef_names.extend(e.name.clone());
+                }
+                "TYPE" => {
+                    self.accept_word("TO");
+                    self.entry_type.1 = Some(self.name("a type name")?);
+                }
                 "VALUE" | "VALUES" => {
                     if clause == "VALUES" && level != 88 {
                         self.values_outside_condition(level);
@@ -1919,7 +2019,20 @@ impl Parser<'_> {
                     self.blank_when_zero()?;
                     e.blank_when_zero = true;
                 }
-                "EXTERNAL" => e.external = true,
+                "EXTERNAL" => {
+                    e.external = true;
+                    if self.is_word("AS") {
+                        let at = self.pos();
+                        self.at += 1;
+                        if !self.extended {
+                            return Err(crate::messages::IWC0342.at(at, "EXTERNAL AS: GnuCOBOL's, not Enterprise COBOL's, whose EXTERNAL record is shared under its data-name; --compliance extended reads it"));
+                        }
+                        let Some(Tok::Alnum(name)) = self.peek().cloned() else { return Err(self.error("the literal EXTERNAL AS names")) };
+                        self.at += 1;
+                        self.messages.push(crate::messages::IWX0115.at(at, format!("EXTERNAL AS \"{name}\" (GnuCOBOL; Enterprise COBOL shares an EXTERNAL record under its data-name): the record is shared under that name")));
+                        e.external_name = Some(name);
+                    }
+                }
                 "GLOBAL" => e.global = true,
                 "BASED" => {
                     let at = self.tokens[self.at - 1].pos;

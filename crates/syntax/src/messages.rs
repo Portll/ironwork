@@ -48,6 +48,7 @@ macro_rules! catalogue {
 }
 
 catalogue! {
+    // IWC0107 is not given to another message: releases up to 0.8.0 used it for what IWR0075 says.
     IWC0001 Severe "{name} is not defined";
     IWC0002 Severe "{name} is ambiguous; qualify it with OF or IN";
     IWC0003 Severe "no paragraph or section named {name}";
@@ -153,7 +154,6 @@ catalogue! {
     IWC0104 Severe "SEARCH {table} VARYING {value}: not an index-name, an index data item or an elementary integer item";
     IWC0105 Severe "the literal {t} has more than {min} digits";
     IWC0106 Severe "FUNCTION {file}: neither an intrinsic function nor a user-defined function defined or prototyped before this program";
-    // IWC0107 is not given to another message: releases up to 0.8.0 used it for what IWR0075 says.
     IWC0108 Severe "WRITE ... END-OF-PAGE: the FD of {file} has no LINAGE clause";
     IWC0109 Severe "LINAGE-COUNTER can be read, but no statement can change it";
     IWC0110 Severe "NUMCHECK: {name} {why} wherever this statement reads it: its VALUE clauses give it X'{hex}' and no statement changes it, so the test is removed (see {NUMCHECK ALWAYS FAILS})";
@@ -373,6 +373,8 @@ catalogue! {
     IWC0326 Severe "CALL STATIC: GnuCOBOL's call convention, not Enterprise COBOL's; --compliance extended reads it";
     IWC0327 Severe "CALL ... GIVING: Micro Focus's and GnuCOBOL's, not Enterprise COBOL's, which writes RETURNING; --compliance extended reads it";
     IWC0340 Severe "{name}: a table with no upper bound, OCCURS ... TO UNBOUNDED, is described in the LINKAGE SECTION";
+    IWC0341 Severe "{name}: a TYPE clause or USAGE type-name names a type that is not defined by an earlier TYPEDEF";
+    IWC0342 Severe "EXTERNAL AS: GnuCOBOL's, not Enterprise COBOL's, whose EXTERNAL record is shared under its data-name; --compliance extended reads it";
     IWC0350 Severe "ANY NUMERIC: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
     IWJ0002 Severe "an unbalanced ) in {text}";
@@ -958,6 +960,8 @@ catalogue! {
     IWX0111 Warning "FUNCTION {name}: {figurative} as an argument (GnuCOBOL; Enterprise COBOL takes a figurative constant as an argument only inside an arithmetic expression): it is read as the literal '{character}'";
     IWX0112 Warning "UNSTRING FUNCTION {name} (GnuCOBOL; Enterprise COBOL's UNSTRING sends a data item): the function's value is the sending field";
     IWX0113 Warning "DISPLAY FUNCTION LENGTH({item}) (GnuCOBOL; Enterprise COBOL uses an integer function only in an arithmetic expression): it shows {n}, the length the program fixes, as cobc 3.2 shows it";
+    IWX0114 Warning "TYPEDEF STRONG (COBOL 2002; cobc 3.2 does not implement it and reads the type as weak): the type is read as weak, so no move or comparison is refused for its type";
+    IWX0115 Warning "EXTERNAL AS \"{name}\" (GnuCOBOL; Enterprise COBOL shares an EXTERNAL record under its data-name): the record is shared under that name";
     IWX0120 Warning "ANY NUMERIC (GnuCOBOL; Enterprise COBOL's parameters have the class their entries give): {name} takes the class, digits, scale, sign and usage of the argument each CALL passes for it, and is read, never written";
     IWX0130 Warning "{PICTURE or literal} (GnuCOBOL; Enterprise COBOL allows 31 digits under ARITH(EXTEND), GnuCOBOL 38): the program is compiled with arithmetic as cobc does it, keeping up to 76 digits of an intermediate result";
 }

@@ -1564,6 +1564,25 @@ literal with IWC0070 or IWC0105, and a PICTURE of more than 38 digits stays IWC0
   the run with IWR0101: their value is held to 32 significant digits. A function evaluated in
   floating point gives a decimal of 32 significant digits (assumption C516).
 - A SQL host variable of more than 31 digits is refused, as DB2's DECIMAL has no wider type.
+### IWX0114-W TYPEDEF STRONG
+
+`IWX0114-W TYPEDEF STRONG (COBOL 2002; cobc 3.2 does not implement it and reads the type as weak): the
+type is read as weak, so no move or comparison is refused for its type`, at STRONG.
+
+TYPEDEF and the TYPE clause (and USAGE type-name) are read under strict as Enterprise COBOL reads them:
+a TYPEDEF entry has no storage, and each item that names the type takes the type's PICTURE, USAGE, SIGN,
+OCCURS and subordinate entries, its own VALUE and clauses winning. Under extended, STRONG is read as cobc
+3.2 reads it, with no type checking; strict still refuses it (IWR0003-S). A type named before a TYPEDEF
+defines it is IWC0341-S.
+
+### IWX0115-W EXTERNAL AS
+
+`IWX0115-W EXTERNAL AS "{name}" (GnuCOBOL; Enterprise COBOL shares an EXTERNAL record under its
+data-name): the record is shared under that name`, at AS.
+
+An EXTERNAL record written `EXTERNAL AS literal` is shared across the run unit under the literal, as
+cobc 3.2 shares it, so programs may refer to one record by different data-names. Strict refuses it
+(IWC0342-S).
 
 ## Relaxed
 

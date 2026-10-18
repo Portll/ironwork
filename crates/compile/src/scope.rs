@@ -95,7 +95,8 @@ pub(crate) fn inherit(program: &mut Program) -> Inherited {
             for e in entries {
                 if matches!(e.level, 1 | 77) {
                     let record = e.name.clone().unwrap_or_default();
-                    let binding = if e.external { Binding::External { name: record, size: 0 } } else { Binding::Global { program: c.id.clone(), record, section: section.clone() } };
+                    let shared = e.external_name.clone().unwrap_or_else(|| record.clone());
+                    let binding = if e.external { Binding::External { name: shared, size: 0 } } else { Binding::Global { program: c.id.clone(), record, section: section.clone() } };
                     inherited.records.push((binding, depth, None));
                 }
                 for name in &e.indexed_by {

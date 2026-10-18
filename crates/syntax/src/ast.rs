@@ -333,6 +333,8 @@ pub struct DataEntry {
     pub object_class: Option<String>,
     /// EXTERNAL, written on the entry or attained from its FD.
     pub external: bool,
+    /// EXTERNAL AS literal: the name the run unit's storage is shared under, where it is not the item's own.
+    pub external_name: Option<String>,
     /// GLOBAL, written on the entry or attained from its FD.
     pub global: bool,
     /// ANY LENGTH, GnuCOBOL's and Micro Focus's parameter as long as its argument, read under

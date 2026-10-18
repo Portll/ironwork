@@ -44,6 +44,7 @@ mod sort;
 mod vm;
 mod wide_decimal;
 mod statements;
+mod suite_forms;
 mod switches;
 mod taint;
 mod xml;
