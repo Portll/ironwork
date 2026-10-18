@@ -55,6 +55,7 @@ catalogue! {
     IWR0073 "the VM does not run {construct} yet; run it with --interpret";
     IWR0074 "{file}, a GLOBAL file of {declarer}, is written as a print file in one of {declarer} and {program} and not the other, which is not supported yet";
     IWR0078 "{construct} was reached: under --compliance relaxed it compiled as a hole, since {why}";
+    IWR0092 "FUNCTION {name} is not implemented: GnuCOBOL declares it and fails when a run reaches it";
     IWR0096 "{what}: an ANY NUMERIC parameter reads only a numeric argument, and this one is {why}";
     IWR0101 "FUNCTION {name} of {digits} digits is not supported yet: its value is held to 32 significant digits";
 }

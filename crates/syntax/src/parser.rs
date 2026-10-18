@@ -3698,6 +3698,14 @@ impl Parser<'_> {
                         }
                         self.expect_word("WHEN")?;
                         x.suppress.push(Suppression::Every { numeric, form, when: self.figurative_list()? });
+                    } else if self.is_word("WHEN") {
+                        let at = self.pos();
+                        if !self.extended {
+                            return Err(crate::messages::IWC0347.at(at, "XML GENERATE SUPPRESS WHEN: GnuCOBOL's, not Enterprise COBOL's, which names an item or EVERY; --compliance extended reads it"));
+                        }
+                        self.at += 1;
+                        self.messages.push(crate::messages::IWX0151.at(at, "XML GENERATE SUPPRESS WHEN (GnuCOBOL; Enterprise COBOL's SUPPRESS names an item or EVERY): it is read as SUPPRESS EVERY ... WHEN, for each element and attribute"));
+                        x.suppress.push(Suppression::Every { numeric: None, form: None, when: self.figurative_list()? });
                     } else {
                         let item = self.reference()?;
                         let when = if self.accept_word("WHEN") { self.figurative_list()? } else { Vec::new() };

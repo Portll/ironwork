@@ -1724,6 +1724,23 @@ the phrase.
 [value]` with the value, or 1, whatever RETURN-CODE held, as cobc 3.2 ends. Strict refuses the phrase
 (IWC0346-S).
 
+### IWX0151-W XML GENERATE SUPPRESS WHEN
+
+`IWX0151-W XML GENERATE SUPPRESS WHEN (GnuCOBOL; Enterprise COBOL's SUPPRESS names an item or EVERY): it is
+read as SUPPRESS EVERY ... WHEN, for each element and attribute`, at SUPPRESS.
+
+`XML GENERATE out FROM group SUPPRESS WHEN SPACES` leaves out every element and attribute whose value
+is one of the figurative constants listed, as cobc 3.2 does. Strict refuses it (IWC0347-S).
+
+### IWX0152-W BOOLEAN-OF-INTEGER
+
+`IWX0152-W FUNCTION BOOLEAN-OF-INTEGER (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such function):
+GnuCOBOL declares it and fails when a run reaches it, and so does this program`, at the function.
+
+cobc 3.2 compiles a call of BOOLEAN-OF-INTEGER and ends the run that reaches it with `attempt to use
+non-implemented function`. Extended compiles it alike and ends the run with IWR0092-S. Strict refuses it
+(IWC0348-S). INTEGER-OF-BOOLEAN, which cobc declares the same way, stays unknown.
+
 ## Relaxed
 
 `--compliance relaxed` (or `--compliance=relaxed`) is `extended` for every program it compiles, and

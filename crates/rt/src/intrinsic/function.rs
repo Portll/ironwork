@@ -1070,6 +1070,10 @@ fn more(x: &mut impl Evaluator, name: &str, args: &mut Vec<Val>, pos: Pos) -> R<
             };
             Ok(Val::Num(Fixed::new(n as i128, Places::new(9, 0))))
         }
+        "BOOLEAN-OF-INTEGER" => {
+            arity(2..=2, args)?;
+            Err(crate::refusal::IWR0092.abend(format!("FUNCTION {name} is not implemented: GnuCOBOL declares it and fails when a run reaches it"), pos))
+        }
         "DISPLAYED NUMBER" => {
             arity(1..=2, args)?;
             let Val::Num(value) = &args[0] else { return Err(Abend::ironwork(format!("FUNCTION {name} takes a number"), pos)) };

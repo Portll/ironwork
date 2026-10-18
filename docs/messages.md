@@ -353,6 +353,8 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWC0344 | S | `START ... LENGTH: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0345 | S | `TYPEDEF goes on a level-01 or level-77 entry` |
 | IWC0346 | S | `STOP RUN {word}: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
+| IWC0347 | S | `XML GENERATE SUPPRESS WHEN: GnuCOBOL's, not Enterprise COBOL's, which names an item or EVERY; --compliance extended reads it` |
+| IWC0348 | S | `FUNCTION BOOLEAN-OF-INTEGER: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWC0350 | S | `ANY NUMERIC: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it` |
 | IWJ0001 | S | `a quoted value continued onto the next line is not supported yet` |
 | IWJ0002 | S | `an unbalanced ) in {text}` |
@@ -957,6 +959,8 @@ released, an id keeps its meaning and is never given to another message; its wor
 | IWX0148 | W | `{construct} (GnuCOBOL warns and fails at run time; Enterprise COBOL refuses it): {why}; it compiles as a hole, and a run that reaches it ends with IWR0078` |
 | IWX0149 | W | `DISPLAY FUNCTION {name} (GnuCOBOL; Enterprise COBOL uses a numeric function only in an arithmetic expression): it shows the digits of the field cobc 3.2 holds its result in` |
 | IWX0150 | W | `STOP RUN {word} (COBOL 2002 and GnuCOBOL; Enterprise COBOL's STOP RUN ends with RETURN-CODE): the value, or {default} where none is written, is moved to RETURN-CODE, then STOP RUN ends the run` |
+| IWX0151 | W | `XML GENERATE SUPPRESS WHEN (GnuCOBOL; Enterprise COBOL's SUPPRESS names an item or EVERY): it is read as SUPPRESS EVERY ... WHEN, for each element and attribute` |
+| IWX0152 | W | `FUNCTION BOOLEAN-OF-INTEGER (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such function): GnuCOBOL declares it and fails when a run reaches it, and so does this program` |
 
 ## Run-time refusals
 
@@ -982,5 +986,6 @@ severity S before the text, under the abend code IRONWORK, EXEC or JAVA.
 | IWR0073 | S | `the VM does not run {construct} yet; run it with --interpret` |
 | IWR0074 | S | `{file}, a GLOBAL file of {declarer}, is written as a print file in one of {declarer} and {program} and not the other, which is not supported yet` |
 | IWR0078 | S | `{construct} was reached: under --compliance relaxed it compiled as a hole, since {why}` |
+| IWR0092 | S | `FUNCTION {name} is not implemented: GnuCOBOL declares it and fails when a run reaches it` |
 | IWR0096 | S | `{what}: an ANY NUMERIC parameter reads only a numeric argument, and this one is {why}` |
 | IWR0101 | S | `FUNCTION {name} of {digits} digits is not supported yet: its value is held to 32 significant digits` |

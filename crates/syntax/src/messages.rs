@@ -379,6 +379,8 @@ catalogue! {
     IWC0344 Severe "START ... LENGTH: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0345 Severe "TYPEDEF goes on a level-01 or level-77 entry";
     IWC0346 Severe "STOP RUN {word}: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
+    IWC0347 Severe "XML GENERATE SUPPRESS WHEN: GnuCOBOL's, not Enterprise COBOL's, which names an item or EVERY; --compliance extended reads it";
+    IWC0348 Severe "FUNCTION BOOLEAN-OF-INTEGER: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWC0350 Severe "ANY NUMERIC: GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it";
     IWJ0001 Severe "a quoted value continued onto the next line is not supported yet";
     IWJ0002 Severe "an unbalanced ) in {text}";
@@ -983,6 +985,8 @@ catalogue! {
     IWX0148 Warning "{construct} (GnuCOBOL warns and fails at run time; Enterprise COBOL refuses it): {why}; it compiles as a hole, and a run that reaches it ends with IWR0078";
     IWX0149 Warning "DISPLAY FUNCTION {name} (GnuCOBOL; Enterprise COBOL uses a numeric function only in an arithmetic expression): it shows the digits of the field cobc 3.2 holds its result in";
     IWX0150 Warning "STOP RUN {word} (COBOL 2002 and GnuCOBOL; Enterprise COBOL's STOP RUN ends with RETURN-CODE): the value, or {default} where none is written, is moved to RETURN-CODE, then STOP RUN ends the run";
+    IWX0151 Warning "XML GENERATE SUPPRESS WHEN (GnuCOBOL; Enterprise COBOL's SUPPRESS names an item or EVERY): it is read as SUPPRESS EVERY ... WHEN, for each element and attribute";
+    IWX0152 Warning "FUNCTION BOOLEAN-OF-INTEGER (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such function): GnuCOBOL declares it and fails when a run reaches it, and so does this program";
 }
 
 /// docs/messages.md: the areas and every message, with the severity it is given.

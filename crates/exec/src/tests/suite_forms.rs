@@ -533,3 +533,50 @@ fn stop_run_with_a_status_sets_return_code_alike_on_both_executors() {
     assert_eq!(ids_under(&source, &[]), ["IWC0346"]);
     assert_eq!(ids_under(&source, EXTENDED), ["IWX0150"]);
 }
+
+#[test]
+fn xml_generate_suppress_when_names_no_item() {
+    let source = under(concat!(
+        "       DATA DIVISION.\n",
+        "       WORKING-STORAGE SECTION.\n",
+        "       01 P.\n",
+        "          03 Q PIC 9(3) VALUE ZERO.\n",
+        "          03 R PIC X(3) VALUE 'abc'.\n",
+        "          03 S PIC X(3) VALUE SPACES.\n",
+        "       01 OUT PIC X(100).\n",
+        "       PROCEDURE DIVISION.\n",
+        "           XML GENERATE OUT FROM P SUPPRESS WHEN SPACES\n",
+        "           DISPLAY FUNCTION TRIM(OUT)\n",
+        "           XML GENERATE OUT FROM P SUPPRESS WHEN ZERO\n",
+        "           DISPLAY FUNCTION TRIM(OUT)\n",
+        "           XML GENERATE OUT FROM P SUPPRESS WHEN SPACES OR ZERO\n",
+        "           DISPLAY FUNCTION TRIM(OUT)\n",
+        "           GOBACK.\n",
+    ));
+    // cobc 3.2's output.
+    runs(&source, EXTENDED, "<P><Q>0</Q><R>abc</R></P>\n<P><R>abc</R><S> </S></P>\n<P><R>abc</R></P>\n");
+    assert_eq!(ids_under(&source, EXTENDED).iter().filter(|i| *i == "IWX0151").count(), 3);
+    assert!(ids_under(&source, &[]).contains(&"IWC0347".to_owned()));
+}
+
+#[test]
+fn boolean_of_integer_compiles_and_ends_the_run_that_reaches_it() {
+    let source = under(concat!(
+        "       DATA DIVISION.\n",
+        "       WORKING-STORAGE SECTION.\n",
+        "       01 A20 PIC X(20).\n",
+        "       PROCEDURE DIVISION.\n",
+        "           DISPLAY 'before'\n",
+        "           MOVE FUNCTION BOOLEAN-OF-INTEGER(5 4) TO A20\n",
+        "           DISPLAY 'after'\n",
+        "           GOBACK.\n",
+    ));
+    for executor in [Executor::Interpreter, Executor::Vm] {
+        let o = Harness::source(&source).flags(EXTENDED).run(executor);
+        let ended = format!("{:?}", o.ending);
+        assert_eq!(o.out, "before\n", "{}", o.err);
+        assert!(ended.contains("IWR0092"), "{ended}");
+    }
+    assert_eq!(ids_under(&source, EXTENDED), ["IWX0152"]);
+    assert_eq!(ids_under(&source, &[]), ["IWC0348"]);
+}

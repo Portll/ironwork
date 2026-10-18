@@ -2583,6 +2583,13 @@ impl Check<'_> {
                         syntax::messages::IWC0343.at(f.pos, format!("FUNCTION {name}: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it"))
                     });
                 }
+                if f.name == "BOOLEAN-OF-INTEGER" && self.intrinsic(&f.name) {
+                    self.errors.push(if self.extended {
+                        syntax::messages::IWX0152.at(f.pos, "FUNCTION BOOLEAN-OF-INTEGER (COBOL 2002 and GnuCOBOL; Enterprise COBOL has no such function): GnuCOBOL declares it and fails when a run reaches it, and so does this program")
+                    } else {
+                        syntax::messages::IWC0348.at(f.pos, "FUNCTION BOOLEAN-OF-INTEGER: COBOL 2002's and GnuCOBOL's, not Enterprise COBOL's; --compliance extended reads it")
+                    });
+                }
                 if f.name == "STORED-CHAR-LENGTH" && self.intrinsic(&f.name) {
                     self.errors.push(if self.extended {
                         syntax::messages::IWX0042.at(f.pos, "FUNCTION STORED-CHAR-LENGTH (GnuCOBOL; Enterprise COBOL has no such function): the argument's length in characters without its trailing spaces")
