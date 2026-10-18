@@ -1312,9 +1312,6 @@ impl Options {
         SWITCHES.iter().enumerate().map(|(i, (id, values))| (*id, values[self.switch_value(i)])).filter(|&(_, value)| value != "ibm")
     }
 
-    /// Whether the program is compiled for GnuCOBOL: under `--dialect gnucobol`, or a compliance
-    /// level that reads GnuCOBOL's and Micro Focus's forms. Behaviours IBM and cobc both define
-    /// otherwise follow cobc then (docs/targets.md).
     /// Whether the program is compiled as cobc -std=ibm-strict compiles it: GnuCOBOL's dialect
     /// under strict compliance, the `gnucobol-ibm-strict` target.
     pub fn emulates_cobc_ibm_strict(&self) -> bool {
@@ -1329,6 +1326,9 @@ impl Options {
         }
     }
 
+    /// Whether the program is compiled for GnuCOBOL: under `--dialect gnucobol`, or a compliance
+    /// level that reads GnuCOBOL's and Micro Focus's forms. Behaviours IBM and cobc both define
+    /// otherwise follow cobc then (docs/targets.md).
     pub fn emulates_cobc(&self) -> bool {
         self.dialect == Dialect::Gnucobol || self.compliance != Compliance::Strict
     }
