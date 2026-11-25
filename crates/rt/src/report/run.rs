@@ -311,10 +311,8 @@ impl<'w, X, C, V, U, H: ReportHost<'w, X, C, V, U>> Reporting<'w, '_, H, X, C, V
         }
         self.restore_controls(&current);
         self.arm_indicators(ri);
-        for l in level..r.control_headings.len() {
-            if let Some(g) = r.control_headings[l] {
-                self.produce(ri, g, Trigger::Other, pos)?;
-            }
+        for g in r.control_headings.iter().skip(level).flatten() {
+            self.produce(ri, *g, Trigger::Other, pos)?;
         }
         Ok(())
     }

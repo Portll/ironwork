@@ -89,9 +89,9 @@ impl Code<'_> {
         if !block.ops.is_empty() {
             let _ = writeln!(out, "                let mut arm = None;");
         }
-        for i in from..block.ops.len() {
+        for (i, op) in self.ops[b].iter().enumerate().skip(from) {
             let general = format!("if let Some(next) = m.run_op({b}, {i}, &mut arm, floor)? {{\n                    break 'b next;\n                }}");
-            match &self.ops[b][i] {
+            match op {
                 Some((name, arms)) if !(general_first && i == from) => {
                     let taken = if *arms { "Some(size_error) => arm = Some(u8::from(size_error))," } else { "Some(_) => {}" };
                     let _ = write!(out, "                let fast = {name}(&mut m.storage());\n                match fast {{\n                    {taken}\n                    None => {{\n                        {general}\n                    }}\n                }}\n");
